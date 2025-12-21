@@ -80,7 +80,11 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 ACT AS A SENIOR BUSINESS ANALYST.
                 DATA INPUT: ${evidencePack}
                 MISSION: Render a Comprehensive Research Report in Markdown.
-                LANGUAGE: Svenska. Use professional tables for data.
+                LANGUAGE: Svenska. 
+                FORMATTING RULES: 
+                - Use proper Markdown tables for financial data.
+                - Use **bold** for emphasis on key metrics.
+                - Do not include technical instructions in the output.
             `;
 
             const writerResponse = await ai.models.generateContent({
@@ -169,41 +173,111 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         }
     };
 
+    // --- ENHANCED MARKDOWN PARSER ---
+    const parseInlineStyles = (text: string) => {
+        // Handle bold (**text**)
+        let parts = text.split(/(\*\*.*?\*\*)/g);
+        return parts.map((part, i) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+                return <strong key={i} className="font-bold text-gray-900">{part.slice(2, -2)}</strong>;
+            }
+            // Handle italic (*text*)
+            let subParts = part.split(/(\*.*?\*)/g);
+            return subParts.map((subPart, j) => {
+                if (subPart.startsWith('*') && subPart.endsWith('*')) {
+                    return <em key={`${i}-${j}`} className="italic text-gray-800">{subPart.slice(1, -1)}</em>;
+                }
+                return subPart;
+            });
+        });
+    };
+
     const renderMarkdown = (md: string) => {
         if (!md) return null;
-        return md.split('\n').map((line, i) => {
-            if (line.startsWith('# ')) return <h1 key={i} className="text-3xl font-serif-display font-bold mb-6 border-b-2 border-black pb-4 pt-8">{line.replace('# ', '')}</h1>;
-            if (line.startsWith('## ')) return <h2 key={i} className="text-2xl font-serif-display font-bold mt-10 mb-4 text-gray-900 border-b pb-2">{line.replace('## ', '')}</h2>;
-            if (line.startsWith('|')) {
-                const cells = line.split('|').filter(c => c.trim().length > 0);
-                if (line.includes('---')) return null;
-                return (
-                    <div key={i} className="overflow-x-auto my-4">
-                        <table className="min-w-full border-collapse border border-gray-200 text-sm">
-                            <tbody>
-                                <tr className="hover:bg-gray-50">
-                                    {cells.map((cell, ci) => (
-                                        <td key={ci} className="border border-gray-200 px-4 py-2 text-gray-700 font-medium">{cell.trim()}</td>
+        
+        const lines = md.split('\n');
+        const renderedElements: React.ReactNode[] = [];
+        let currentTable: string[][] = [];
+
+        lines.forEach((line, i) => {
+            const trimmed = line.trim();
+
+            // Handle Tables
+            if (trimmed.startsWith('|')) {
+                const cells = line.split('|').filter(c => c.trim().length > 0 || line.indexOf('|') !== line.lastIndexOf('|'));
+                // Skip separator rows like |---|---|
+                if (!trimmed.match(/[a-zA-Z0-9]/)) return; 
+                
+                currentTable.push(cells.map(c => c.trim()));
+                
+                // If next line isn't a table or is end of md, render the table
+                const nextLine = lines[i + 1]?.trim();
+                if (!nextLine || !nextLine.startsWith('|')) {
+                    renderedElements.push(
+                        <div key={`table-${i}`} className="overflow-x-auto my-8">
+                            <table className="min-w-full border-collapse border border-gray-200 text-sm shadow-sm rounded-lg overflow-hidden">
+                                <thead>
+                                    <tr className="bg-gray-50 border-b border-gray-200">
+                                        {currentTable[0].map((cell, ci) => (
+                                            <th key={ci} className="px-4 py-3 text-left font-bold text-gray-900 uppercase tracking-wider text-[10px]">{cell}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {currentTable.slice(1).map((row, ri) => (
+                                        <tr key={ri} className="hover:bg-gray-50/50 transition-colors">
+                                            {row.map((cell, ci) => (
+                                                <td key={ci} className="px-4 py-3 text-gray-700 font-medium">{parseInlineStyles(cell)}</td>
+                                            ))}
+                                        </tr>
                                     ))}
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
+                                </tbody>
+                            </table>
+                        </div>
+                    );
+                    currentTable = [];
+                }
+                return;
+            }
+
+            // Headers
+            if (trimmed.startsWith('# ')) {
+                renderedElements.push(<h1 key={i} className="text-4xl font-serif-display font-bold mb-8 border-b-4 border-black pb-6 pt-12 text-black leading-tight uppercase tracking-tighter">{parseInlineStyles(trimmed.replace('# ', ''))}</h1>);
+            } else if (trimmed.startsWith('## ')) {
+                renderedElements.push(<h2 key={i} className="text-2xl font-serif-display font-bold mt-12 mb-6 text-gray-900 border-b-2 border-gray-100 pb-3">{parseInlineStyles(trimmed.replace('## ', ''))}</h2>);
+            } else if (trimmed.startsWith('### ')) {
+                renderedElements.push(<h3 key={i} className="text-lg font-bold mt-10 mb-4 text-gray-800 uppercase tracking-widest">{parseInlineStyles(trimmed.replace('### ', ''))}</h3>);
+            }
+            // Lists
+            else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+                renderedElements.push(
+                    <li key={i} className="ml-6 text-sm text-gray-700 list-none mb-3 flex items-start gap-3">
+                        <span className="w-1.5 h-1.5 rounded-full bg-black mt-2 shrink-0"></span>
+                        <span>{parseInlineStyles(trimmed.substring(2))}</span>
+                    </li>
                 );
             }
-            if (line.trim() === '') return <div key={i} className="h-4" />;
-            return <p key={i} className="text-sm leading-relaxed text-gray-700 mb-4">{line}</p>;
+            // Paragraphs
+            else if (trimmed !== '') {
+                renderedElements.push(<p key={i} className="text-sm leading-relaxed text-gray-700 mb-5 text-justify">{parseInlineStyles(trimmed)}</p>);
+            }
+            // Spacing
+            else {
+                renderedElements.push(<div key={i} className="h-2" />);
+            }
         });
+
+        return renderedElements;
     };
 
     return (
         <div className="h-full flex flex-col animate-fadeIn">
-            <div className="flex justify-between items-end mb-6 no-print">
+            <div className="flex justify-between items-end mb-6 no-print px-1">
                 <div>
                     <h1 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-1">{t('dashboard.crmContent.title')}</h1>
                     <p className="text-gray-500 dark:text-gray-400 text-sm">{t('dashboard.crmContent.subtitle')}</p>
                 </div>
-                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
+                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg no-print">
                     <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<BarChart3 size={16} />} label={t('dashboard.crmContent.tabs.overview')} />
                     <TabButton active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} icon={<Users size={16} />} label={t('dashboard.crmContent.tabs.contacts')} />
                     <TabButton active={activeTab === 'mail'} onClick={() => setActiveTab('mail')} icon={<Mail size={16} />} label={t('dashboard.crmContent.tabs.mail')} />
@@ -213,10 +287,10 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
             <div className="flex-1 overflow-y-auto min-h-0">
                 {activeTab === 'intelligence' && (
-                    <div className="space-y-6">
+                    <div className="h-full">
                         {!activeReport ? (
-                            <>
-                                <div className="bg-white dark:bg-gray-900 p-10 rounded-2xl border border-gray-200 dark:border-gray-800 text-center shadow-sm no-print">
+                            <div className="space-y-6">
+                                <div className="bg-white dark:bg-gray-900 p-10 rounded-2xl border border-gray-200 dark:border-gray-800 text-center shadow-sm">
                                     <div className="w-16 h-16 bg-gray-50 dark:bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-6 text-black dark:text-white">
                                         <Sparkles size={32} />
                                     </div>
@@ -230,7 +304,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                     </div>
                                     {isGeneratingReport && <div className="mt-4 text-xs font-bold text-blue-600 dark:text-blue-400 animate-pulse uppercase tracking-widest">{loadingMessage}</div>}
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 no-print">
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {reports.map(report => (
                                         <div key={report.id} onClick={() => setActiveReport(report)} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 transition-all hover:shadow-lg cursor-pointer group border-b-4 border-b-black">
                                             <h4 className="font-bold text-gray-900 dark:text-white truncate text-lg mb-1">{report.title}</h4>
@@ -238,18 +312,20 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                         </div>
                                     ))}
                                 </div>
-                            </>
+                            </div>
                         ) : (
-                            <div className="flex flex-col h-full animate-slideUp pb-10">
-                                <div className="no-print bg-white/80 dark:bg-gray-900/80 backdrop-blur-md p-4 rounded-xl border border-gray-200 dark:border-gray-800 mb-6 flex justify-between items-center sticky top-0 z-50 shadow-sm">
+                            <div className="flex flex-col h-full bg-gray-100 dark:bg-black/40 rounded-2xl overflow-hidden animate-slideUp">
+                                {/* Report Toolbar - Sticky */}
+                                <div className="no-print bg-white/80 dark:bg-gray-900/80 backdrop-blur-md p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center sticky top-0 z-50 shadow-sm">
                                     <div className="flex items-center gap-4">
-                                        <button onClick={() => setActiveReport(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"><ArrowRight className="rotate-180" size={20} /></button>
-                                        <h2 className="font-bold text-gray-900 dark:text-white">{activeReport.reportData.meta.companyName}</h2>
+                                        <button onClick={() => setActiveReport(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 dark:text-gray-400"><ArrowRight className="rotate-180" size={20} /></button>
+                                        <div className="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
+                                        <h2 className="font-bold text-gray-900 dark:text-white truncate max-w-[200px]">{activeReport.reportData.meta.companyName}</h2>
                                     </div>
                                     <div className="flex gap-2">
-                                        <button onClick={handleCopyReport} className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-all flex items-center gap-2">
+                                        <button onClick={handleCopyReport} className="hidden sm:flex px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-bold rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-all items-center gap-2">
                                             {copyStatus ? <Check size={14} className="text-green-500" /> : <ClipboardList size={14}/>} 
-                                            {copyStatus ? 'Kopierat!' : 'Kopiera Rapport'}
+                                            {copyStatus ? 'Kopierat!' : 'Kopiera'}
                                         </button>
                                         <button 
                                             onClick={handleDownloadPDF} 
@@ -257,39 +333,50 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                             className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black text-xs font-bold rounded-lg hover:opacity-80 transition-all flex items-center gap-2 shadow-lg shadow-black/10 disabled:opacity-50"
                                         >
                                             {isDownloading ? <Loader2 className="animate-spin" size={14} /> : <Download size={14}/>}
-                                            {isDownloading ? 'Genererar fil...' : 'Ladda ned som PDF'}
+                                            {isDownloading ? 'Genererar...' : 'Ladda ned PDF'}
                                         </button>
                                         <button onClick={handleDeleteCurrentReport} className="p-2 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-lg hover:bg-red-100 transition-colors"><Trash2 size={20}/></button>
                                     </div>
                                 </div>
-                                <div id="printable-report" className="bg-white p-12 md:p-24 shadow-2xl border border-gray-200 mx-auto max-w-5xl min-h-screen text-black font-sans selection:bg-yellow-100">
-                                    <div className="border-b-8 border-black pb-8 mb-16 flex justify-between items-end">
-                                        <div>
-                                            <div className="flex items-center gap-2 mb-4">
-                                                <div className="w-8 h-8 bg-black rounded flex items-center justify-center text-white font-bold text-xs italic">A</div>
-                                                <span className="font-bold tracking-tighter text-xl">ACEVERSE INTELLIGENCE</span>
+
+                                {/* SCROLLABLE PAPER VIEW */}
+                                <div className="flex-1 overflow-y-auto p-4 md:p-12">
+                                    <div 
+                                        id="printable-report" 
+                                        className="bg-white p-12 md:p-24 shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-gray-200 mx-auto max-w-5xl min-h-full text-black font-sans selection:bg-yellow-100 mb-20"
+                                    >
+                                        {/* Document Header */}
+                                        <div className="border-b-8 border-black pb-8 mb-16 flex justify-between items-end">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-4">
+                                                    <div className="w-8 h-8 bg-black rounded flex items-center justify-center text-white font-bold text-xs italic">A</div>
+                                                    <span className="font-bold tracking-tighter text-xl text-black">ACEVERSE INTELLIGENCE</span>
+                                                </div>
+                                                <h1 className="text-5xl font-serif-display font-bold uppercase tracking-tighter max-w-2xl leading-none text-black">Research Report</h1>
+                                                <p className="text-gray-500 text-sm mt-4 font-medium uppercase tracking-widest">Target: {activeReport.reportData.meta.companyName} | {activeReport.reportData.meta.website}</p>
                                             </div>
-                                            <h1 className="text-5xl font-serif-display font-bold uppercase tracking-tighter max-w-2xl leading-none">Research Report</h1>
-                                            <p className="text-gray-500 text-sm mt-4 font-medium uppercase tracking-widest">Target: {activeReport.reportData.meta.companyName} | {activeReport.reportData.meta.website}</p>
+                                            <div className="text-right flex flex-col items-end">
+                                                <div className="font-bold border-t border-black pt-1 text-black">{activeReport.reportData.meta.generatedDate}</div>
+                                                <div className="text-[10px] font-bold text-gray-400 mt-2 uppercase tracking-widest">Confidential Data</div>
+                                            </div>
                                         </div>
-                                        <div className="text-right flex flex-col items-end">
-                                            <div className="font-bold border-t border-black pt-1">{activeReport.reportData.meta.generatedDate}</div>
-                                            <div className="text-[10px] font-bold text-gray-400 mt-2 uppercase tracking-widest">Confidential Data</div>
+
+                                        {/* Document Body */}
+                                        <div className="max-w-none report-content text-black">
+                                            {renderMarkdown(activeReport.reportData.fullMarkdown)}
                                         </div>
-                                    </div>
-                                    <div className="prose prose-slate max-w-none report-content">
-                                        {renderMarkdown(activeReport.reportData.fullMarkdown)}
-                                    </div>
-                                    
-                                    <div className="mt-24 pt-10 border-t-2 border-gray-100">
-                                        <div className="flex items-center gap-2 text-gray-400 mb-4">
-                                            <Sparkles size={16} />
-                                            <span className="text-xs font-bold uppercase tracking-widest">AI Synthesis Verified</span>
+                                        
+                                        {/* Document Footer */}
+                                        <div className="mt-24 pt-10 border-t-2 border-gray-100">
+                                            <div className="flex items-center gap-2 text-gray-400 mb-4">
+                                                <Sparkles size={16} />
+                                                <span className="text-xs font-bold uppercase tracking-widest">AI Synthesis Verified</span>
+                                            </div>
+                                            <p className="text-[11px] text-gray-400 leading-relaxed italic">
+                                                Denna rapport har genererats autonomt av Aceverse genom en 2-stegs research-process. 
+                                                Data är hämtad från publika källor vid tidpunkten för generering. Innehållet är konfidentiellt och endast avsett för mottagaren.
+                                            </p>
                                         </div>
-                                        <p className="text-[11px] text-gray-400 leading-relaxed italic">
-                                            Denna rapport har genererats autonomt av Aceverse genom en 2-stegs research-process. 
-                                            Data är hämtad från publika källor vid tidpunkten för generering.
-                                        </p>
                                     </div>
                                 </div>
                             </div>
