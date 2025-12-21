@@ -334,10 +334,10 @@ const IdeaLab: React.FC<IdeaLabProps> = ({ user, isSidebarOpen = true, toggleSid
 
             const { title, tagline } = generateCoreConcept(ideaText);
             
+            // FIX: Removed 'score: 0' as it is not allowed in Omit<Idea, 'id' | 'dateCreated' | 'score'>
             const newIdea = await db.addIdea(user.id, {
                 title: title,
                 description: ideaText,
-                score: 0,
                 marketSize: '',
                 competition: '',
                 chatSessionId: sessionId
@@ -696,8 +696,8 @@ const IdeaLab: React.FC<IdeaLabProps> = ({ user, isSidebarOpen = true, toggleSid
                 </div>
 
                 <div className="absolute bottom-6 left-6 flex gap-2 z-50 pointer-events-auto">
-                    <button onClick={() => updateZoom(0.1)} className="bg-white dark:bg-gray-900 p-2.5 rounded-lg shadow-md border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition-colors"><ZoomIn size={18} /></button>
-                    <button onClick={() => updateZoom(-0.1)} className="bg-white dark:bg-gray-900 p-2.5 rounded-lg shadow-md border border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition-colors"><ZoomOut size={18} /></button>
+                    <button onClick={() => updateZoom(0.1)} className="bg-white dark:bg-gray-900 p-2.5 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-black dark:hover:text-white transition-colors"><ZoomIn size={18} /></button>
+                    <button onClick={() => updateZoom(-0.1)} className="bg-white dark:bg-gray-900 p-2.5 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition-colors"><ZoomOut size={18} /></button>
                     <div className="bg-white dark:bg-gray-900 px-3 py-2.5 rounded-lg shadow-md border border-gray-100 dark:border-gray-700 text-xs font-mono text-gray-400">
                         {Math.round(camera.zoom * 100)}%
                     </div>

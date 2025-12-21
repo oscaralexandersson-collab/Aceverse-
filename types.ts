@@ -28,9 +28,7 @@ export interface CompanyReport {
     generatedDate: string;
     language: string;
   };
-  // The raw Markdown content following the 15-section specification
   fullMarkdown: string;
-  // Structured summary for UI cards
   summary: {
     revenue: string;
     ebitda: string;
@@ -71,23 +69,6 @@ export interface NavItem {
   label: string;
   page: Page;
   hasDropdown?: boolean;
-}
-
-export interface Feature {
-  title: string;
-  description: string;
-  image?: string; 
-  tag?: string;
-  category?: string;
-  link?: string;
-  icon?: React.ReactNode;
-  renderVisual?: () => React.ReactNode; 
-}
-
-export interface ComplianceBadge {
-  title: string;
-  description: string;
-  iconType: 'iso' | 'soc' | 'gdpr';
 }
 
 export interface Lead {
@@ -138,8 +119,10 @@ export interface Pitch {
   id: string;
   type: 'deck' | 'speech' | 'email';
   name: string;
-  content: string; 
+  content: string; // Used for generated deck JSON
   dateCreated: string;
+  chatSessionId?: string; // Link to the conversation
+  contextScore?: number;
 }
 
 export interface Coach {
@@ -219,13 +202,7 @@ export interface BrandDNA {
     };
 }
 
-export interface CampaignBrief {
-    goal: string;
-    timeframe: string;
-    audience: string;
-    constraints: string;
-}
-
+// Added CampaignIdea interface
 export interface CampaignIdea {
     id: string;
     name: string;
@@ -236,19 +213,20 @@ export interface CampaignIdea {
     exampleHeadline: string;
 }
 
+// Added CampaignAsset interface
 export interface CampaignAsset {
     id: string;
     channel: 'instagram_feed' | 'linkedin_post' | 'email_intro';
     content: {
         headline?: string;
         body: string;
-        cta: string;
+        cta?: string;
         hashtags?: string[];
         notes?: string;
     };
     image?: {
         prompt: string;
-        url?: string; 
+        url?: string;
     };
 }
 
@@ -256,7 +234,7 @@ export interface MarketingCampaign {
     id: string;
     brandDnaId?: string; 
     name: string;
-    brief: CampaignBrief;
+    brief: any;
     selectedIdea: CampaignIdea;
     assets: CampaignAsset[];
     dateCreated: string;
@@ -283,14 +261,6 @@ export interface SearchResult {
     title: string;
     subtitle: string;
     view: DashboardView;
-}
-
-export interface Slide {
-    id: number;
-    layout: 'title-slide' | 'split-image-right' | 'split-image-left' | 'big-stat' | 'quote' | 'three-column' | 'default';
-    title: string;
-    content?: (string | { header: string, description: string })[]; 
-    visualPrompt: string;
 }
 
 export interface PitchAnalysis {
