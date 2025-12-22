@@ -1,484 +1,369 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-    Mic, FileText, Send, Check, Copy, ArrowRight, ArrowLeft, 
-    Presentation, Plus, Play, Sparkles, User as UserIcon, Settings, BarChart3, AlertCircle, Loader2, Briefcase, Smile, Command, X, Tag, Image as ImageIcon, Quote,
-    Target, ThumbsUp, BrainCircuit, Lightbulb, TrendingUp, MessageSquare, Gauge, Download, History, ChevronRight, Trash2, Clock
+    Plus, Presentation, Download, ArrowRight, ArrowLeft, Sparkles, 
+    Loader2, CheckCircle2, AlertCircle, Edit3, Trash2, History,
+    Layout, Type, Palette, History as HistoryIcon, Layers, Info
 } from 'lucide-react';
-import { User, Pitch, Coach, PitchAnalysis, ChatMessage } from '../../types';
+import { User, Pitch, DeckSpec, SlideSpec, ClarificationQuestion, DeckOutline } from '../../types';
 import { db } from '../../services/db';
 import { GoogleGenAI } from "@google/genai";
-import PptxGenJS from 'pptxgenjs';
-import { useLanguage } from '../../contexts/LanguageContext';
+import { renderPptx } from '../../features/presentations/pptx/renderPptx';
+import { 
+    SYSTEMPROMPT_CLARIFICATIONS, 
+    SYSTEMPROMPT_OUTLINE, 
+    SYSTEMPROMPT_DECKSPEC, 
+    SYSTEMPROMPT_QUALITY_PASS 
+} from '../../features/presentations/ai/prompts';
 
 interface PitchStudioProps {
     user: User;
 }
 
-type Tab = 'generator' | 'dojo' | 'coaches';
-
-// --- ACEVERSE KRUNCH KEEPER DESIGN SYSTEM ---
-const KK_DESIGN = {
-    colors: {
-        background: 'F3F0E8', 
-        text: '000000',
-        accent: 'D24726', 
-    },
-    fonts: {
-        header: 'Inter', 
-        body: 'Inter'
-    }
-};
-
-// --- RICH TEXT RENDERER FOR AI MESSAGES ---
-const RichTextResponse: React.FC<{ text: string }> = ({ text }) => {
-    if (!text) return null;
-
-    // Remove tags if they exist
-    let cleanText = text.replace(/<SCORE>.*?<\/SCORE>/gs, '').trim();
-
-    // Split into blocks
-    const blocks = cleanText.split(/\n\n+/);
-
-    return (
-        <div className="space-y-4 text-gray-800 dark:text-gray-200">
-            {blocks.map((block, index) => {
-                // H1/H2 style (using Playfair)
-                if (block.startsWith('##')) {
-                    return (
-                        <h3 key={index} className="font-serif-display text-xl font-bold text-black dark:text-white mt-4 mb-2">
-                            {block.replace(/^##\s*/, '')}
-                        </h3>
-                    );
-                }
-                // Bullet points
-                if (block.match(/^[\-*]\s/m)) {
-                    const items = block.split(/\n/).filter(line => line.trim().length > 0);
-                    return (
-                        <ul key={index} className="space-y-2 my-2">
-                            {items.map((item, i) => (
-                                <li key={i} className="flex items-start gap-2 text-sm">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white mt-1.5 shrink-0 opacity-50"></div>
-                                    <span dangerouslySetInnerHTML={{ 
-                                        __html: item.replace(/^[\-*]\s*/, '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') 
-                                    }} />
-                                </li>
-                            ))}
-                        </ul>
-                    );
-                }
-                // Paragraph
-                return (
-                    <p key={index} className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ 
-                        __html: block.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') 
-                    }} />
-                );
-            })}
-        </div>
-    );
-};
-
-interface AdvancedSlide {
-    slide_number: number;
-    type: 'cover' | 'problem' | 'solution' | 'timeline' | 'audience' | 'market' | 'future' | 'closing';
-    content: {
-        headline: string;
-        subheadline?: string;
-        points?: string[];
-        team?: string[];
-        images?: string[]; 
-        metadata?: any;
-    };
-}
-
-const SlidePreview: React.FC<{ slide: AdvancedSlide, companyName: string }> = ({ slide, companyName }) => {
-    return (
-        <div className="aspect-video bg-[#F3F0E8] shadow-lg rounded-sm border border-gray-200 overflow-hidden flex flex-col relative group transition-transform hover:scale-[1.02]">
-            <div className="absolute top-4 left-4 w-6 h-6 bg-black opacity-20 flex items-center justify-center">
-                <span className="text-[6px] text-white font-bold italic">A</span>
-            </div>
-            
-            <div className="flex-1 p-8 flex flex-col justify-center">
-                {slide.type === 'cover' && (
-                    <>
-                        <h3 className="font-serif-display text-2xl font-black uppercase tracking-tighter text-black mb-2">{companyName}</h3>
-                        <p className="text-[10px] font-bold text-black opacity-80">{slide.content.subheadline}</p>
-                        <div className="absolute bottom-4 left-4 flex gap-2">
-                             {slide.content.team?.map((m, i) => <span key={i} className="text-[6px] font-bold uppercase opacity-40">{m}</span>)}
-                        </div>
-                    </>
-                )}
-
-                {slide.type === 'problem' && (
-                    <div className="flex justify-between items-center h-full">
-                         <div className="w-1/3 space-y-2">
-                            {slide.content.points?.map((p, i) => (
-                                <div key={i} className="text-[8px] font-bold flex gap-2">
-                                    <span className="opacity-40">0{i+1}</span>
-                                    <span className="uppercase">{p}</span>
-                                </div>
-                            ))}
-                         </div>
-                         <div className="w-1/3 text-right">
-                            <h4 className="font-serif-display text-xl font-black uppercase">{slide.content.headline}</h4>
-                            <p className="text-[8px] opacity-60">Mjukt bröd efter minuter</p>
-                         </div>
-                    </div>
-                )}
-
-                {slide.type !== 'cover' && slide.type !== 'problem' && (
-                    <>
-                        <h4 className="font-serif-display text-xl font-black uppercase mb-4">{slide.content.headline}</h4>
-                        <div className="grid grid-cols-3 gap-2">
-                            {[1, 2, 3].map(i => (
-                                <div key={i} className="aspect-square bg-white/50 border border-black/5 rounded-sm flex items-center justify-center">
-                                    <ImageIcon size={12} className="text-black/10" />
-                                </div>
-                            ))}
-                        </div>
-                    </>
-                )}
-            </div>
-
-            <div className="absolute bottom-2 right-4 text-[6px] text-black/20 font-bold uppercase tracking-widest">
-                {companyName} • 0{slide.slide_number}
-            </div>
-        </div>
-    );
-};
+type GeneratorStep = 'brief' | 'clarify' | 'outline' | 'generate' | 'preview';
 
 const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
-    const { t } = useLanguage();
-    
-    // --- STATE ---
-    const [step, setStep] = useState<'history' | 'chat' | 'preview'>('history');
+    // --- UI STATE ---
+    const [view, setView] = useState<'history' | 'generator'>('history');
+    const [step, setStep] = useState<GeneratorStep>('brief');
     const [savedPitches, setSavedPitches] = useState<Pitch[]>([]);
-    const [currentPitchId, setCurrentPitchId] = useState<string | null>(null);
-    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
-    const [chatInput, setChatInput] = useState('');
-    const [isThinking, setIsThinking] = useState(false);
-    const [contextScore, setContextScore] = useState(0);
-    const [isGeneratingDeck, setIsGeneratingDeck] = useState(false);
-    const [generatedData, setGeneratedData] = useState<{ metadata: any, slides: AdvancedSlide[] } | null>(null);
-    
-    const chatEndRef = useRef<HTMLDivElement>(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [loadingMsg, setLoadingMsg] = useState('');
 
-    useEffect(() => { loadPitches(); }, [user.id]);
-    useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isThinking]);
+    // --- FORM STATE ---
+    const [brief, setBrief] = useState({
+        topic: '',
+        objective: 'sälja',
+        audience: '',
+        tone: 'professionell',
+        slideCount: 10,
+        sources: ''
+    });
 
-    const loadPitches = async () => {
+    const [brandKit, setBrandKit] = useState({
+        primary: '#000000',
+        background: '#F3F0E8',
+        fontHeading: 'Playfair Display',
+        fontBody: 'Inter'
+    });
+
+    // --- AI GENERATED DATA ---
+    const [questions, setQuestions] = useState<ClarificationQuestion[]>([]);
+    const [answers, setAnswers] = useState<Record<string, string>>({});
+    const [outline, setOutline] = useState<DeckOutline | null>(null);
+    const [currentDeck, setCurrentDeck] = useState<DeckSpec | null>(null);
+
+    useEffect(() => { loadHistory(); }, [user.id]);
+
+    const loadHistory = async () => {
         const data = await db.getUserData(user.id);
         setSavedPitches(data.pitches || []);
     };
 
-    const handleDeletePitch = async (id: string, e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (confirm("Är du säker på att du vill radera denna presentation? Detta går inte att ångra.")) {
-            try {
-                await db.deletePitch(user.id, id);
-                setSavedPitches(prev => prev.filter(p => p.id !== id));
-                if (currentPitchId === id) setStep('history');
-            } catch (err) {
-                console.error("Failed to delete pitch", err);
-                alert("Kunde inte radera presentationen.");
-            }
-        }
+    const handleCreateNew = () => {
+        setStep('brief');
+        setView('generator');
     };
 
-    const handleCreateNewPitch = async () => {
-        const sessionId = 'ps-' + Date.now();
-        const newPitch = await db.addPitch(user.id, {
-            type: 'deck',
-            name: `Projekt: ${new Date().toLocaleDateString()}`,
-            content: '',
-            chatSessionId: sessionId,
-            contextScore: 10
-        });
-
-        setCurrentPitchId(newPitch.id);
-        setCurrentSessionId(sessionId);
-        setMessages([{
-            id: 'init',
-            role: 'ai',
-            text: `## Välkommen till din Pitch Architect 👋\n\nVi kommer att bygga din presentation baserat på Aceverse "Krunch Keeper"-mall (Beige/Modern). Berätta: Vad vill du presentera idag?`,
-            timestamp: Date.now()
-        }]);
-        setContextScore(10);
-        setGeneratedData(null);
-        setStep('chat');
-        loadPitches();
-    };
-
-    const handleLoadPitch = async (pitch: Pitch) => {
-        setCurrentPitchId(pitch.id);
-        setCurrentSessionId(pitch.chatSessionId || null);
-        setContextScore(pitch.contextScore || 0);
-
-        if (pitch.chatSessionId) {
-            const data = await db.getUserData(user.id);
-            const history = data.chatHistory.filter(m => m.sessionId === pitch.chatSessionId).sort((a,b) => a.timestamp - b.timestamp);
-            setMessages(history.length > 0 ? history : [{ id: 'init', role: 'ai', text: "## Fortsätt bygga din pitch\n\nVad vill du justera idag?", timestamp: Date.now() }]);
-        }
-
-        if (pitch.content) {
-            try {
-                setGeneratedData(JSON.parse(pitch.content));
-                setStep('preview');
-            } catch (e) { setStep('chat'); }
-        } else {
-            setStep('chat');
-        }
-    };
-
-    const handleSendMessage = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!chatInput.trim() || isThinking || !currentSessionId) return;
-
-        const userText = chatInput;
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: userText, timestamp: Date.now(), sessionId: currentSessionId }]);
-        setChatInput('');
-        setIsThinking(true);
-
+    // --- STEP 1 -> 2: CLARIFICATIONS ---
+    const generateClarifications = async () => {
+        setIsLoading(true);
+        setLoadingMsg('Analyserar brief och förbereder frågor...');
         try {
-            await db.addMessage(user.id, { role: 'user', text: userText, sessionId: currentSessionId });
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            
-            const chat = ai.chats.create({
+            const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
-                config: {
-                    systemInstruction: `
-                        Du är en senior Pitch Strategist. Du bygger presentationer i "Krunch Keeper"-stil (minimalistisk, beige, svart fet text).
-                        Använd Markdown för att strukturera dina svar. Använd ## för rubriker.
-                        Grilla användaren för att få fram: Bolagsnamn, Problem (3 punkter), Lösning, Team-medlemmar, Målgrupp, Framtidsplan.
-                        Inkludera alltid <SCORE>antal</SCORE> (0-100).
-                    `
-                },
-                history: messages.map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }))
+                contents: `Brief: ${JSON.stringify(brief)}`,
+                config: { 
+                    systemInstruction: SYSTEMPROMPT_CLARIFICATIONS,
+                    responseMimeType: 'application/json' 
+                }
             });
-
-            const result = await chat.sendMessage({ message: userText });
-            const responseText = result.text || "";
-
-            const scoreMatch = responseText.match(/<SCORE>(\d+)<\/SCORE>/);
-            if (scoreMatch) {
-                const newScore = parseInt(scoreMatch[1]);
-                setContextScore(newScore);
-                if (currentPitchId) db.updatePitch(user.id, currentPitchId, { contextScore: newScore });
-            }
-
-            setMessages(prev => [...prev, { id: 'ai-' + Date.now(), role: 'ai', text: responseText, timestamp: Date.now(), sessionId: currentSessionId }]);
-            await db.addMessage(user.id, { role: 'ai', text: responseText, sessionId: currentSessionId });
-
-        } catch (e) { console.error(e); } finally { setIsThinking(false); }
+            const data = JSON.parse(response.text || '{}');
+            setQuestions(data.questions || []);
+            setStep('clarify');
+        } catch (e) {
+            alert("Kunde inte starta processen. Prova igen.");
+        } finally { setIsLoading(false); }
     };
 
-    const generateFinalDeck = async () => {
-        setIsGeneratingDeck(true);
+    // --- STEP 2 -> 3: OUTLINE ---
+    const generateOutline = async () => {
+        setIsLoading(true);
+        setLoadingMsg('Skapar presentationens struktur...');
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const contextPrompt = messages.map(m => `${m.role.toUpperCase()}: ${m.text}`).join('\n');
-            const prompt = `
-                KONVERSATION: ${contextPrompt}
-                SKAPA EN PITCH DECK SPECIFIKATION I KRUNCH KEEPER-STIL (10 slides).
-                Använd dessa typer: cover, problem, solution, timeline, audience, market, future, closing.
-                
-                FORMAT (JSON enbart):
-                {
-                    "metadata": { "company_name": "...", "tagline": "...", "team": ["Namn1", "Namn2"] },
-                    "slides": [
-                        { "slide_number": 1, "type": "cover", "content": { "headline": "...", "subheadline": "...", "team": ["..."] } },
-                        { "slide_number": 2, "type": "problem", "content": { "headline": "Problemet", "points": ["P1", "P2", "P3"] } },
-                        ...
-                    ]
+            const input = `Brief: ${JSON.stringify(brief)}. Svar på frågor: ${JSON.stringify(answers)}`;
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: input,
+                config: { 
+                    systemInstruction: SYSTEMPROMPT_OUTLINE,
+                    responseMimeType: 'application/json' 
                 }
-            `;
+            });
+            setOutline(JSON.parse(response.text || '{}'));
+            setStep('outline');
+        } catch (e) { alert("Fel vid generering av outline."); } finally { setIsLoading(false); }
+    };
 
+    // --- STEP 3 -> 4: FULL DECK ---
+    const generateFullDeck = async () => {
+        setIsLoading(true);
+        setLoadingMsg('Designar och skriver innehåll för alla slides...');
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const input = `Outline: ${JSON.stringify(outline)}. Brand Kit: ${JSON.stringify(brandKit)}`;
             const response = await ai.models.generateContent({
                 model: 'gemini-3-pro-preview',
-                contents: prompt,
-                config: { responseMimeType: 'application/json' }
+                contents: input,
+                config: { 
+                    systemInstruction: SYSTEMPROMPT_DECKSPEC,
+                    responseMimeType: 'application/json' 
+                }
             });
-
-            const data = JSON.parse(response.text || '{}');
-            setGeneratedData(data);
             
-            if (currentPitchId) {
-                await db.updatePitch(user.id, currentPitchId, { 
-                    content: JSON.stringify(data),
-                    name: data.metadata?.company_name || 'Pitch Deck'
-                });
-            }
+            let deckData = JSON.parse(response.text || '{}');
+            
+            // Inject theme
+            deckData.theme = {
+                palette: { primary: brandKit.primary, secondary: '#666666', accent: '#D24726', background: brandKit.background },
+                fonts: { heading: brandKit.fontHeading, body: brandKit.fontBody }
+            };
+
+            setCurrentDeck(deckData);
             setStep('preview');
-        } catch (e) { console.error(e); alert("Kunde inte generera presentationen."); } finally { setIsGeneratingDeck(false); }
+
+            // Spara till DB
+            await db.addPitch(user.id, {
+                type: 'deck',
+                name: deckData.deck.title,
+                content: JSON.stringify(deckData),
+                contextScore: 100
+            });
+            loadHistory();
+
+        } catch (e) { alert("Fel vid generering av presentationen."); } finally { setIsLoading(false); }
     };
 
-    const exportToPPT = () => {
-        if (!generatedData) return;
-        const pptx = new PptxGenJS();
-        pptx.layout = 'LAYOUT_16x9';
-        
-        const bgColor = KK_DESIGN.colors.background;
-        const textColor = KK_DESIGN.colors.text;
-        const brandName = generatedData.metadata.company_name;
-
-        // --- MASTER DEFINITIONS BASED ON KRUNCH KEEPER PDF ---
-
-        // 1. KK_COVER (Page 1)
-        pptx.defineSlideMaster({
-            title: 'KK_COVER',
-            background: { color: bgColor },
-            objects: [
-                { rect: { x: 0.4, y: 0.4, w: 0.3, h: 0.3, fill: { color: '000000' } } }, 
-                { placeholder: { name: 'title', type: 'title', x: 0.5, y: 2.2, w: '90%', h: 1.5, fontSize: 64, bold: true, color: textColor, align: 'center', fontFace: 'Arial Black' } },
-                { placeholder: { name: 'tagline', type: 'body', x: 1, y: 3.8, w: '80%', h: 0.5, fontSize: 24, color: textColor, align: 'right' } },
-                { placeholder: { name: 'team', type: 'body', x: 0.5, y: 5, w: '50%', h: 0.5, fontSize: 10, bold: true, color: textColor, align: 'left' } }
-            ]
-        });
-
-        // 2. KK_PROBLEM (Page 2)
-        pptx.defineSlideMaster({
-            title: 'KK_PROBLEM',
-            background: { color: bgColor },
-            objects: [
-                { line: { x: '50%', y: 0, w: 0, h: '100%', line: { color: '000000', width: 0.5, transparency: 80 } } }, 
-                { placeholder: { name: 'points', type: 'body', x: 0.5, y: 1, w: 4, h: 4, fontSize: 18, bold: true, color: textColor, bullet: { type: 'number' } } },
-                { placeholder: { name: 'title', type: 'title', x: 5, y: 2, w: 4, h: 1, fontSize: 44, bold: true, color: textColor, align: 'right' } }
-            ]
-        });
-
-        // 3. KK_CONTENT
-        pptx.defineSlideMaster({
-            title: 'KK_CONTENT',
-            background: { color: bgColor },
-            objects: [
-                { placeholder: { name: 'title', type: 'title', x: 0.5, y: 0.5, w: 9, h: 1, fontSize: 42, bold: true, color: textColor } },
-                { placeholder: { name: 'body', type: 'body', x: 0.5, y: 1.8, w: 9, h: 3.5, fontSize: 20, color: textColor } },
-                { text: { text: brandName, options: { x: 8, y: 5.2, w: 1.5, fontSize: 8, bold: true, align: 'right', color: textColor, transparency: 70 } } }
-            ]
-        });
-
-        generatedData.slides.forEach(slide => {
-            let master = 'KK_CONTENT';
-            if (slide.type === 'cover') master = 'KK_COVER';
-            if (slide.type === 'problem') master = 'KK_PROBLEM';
-
-            const s = pptx.addSlide({ masterName: master });
-            
-            if (slide.type === 'cover') {
-                s.addText(slide.content.headline, { placeholder: 'title' });
-                s.addText(slide.content.subheadline || '', { placeholder: 'tagline' });
-                s.addText(slide.content.team?.join('   ') || '', { placeholder: 'team' });
-            } else if (slide.type === 'problem') {
-                s.addText(slide.content.headline, { placeholder: 'title' });
-                s.addText(slide.content.points?.join('\n') || '', { placeholder: 'points' });
-            } else {
-                s.addText(slide.content.headline, { placeholder: 'title' });
-                if (slide.content.points) s.addText(slide.content.points.join('\n'), { placeholder: 'body', bullet: true });
-            }
-        });
-
-        pptx.writeFile({ fileName: `${brandName.replace(/\s+/g, '_')}_Deck.pptx` });
+    const handleExport = async () => {
+        if (!currentDeck) return;
+        const pptx = await renderPptx(currentDeck);
+        pptx.writeFile({ fileName: `${currentDeck.deck.title.replace(/\s/g, '_')}.pptx` });
     };
+
+    if (isLoading) {
+        return (
+            <div className="h-full flex flex-col items-center justify-center animate-fadeIn bg-white dark:bg-gray-950">
+                <div className="w-20 h-20 mb-8 relative">
+                    <div className="absolute inset-0 border-4 border-gray-100 dark:border-gray-800 rounded-full"></div>
+                    <div className="absolute inset-0 border-4 border-black dark:border-white rounded-full border-t-transparent animate-spin"></div>
+                    <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-black dark:text-white" size={24} />
+                </div>
+                <h3 className="text-2xl font-serif-display mb-2 text-gray-900 dark:text-white">{loadingMsg}</h3>
+                <p className="text-gray-400 text-sm animate-pulse">Detta kan ta upp till en minut för stora presentationer.</p>
+            </div>
+        );
+    }
 
     return (
-        <div className="h-full flex flex-col">
-            <div className="mb-6 flex justify-between items-end no-print">
+        <div className="h-full flex flex-col max-w-7xl mx-auto w-full">
+            {/* Header */}
+            <div className="flex justify-between items-end mb-8 no-print px-4">
                 <div>
-                    <h1 className="font-serif-display text-4xl mb-1 text-gray-900 dark:text-white">Pitch Studio</h1>
-                    <p className="text-gray-500 text-sm">Designa presentationer baserat på Krunch Keeper-stilen.</p>
+                    <h1 className="font-serif-display text-4xl mb-1 text-gray-900 dark:text-white">Pitch Studio PRO</h1>
+                    <p className="text-gray-500 text-sm">Skywork-grade AI presentationsgenerator.</p>
                 </div>
-                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg">
-                    <button onClick={() => setStep('history')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${step === 'history' ? 'bg-white dark:bg-gray-700 shadow text-black dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>Mina Decks</button>
-                    <button onClick={() => setStep('chat')} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${step === 'chat' ? 'bg-white dark:bg-gray-700 shadow text-black dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>Editor</button>
+                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+                    <button onClick={() => setView('history')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${view === 'history' ? 'bg-white dark:bg-gray-700 shadow-sm text-black dark:text-white' : 'text-gray-500'}`}>Historik</button>
+                    <button onClick={handleCreateNew} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${view === 'generator' ? 'bg-white dark:bg-gray-700 shadow-sm text-black dark:text-white' : 'text-gray-500'}`}>Ny Deck</button>
                 </div>
             </div>
 
-            <div className="flex-1 flex gap-6 overflow-hidden">
-                {step === 'history' && (
-                    <div className="flex-1 animate-fadeIn overflow-y-auto pb-20">
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            <button onClick={handleCreateNewPitch} className="border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-3xl p-8 flex flex-col items-center justify-center text-gray-400 hover:border-black dark:hover:border-white hover:text-black dark:hover:text-white transition-all group min-h-[200px]">
-                                <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-black dark:group-hover:bg-white group-hover:text-white dark:group-hover:text-black transition-colors"><Plus size={24}/></div>
-                                <h3 className="font-bold">Skapa ny pitch</h3>
-                            </button>
-                            {savedPitches.map(pitch => (
-                                <div key={pitch.id} onClick={() => handleLoadPitch(pitch)} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group border-b-4 border-b-black relative">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="w-10 h-10 bg-[#F3F0E8] rounded-xl flex items-center justify-center text-black"><Presentation size={20}/></div>
-                                        <button 
-                                            onClick={(e) => handleDeletePitch(pitch.id, e)} 
-                                            className="p-2 text-gray-300 hover:text-red-500 transition-colors"
-                                            title="Radera"
-                                        >
-                                            <Trash2 size={16}/>
-                                        </button>
-                                    </div>
-                                    <h3 className="font-bold text-lg text-gray-900 dark:text-white mb-2 truncate">{pitch.name}</h3>
-                                    <div className="mt-auto flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                                        <span className="flex items-center gap-1"><Clock size={10}/> {new Date(pitch.dateCreated).toLocaleDateString()}</span>
-                                        <span className={pitch.content ? 'text-green-500' : 'text-orange-400'}>{pitch.content ? 'Klar' : 'Utkast'}</span>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+            {view === 'history' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 p-4">
+                    <div onClick={handleCreateNew} className="border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-3xl p-10 flex flex-col items-center justify-center text-gray-400 hover:border-black dark:hover:border-white hover:text-black dark:hover:text-white cursor-pointer transition-all group">
+                        <Plus size={32} className="mb-4 group-hover:scale-110 transition-transform" />
+                        <span className="font-bold">Skapa ny presentation</span>
                     </div>
-                )}
+                    {savedPitches.map(p => (
+                        <div key={p.id} onClick={() => { setCurrentDeck(JSON.parse(p.content)); setStep('preview'); setView('generator'); }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group border-b-4 border-b-black">
+                            <div className="flex justify-between items-start mb-6">
+                                <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center text-black dark:text-white"><Presentation size={24}/></div>
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{new Date(p.dateCreated).toLocaleDateString()}</div>
+                            </div>
+                            <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2 line-clamp-2">{p.name}</h3>
+                            <div className="mt-auto flex items-center gap-2 text-xs font-bold text-green-500">
+                                <CheckCircle2 size={14}/> Redo för export
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            ) : (
+                <div className="flex-1 overflow-y-auto px-4 pb-20">
+                    {/* Progress Bar */}
+                    <div className="flex justify-center gap-2 mb-12">
+                        {['brief', 'clarify', 'outline', 'preview'].map((s, idx) => (
+                            <div key={s} className={`h-1.5 w-16 rounded-full transition-colors ${idx <= ['brief', 'clarify', 'outline', 'preview'].indexOf(step) ? 'bg-black dark:bg-white' : 'bg-gray-200 dark:bg-gray-800'}`} />
+                        ))}
+                    </div>
 
-                {step === 'chat' && (
-                    <>
-                        <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden animate-slideUp">
-                            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                                {messages.map(msg => (
-                                    <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-fadeIn`}>
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'ai' ? 'bg-black text-white' : 'bg-gray-100 text-gray-600'}`}>{msg.role === 'ai' ? <BrainCircuit size={16} /> : <UserIcon size={16} />}</div>
-                                        <div className={`max-w-[80%] px-5 py-3 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-black text-white rounded-tr-none' : 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-tl-none'}`}>
-                                            {msg.role === 'ai' ? <RichTextResponse text={msg.text} /> : <p>{msg.text}</p>}
+                    {/* Step 1: BRIEF */}
+                    {step === 'brief' && (
+                        <div className="max-w-2xl mx-auto space-y-8 animate-slideUp">
+                            <div className="space-y-4">
+                                <h2 className="text-3xl font-serif-display">Vad vill du bygga idag?</h2>
+                                <p className="text-gray-500">Beskriv din idé, ditt företag eller ämnet för presentationen.</p>
+                                <textarea 
+                                    value={brief.topic}
+                                    onChange={e => setBrief({...brief, topic: e.target.value})}
+                                    placeholder="t.ex. En pitch för en ny hållbar app som hjälper UF-företag att hitta lokala leverantörer..."
+                                    className="w-full h-40 p-6 bg-gray-50 dark:bg-gray-900 border-none rounded-3xl text-lg focus:ring-2 ring-black outline-none resize-none shadow-inner"
+                                />
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <label className="block text-xs font-bold uppercase text-gray-400 mb-2">Målgrupp</label>
+                                    <input value={brief.audience} onChange={e => setBrief({...brief, audience: e.target.value})} placeholder="Investerare, kunder..." className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border-none focus:ring-1 ring-black outline-none" />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold uppercase text-gray-400 mb-2">Slide Antal</label>
+                                    <select value={brief.slideCount} onChange={e => setBrief({...brief, slideCount: parseInt(e.target.value)})} className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border-none focus:ring-1 ring-black outline-none">
+                                        <option value={8}>8 slides (Snabb)</option>
+                                        <option value={10}>10 slides (Standard)</option>
+                                        <option value={15}>15 slides (Djupgående)</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <button onClick={generateClarifications} disabled={!brief.topic} className="w-full py-5 bg-black dark:bg-white text-white dark:text-black rounded-full font-bold text-xl shadow-lg hover:opacity-90 transition-all flex items-center justify-center gap-3 disabled:opacity-50">
+                                Nästa steg <ArrowRight size={24}/>
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Step 2: CLARIFY */}
+                    {step === 'clarify' && (
+                        <div className="max-w-2xl mx-auto space-y-8 animate-slideUp">
+                            <h2 className="text-3xl font-serif-display">Bara några frågor till...</h2>
+                            <div className="space-y-6">
+                                {questions.map(q => (
+                                    <div key={q.id} className="bg-gray-50 dark:bg-gray-900 p-6 rounded-3xl border border-gray-100 dark:border-gray-800">
+                                        <label className="block font-bold mb-3">{q.question}</label>
+                                        {q.type === 'text' ? (
+                                            <input className="w-full p-3 bg-white dark:bg-gray-800 rounded-xl outline-none" onChange={e => setAnswers({...answers, [q.id]: e.target.value})} />
+                                        ) : (
+                                            <div className="flex flex-wrap gap-2">
+                                                {q.options?.map(opt => (
+                                                    <button 
+                                                        key={opt} 
+                                                        onClick={() => setAnswers({...answers, [q.id]: opt})}
+                                                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${answers[q.id] === opt ? 'bg-black text-white' : 'bg-white text-gray-500 border border-gray-200'}`}
+                                                    >
+                                                        {opt}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                            <button onClick={generateOutline} className="w-full py-5 bg-black dark:bg-white text-white dark:text-black rounded-full font-bold text-xl flex items-center justify-center gap-3">
+                                Skapa Outline <ArrowRight size={24}/>
+                            </button>
+                        </div>
+                    )}
+
+                    {/* Step 3: OUTLINE */}
+                    {step === 'outline' && outline && (
+                        <div className="max-w-3xl mx-auto space-y-8 animate-slideUp">
+                            <h2 className="text-3xl font-serif-display">Presentationens ryggrad</h2>
+                            <div className="space-y-4">
+                                {outline.sections.map((section, idx) => (
+                                    <div key={idx} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl overflow-hidden">
+                                        <div className="p-4 bg-gray-50 dark:bg-gray-800 font-bold text-sm uppercase tracking-widest text-gray-400">{section.title}</div>
+                                        <div className="p-2 space-y-1">
+                                            {section.slides.map((s, sidx) => (
+                                                <div key={sidx} className="flex items-center gap-4 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition-colors group">
+                                                    <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-bold">{s.type.substring(0,2).toUpperCase()}</div>
+                                                    <div className="flex-1">
+                                                        <div className="font-bold text-sm">{s.title}</div>
+                                                        <div className="text-xs text-gray-500">{s.keyMessage}</div>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
                                 ))}
-                                {isThinking && <div className="text-xs text-gray-400 animate-pulse">Arkitekten bygger...</div>}
-                                <div ref={chatEndRef} />
                             </div>
-                            <div className="p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
-                                <form onSubmit={handleSendMessage} className="relative flex gap-2">
-                                    <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Svara arkitekten..." className="flex-1 bg-gray-50 dark:bg-gray-800 border-none rounded-xl px-5 py-3 text-sm focus:ring-1 focus:ring-black outline-none" />
-                                    <button type="submit" className="p-3 bg-black dark:bg-white text-white dark:text-black rounded-xl hover:opacity-80 transition-opacity"><Send size={18} /></button>
-                                </form>
-                            </div>
+                            <button onClick={generateFullDeck} className="w-full py-5 bg-black dark:bg-white text-white dark:text-black rounded-full font-bold text-xl flex items-center justify-center gap-3 shadow-2xl">
+                                <Sparkles size={24}/> Generera Deck
+                            </button>
                         </div>
-                        <div className="w-80 space-y-4">
-                            <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm">
-                                <h3 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2"><Gauge size={18} /> Pitch Context</h3>
-                                <div className="h-4 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden mb-2"><div className="h-full bg-black dark:bg-white transition-all duration-1000" style={{ width: `${contextScore}%` }}></div></div>
-                                <div className="flex justify-between text-[10px] font-bold text-gray-400 uppercase"><span>0%</span><span>{contextScore}%</span><span>Redo</span></div>
-                                <button onClick={generateFinalDeck} disabled={contextScore < 25 || isGeneratingDeck} className="w-full mt-10 bg-black dark:bg-white text-white dark:text-black py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg disabled:opacity-50 hover:scale-[1.02] transition-transform">{isGeneratingDeck ? <Loader2 size={18} className="animate-spin" /> : <><Sparkles size={18} /> Generera Deck</>}</button>
-                                <p className="text-[10px] text-gray-400 text-center mt-3 italic">Designas i "Krunch Keeper"-stil.</p>
-                            </div>
-                        </div>
-                    </>
-                )}
+                    )}
 
-                {step === 'preview' && (
-                    <div className="flex-1 flex flex-col animate-slideUp">
-                        <div className="bg-white dark:bg-gray-900 p-4 border border-gray-200 dark:border-gray-800 rounded-xl mb-6 flex justify-between items-center shadow-sm">
-                            <div className="flex items-center gap-3">
-                                <button onClick={() => setStep('chat')} className="p-2 hover:bg-gray-100 rounded-lg"><ArrowLeft size={18} /></button>
+                    {/* Step 4: PREVIEW */}
+                    {step === 'preview' && currentDeck && (
+                        <div className="animate-fadeIn">
+                            <div className="flex justify-between items-center mb-8 sticky top-0 bg-gray-50 dark:bg-gray-950 py-4 z-20">
                                 <div>
-                                    <h3 className="font-bold text-gray-900 dark:text-white">{generatedData?.metadata.company_name}</h3>
-                                    <p className="text-xs text-gray-500">Mallen: Krunch Keeper Minimalist</p>
+                                    <h2 className="text-2xl font-bold">{currentDeck.deck.title}</h2>
+                                    <p className="text-sm text-gray-500">{currentDeck.slides.length} slides • Designad för {currentDeck.deck.audience}</p>
                                 </div>
+                                <button onClick={handleExport} className="bg-black dark:bg-white text-white dark:text-black px-8 py-3 rounded-full font-bold flex items-center gap-2 hover:scale-105 transition-transform shadow-xl">
+                                    <Download size={20}/> Exportera till PPTX
+                                </button>
                             </div>
-                            <button onClick={exportToPPT} className="bg-[#D24726] text-white px-5 py-2.5 rounded-lg font-bold text-sm flex items-center gap-2 hover:opacity-90 shadow-md"><Download size={16} /> Ladda ned PPTX</button>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-20">
+                                {currentDeck.slides.map((slide, idx) => (
+                                    <div key={slide.id} className="group relative">
+                                        <div className="absolute -left-4 top-0 bottom-0 w-1 bg-black opacity-0 group-hover:opacity-100 transition-opacity rounded-full"></div>
+                                        <div className="aspect-video bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm p-8 flex flex-col relative overflow-hidden">
+                                            {/* Design Elements based on type */}
+                                            <div className="absolute top-0 left-0 w-full h-1 bg-black dark:bg-white"></div>
+                                            
+                                            <div className="flex justify-between mb-4">
+                                                <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Slide {idx+1} • {slide.type}</span>
+                                                <button className="text-gray-300 hover:text-black"><Edit3 size={14}/></button>
+                                            </div>
+
+                                            <h3 className="text-xl font-bold mb-4 line-clamp-2">{slide.title}</h3>
+                                            
+                                            <div className="flex-1 space-y-2 overflow-hidden">
+                                                {slide.bullets?.map((b, bidx) => (
+                                                    <div key={bidx} className="flex gap-2 text-sm text-gray-600 dark:text-gray-400">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white mt-1.5 shrink-0" />
+                                                        <span>{b}</span>
+                                                    </div>
+                                                ))}
+                                                {slide.type === 'kpi' && slide.kpis && (
+                                                    <div className="grid grid-cols-3 gap-2 mt-4">
+                                                        {slide.kpis.map((k, ki) => (
+                                                            <div key={ki} className="bg-gray-50 dark:bg-gray-800 p-2 rounded-lg text-center">
+                                                                <div className="font-bold text-black dark:text-white">{k.value}</div>
+                                                                <div className="text-[8px] text-gray-400 uppercase">{k.label}</div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            
+                                            <div className="mt-4 pt-4 border-t border-gray-50 dark:border-gray-800 flex justify-between items-center">
+                                                <span className="text-[9px] text-gray-300 italic">Key: {slide.speakerNotes?.[0]?.substring(0, 30)}...</span>
+                                                <div className="flex gap-1">
+                                                    <button className="p-1 hover:bg-gray-100 rounded text-gray-400"><Trash2 size={12}/></button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
-                        <div className="grid grid-cols-2 lg:grid-cols-3 gap-6 pb-20 overflow-y-auto">
-                            {generatedData?.slides.map(slide => (
-                                <SlidePreview key={slide.slide_number} slide={slide} companyName={generatedData.metadata.company_name} />
-                            ))}
-                        </div>
-                    </div>
-                )}
-            </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 };

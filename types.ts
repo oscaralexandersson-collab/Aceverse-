@@ -20,6 +20,80 @@ export interface User {
   companyReport?: CompanyReport; 
 }
 
+// --- NEW PRESENTATION TYPES ---
+
+export type SlideType = 
+  | "title" | "agenda" | "section" | "bullets" | "bulletsImage" 
+  | "twoColumn" | "kpi" | "timeline" | "comparison" | "chart" | "closing";
+
+export interface SlideSpec {
+  id: string;
+  type: SlideType;
+  title: string;
+  subtitle?: string;
+  bullets?: string[];
+  imageQuery?: string;
+  left?: { heading?: string, bullets?: string[] };
+  right?: { heading?: string, bullets?: string[] };
+  kpis?: Array<{ value: string, label: string }>;
+  timeline?: Array<{ label: string, text: string }>;
+  table?: { headers: string[], rows: string[][] };
+  chart?: { kind: "bar" | "line", title?: string, categories: string[], series: Array<{ name: string, values: number[] }> };
+  speakerNotes?: string[];
+  citations?: Array<{ url: string, title?: string, snippet?: string }>;
+}
+
+export interface DeckSpec {
+  deck: {
+    title: string;
+    language: string;
+    audience: string;
+    objective: string;
+    tone: string;
+    slideCount: number;
+  };
+  theme: {
+    palette: {
+      primary: string;
+      secondary: string;
+      accent: string;
+      background: string;
+    };
+    fonts: {
+      heading: string;
+      body: string;
+    };
+    logoDataUrl?: string;
+  };
+  sources?: {
+    userProvided?: string[];
+    urls?: string[];
+  };
+  slides: SlideSpec[];
+}
+
+export interface ClarificationQuestion {
+  id: string;
+  type: "single" | "multi" | "text";
+  question: string;
+  options?: string[];
+  required: boolean;
+}
+
+export interface DeckOutline {
+  deckTitle: string;
+  sections: Array<{
+    title: string;
+    slides: Array<{
+      type: SlideType;
+      title: string;
+      keyMessage: string;
+    }>;
+  }>;
+}
+
+// --- END NEW TYPES ---
+
 export interface CompanyReport {
   meta: {
     companyName: string;
@@ -119,9 +193,9 @@ export interface Pitch {
   id: string;
   type: 'deck' | 'speech' | 'email';
   name: string;
-  content: string; // Used for generated deck JSON
+  content: string; // JSON string of DeckSpec
   dateCreated: string;
-  chatSessionId?: string; // Link to the conversation
+  chatSessionId?: string; 
   contextScore?: number;
 }
 
@@ -202,7 +276,6 @@ export interface BrandDNA {
     };
 }
 
-// Added CampaignIdea interface
 export interface CampaignIdea {
     id: string;
     name: string;
@@ -213,7 +286,6 @@ export interface CampaignIdea {
     exampleHeadline: string;
 }
 
-// Added CampaignAsset interface
 export interface CampaignAsset {
     id: string;
     channel: 'instagram_feed' | 'linkedin_post' | 'email_intro';
