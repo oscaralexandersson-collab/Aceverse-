@@ -73,6 +73,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     setLanguage(language === 'sv' ? 'en' : 'sv');
   };
 
+  const toggleSidebar = () => {
+    setIsSidebarOpen(!isSidebarOpen);
+  };
+
   const menuItems: { id: DashboardView; label: string; icon: React.ReactNode }[] = [
     { id: 'overview', label: t('dashboard.overview'), icon: <LayoutDashboard size={20} /> },
     { id: 'ideas', label: t('dashboard.ideas'), icon: <Lightbulb size={20} /> },
@@ -179,7 +183,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     <div className="flex h-screen bg-gray-50 dark:bg-gray-950 overflow-hidden font-sans transition-colors duration-300">
       {/* Sidebar */}
       <aside 
-        className={`${isSidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full opacity-0'} bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col z-20 transition-all duration-300 ease-in-out absolute md:relative h-full`}
+        className={`${isSidebarOpen ? 'w-64 translate-x-0' : 'w-0 -translate-x-full opacity-0'} bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col z-20 transition-all duration-300 ease-in-out absolute md:relative h-full overflow-hidden`}
       >
         <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-3 overflow-hidden whitespace-nowrap">
@@ -262,7 +266,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
         <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-4 md:px-8 relative z-30 flex-shrink-0">
             <div className="flex items-center gap-4">
                 {!isSidebarOpen && (
-                   <button onClick={() => setIsSidebarOpen(true)} className="text-gray-500 hover:text-black dark:text-gray-400 dark:hover:text-white transition-colors">
+                   <button onClick={toggleSidebar} className="text-gray-500 hover:text-black dark:text-gray-400 dark:hover:text-white transition-colors">
                       <Menu size={24} />
                    </button>
                 )}
@@ -341,45 +345,32 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
         </header>
 
         <div className={`flex-1 bg-gray-50 dark:bg-gray-950 transition-colors ${currentView === 'ideas' && !isSidebarOpen ? 'p-0 overflow-hidden' : 'p-8 overflow-y-auto'}`}>
-            {/* 
-               CRITICAL CHANGE: 
-               Instead of conditionally rendering components (which unmounts them and kills background processes),
-               we render ALL components but use CSS `display: none` (via 'hidden' class) to toggle visibility.
-               This keeps the component state alive, allowing AI generation to continue in the background.
-            */}
             <div className={`${currentView === 'ideas' && !isSidebarOpen ? 'h-full' : 'max-w-6xl mx-auto'} h-full relative`}>
                 
-                {/* Overview */}
                 <div className={currentView === 'overview' ? 'block h-full animate-[fadeIn_0.5s_ease-out_forwards]' : 'hidden'}>
                     <Overview user={user} setView={setCurrentView} />
                 </div>
 
-                {/* Idea Lab */}
                 <div className={currentView === 'ideas' ? 'block h-full animate-[fadeIn_0.5s_ease-out_forwards]' : 'hidden'}>
-                    <IdeaLab user={user} isSidebarOpen={isSidebarOpen} toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)} />
+                    <IdeaLab user={user} isSidebarOpen={isSidebarOpen} toggleSidebar={toggleSidebar} />
                 </div>
 
-                {/* Advisor */}
                 <div className={currentView === 'advisor' ? 'block h-full animate-[fadeIn_0.5s_ease-out_forwards]' : 'hidden'}>
                     <Advisor user={user} />
                 </div>
 
-                {/* Marketing */}
                 <div className={currentView === 'marketing' ? 'block h-full animate-[fadeIn_0.5s_ease-out_forwards]' : 'hidden'}>
                     <MarketingEngine user={user} />
                 </div>
 
-                {/* CRM */}
                 <div className={currentView === 'crm' ? 'block h-full animate-[fadeIn_0.5s_ease-out_forwards]' : 'hidden'}>
                     <CRM user={user} />
                 </div>
 
-                {/* Pitch Studio */}
                 <div className={currentView === 'pitch' ? 'block h-full animate-[fadeIn_0.5s_ease-out_forwards]' : 'hidden'}>
                     <PitchStudio user={user} />
                 </div>
 
-                {/* Settings */}
                 <div className={currentView === 'settings' ? 'block h-full animate-[fadeIn_0.5s_ease-out_forwards]' : 'hidden'}>
                     <Settings user={user} />
                 </div>

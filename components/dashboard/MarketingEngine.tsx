@@ -80,7 +80,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
     const handleLoadDna = (loadedDna: BrandDNA) => {
         setDna(loadedDna);
         setStep('dna_review');
-        setBrandUrl(loadedDna.meta.siteUrl);
+        setBrandUrl(loadedDna.meta?.siteUrl || '');
         setCampaignIdeas([]);
         setAssets([]);
         if(window.innerWidth < 768) setIsSidebarOpen(false);
@@ -91,11 +91,11 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         const parentDna = dnas.find(d => d.id === campaign.brandDnaId);
         if (parentDna) {
             setDna(parentDna);
-            setBrandUrl(parentDna.meta.siteUrl);
+            setBrandUrl(parentDna.meta?.siteUrl || '');
         }
         setSelectedIdea(campaign.selectedIdea);
-        setAssets(campaign.assets);
-        if (campaign.assets.length > 0) setActiveAssetId(campaign.assets[0].id);
+        setAssets(campaign.assets || []);
+        if (campaign.assets && campaign.assets.length > 0) setActiveAssetId(campaign.assets[0].id);
         setStep('asset_generation');
         if(window.innerWidth < 768) setIsSidebarOpen(false);
     };
@@ -335,8 +335,8 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
             // 1. Generate Image Prompt
             const promptGenPrompt = `
                 Create a text-to-image prompt for this campaign asset.
-                Context: ${asset.content.body}
-                Visual Style: ${dna?.visual.layoutStyle.photoStyle}, ${dna?.visual.primaryColors.map(c => c.hex).join(', ')}
+                Context: ${asset.content?.body || 'Marketing image'}
+                Visual Style: ${dna?.visual?.layoutStyle?.photoStyle || 'modern'}, ${dna?.visual?.primaryColors?.map(c => c.hex).join(', ') || '#000000'}
                 Requirement: High quality, photorealistic or 3D render, minimalist.
                 Output: Just the prompt string.
             `;
@@ -396,7 +396,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         setAttachStatus('loading');
         
         // 1. COPY TEXT TO CLIPBOARD (Universal step)
-        const textToCopy = `${asset.content.headline || ''}\n\n${asset.content.body}\n\n${asset.content.hashtags?.map(h => `#${h}`).join(' ')}`;
+        const textToCopy = `${asset.content?.headline || ''}\n\n${asset.content?.body || ''}\n\n${asset.content?.hashtags?.map(h => `#${h}`).join(' ') || ''}`;
         try {
             await navigator.clipboard.writeText(textToCopy);
         } catch (err) {
@@ -424,8 +424,8 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
             window.open('https://www.linkedin.com/feed/', '_blank');
         } else if (asset.channel === 'email_intro') {
             platformName = 'Mail';
-            const subject = encodeURIComponent(asset.content.headline || 'Hej');
-            const body = encodeURIComponent(asset.content.body);
+            const subject = encodeURIComponent(asset.content?.headline || 'Hej');
+            const body = encodeURIComponent(asset.content?.body || '');
             window.location.href = `mailto:?subject=${subject}&body=${body}`;
         }
 
@@ -505,8 +505,8 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                     className="p-3 cursor-pointer flex items-center justify-between"
                                 >
                                     <div>
-                                        <h3 className="font-bold text-sm text-gray-900 dark:text-white">{d.meta.brandName || 'Namnlöst'}</h3>
-                                        <p className="text-xs text-gray-500 truncate w-40">{d.meta.siteUrl}</p>
+                                        <h3 className="font-bold text-sm text-gray-900 dark:text-white">{d.meta?.brandName || 'Namnlöst'}</h3>
+                                        <p className="text-xs text-gray-500 truncate w-40">{d.meta?.siteUrl || ''}</p>
                                     </div>
                                     {isActive && <div className="w-2 h-2 bg-green-500 rounded-full"></div>}
                                 </div>
@@ -587,7 +587,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                 <span className="text-xs font-bold text-green-600 dark:text-green-400 uppercase tracking-widest mb-2 block flex items-center gap-2">
                                     <CheckCircle2 size={14} /> Analys Klar
                                 </span>
-                                <h2 className="font-serif-display text-4xl text-gray-900 dark:text-white">{dna.meta.brandName} DNA</h2>
+                                <h2 className="font-serif-display text-4xl text-gray-900 dark:text-white">{dna.meta?.brandName || 'Varumärke'} DNA</h2>
                             </div>
                             <button 
                                 onClick={() => setStep('campaign_brief')}
@@ -609,13 +609,13 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                     <div>
                                         <span className="text-xs font-bold text-gray-400 uppercase mb-2 block">Färgpalett</span>
                                         <div className="flex gap-3">
-                                            {dna.visual.primaryColors.map((c, i) => (
+                                            {(dna.visual?.primaryColors || []).map((c, i) => (
                                                 <div key={i} className="group relative">
                                                     <div className="w-12 h-12 rounded-full shadow-sm border border-gray-100 dark:border-gray-700 cursor-pointer transition-transform hover:scale-110" style={{ backgroundColor: c.hex }}></div>
                                                     <span className="absolute top-full mt-2 left-1/2 -translate-x-1/2 text-[10px] font-mono bg-black text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">{c.hex}</span>
                                                 </div>
                                             ))}
-                                            {dna.visual.secondaryColors.map((c, i) => (
+                                            {(dna.visual?.secondaryColors || []).map((c, i) => (
                                                 <div key={`s-${i}`} className="w-8 h-8 rounded-full shadow-sm border border-gray-100 dark:border-gray-700 mt-2" style={{ backgroundColor: c.hex }}></div>
                                             ))}
                                         </div>
@@ -624,17 +624,17 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
                                             <span className="text-xs font-bold text-gray-400 uppercase mb-1 block">Rubriktypsnitt</span>
-                                            <p className="text-lg font-serif-display text-gray-900 dark:text-white">{dna.visual.typography.primaryFont.name}</p>
+                                            <p className="text-lg font-serif-display text-gray-900 dark:text-white">{dna.visual?.typography?.primaryFont?.name || 'Standard'}</p>
                                         </div>
                                         <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
                                             <span className="text-xs font-bold text-gray-400 uppercase mb-1 block">Brödtext</span>
-                                            <p className="text-lg font-sans text-gray-900 dark:text-white">{dna.visual.typography.secondaryFont.name}</p>
+                                            <p className="text-lg font-sans text-gray-900 dark:text-white">{dna.visual?.typography?.secondaryFont?.name || 'Standard'}</p>
                                         </div>
                                     </div>
 
                                     <div>
                                         <span className="text-xs font-bold text-gray-400 uppercase mb-2 block">Designstil</span>
-                                        <p className="text-sm text-gray-600 dark:text-gray-300 italic">"{dna.visual.layoutStyle.notes || 'Modern och ren layout.'}"</p>
+                                        <p className="text-sm text-gray-600 dark:text-gray-300 italic">"{dna.visual?.layoutStyle?.notes || 'Modern och ren layout.'}"</p>
                                     </div>
                                 </div>
                             </div>
@@ -648,7 +648,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
 
                                 <div className="space-y-6">
                                     <div className="flex flex-wrap gap-2">
-                                        {dna.voice.toneDescriptors.map((tone, i) => (
+                                        {(dna.voice?.toneDescriptors || []).map((tone, i) => (
                                             <span key={i} className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 text-sm font-medium rounded-lg border border-gray-200 dark:border-gray-700">
                                                 {tone}
                                             </span>
@@ -658,7 +658,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                     <div>
                                         <span className="text-xs font-bold text-gray-400 uppercase mb-2 block">Formellhetsgrad</span>
                                         <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                                            <div className="h-full bg-blue-500 w-1/2 rounded-full relative"></div> {/* Static for now, could be dynamic based on 'formality' string */}
+                                            <div className="h-full bg-blue-500 w-1/2 rounded-full relative"></div>
                                         </div>
                                         <div className="flex justify-between text-[10px] text-gray-400 mt-1 uppercase font-bold">
                                             <span>Casual</span>
@@ -670,13 +670,13 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                         <div className="p-3 border border-green-100 dark:border-green-900 bg-green-50 dark:bg-green-900/10 rounded-xl">
                                             <span className="text-xs font-bold text-green-700 dark:text-green-400 uppercase mb-1 block">Gör detta</span>
                                             <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1 list-disc pl-3">
-                                                {dna.voice.doUse.slice(0,3).map((item, i) => <li key={i}>{item}</li>)}
+                                                {(dna.voice?.doUse || []).slice(0,3).map((item, i) => <li key={i}>{item}</li>)}
                                             </ul>
                                         </div>
                                         <div className="p-3 border border-red-100 dark:border-red-900 bg-red-50 dark:bg-red-900/10 rounded-xl">
                                             <span className="text-xs font-bold text-red-700 dark:text-red-400 uppercase mb-1 block">Undvik</span>
                                             <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1 list-disc pl-3">
-                                                {dna.voice.dontUse.slice(0,3).map((item, i) => <li key={i}>{item}</li>)}
+                                                {(dna.voice?.dontUse || []).slice(0,3).map((item, i) => <li key={i}>{item}</li>)}
                                             </ul>
                                         </div>
                                     </div>
@@ -748,7 +748,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                         </div>
 
                         <div className="grid md:grid-cols-3 gap-6">
-                            {campaignIdeas.map((idea) => (
+                            {(campaignIdeas || []).map((idea) => (
                                 <div key={idea.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-8 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
                                     <div className="mb-6">
                                         <h3 className="font-serif-display text-2xl mb-2 text-gray-900 dark:text-white">{idea.name}</h3>
@@ -761,7 +761,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                             <p className="text-sm font-medium text-gray-800 dark:text-gray-200">"{idea.coreMessage}"</p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
-                                            {idea.suggestedChannels.map(c => (
+                                            {(idea.suggestedChannels || []).map(c => (
                                                 <span key={c} className="text-[10px] bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-2 py-1 rounded uppercase font-bold text-gray-500">
                                                     {c}
                                                 </span>
@@ -788,11 +788,11 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                         <div className="w-full md:w-80 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full">
                             <div className="p-6 border-b border-gray-100 dark:border-gray-800">
                                 <button onClick={() => setStep('campaign_selection')} className="text-xs font-bold text-gray-400 hover:text-black dark:hover:text-white mb-2 flex items-center gap-1"><ChevronRight className="rotate-180" size={12} /> Tillbaka</button>
-                                <h3 className="font-serif-display text-xl text-gray-900 dark:text-white">{selectedIdea?.name}</h3>
+                                <h3 className="font-serif-display text-xl text-gray-900 dark:text-white">{selectedIdea?.name || 'Kampanj'}</h3>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">Genererade tillgångar</p>
                             </div>
                             <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                                {assets.map(asset => (
+                                {(assets || []).map(asset => (
                                     <button 
                                         key={asset.id}
                                         onClick={() => setActiveAssetId(asset.id)}
@@ -811,7 +811,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                                 <span className="block text-sm font-bold capitalize">{asset.channel.replace('_', ' ')}</span>
                                                 {generatingImages[asset.id] && <Loader2 size={12} className="animate-spin text-gray-400" />}
                                             </div>
-                                            <span className="text-[10px] opacity-70 truncate block">{asset.content.headline || 'Utkast'}</span>
+                                            <span className="text-[10px] opacity-70 truncate block">{asset.content?.headline || 'Utkast'}</span>
                                         </div>
                                     </button>
                                 ))}
@@ -838,15 +838,15 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                             <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Rubrik</label>
                                             <input 
                                                 className="w-full bg-transparent border-b-2 border-gray-200 dark:border-gray-700 py-2 text-xl font-serif-display text-gray-900 dark:text-white focus:border-black dark:focus:border-white outline-none transition-colors"
-                                                value={assets.find(a => a.id === activeAssetId)?.content.headline || ''}
-                                                onChange={() => {}} // In a real app, update state here
+                                                value={assets.find(a => a.id === activeAssetId)?.content?.headline || ''}
+                                                onChange={() => {}}
                                             />
                                         </div>
                                         <div>
                                             <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Text</label>
                                             <textarea 
                                                 className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-sm leading-relaxed text-gray-700 dark:text-gray-300 h-64 resize-none focus:ring-1 focus:ring-black dark:focus:ring-white outline-none"
-                                                value={assets.find(a => a.id === activeAssetId)?.content.body}
+                                                value={assets.find(a => a.id === activeAssetId)?.content?.body || ''}
                                                 onChange={() => {}}
                                             />
                                         </div>
@@ -854,7 +854,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                             <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Call to Action</label>
                                             <input 
                                                 className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-3 text-sm font-medium text-gray-900 dark:text-white"
-                                                value={assets.find(a => a.id === activeAssetId)?.content.cta}
+                                                value={assets.find(a => a.id === activeAssetId)?.content?.cta || ''}
                                                 onChange={() => {}}
                                             />
                                         </div>
@@ -912,10 +912,10 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                             <div className="p-4">
                                                 <p className="text-sm text-gray-800 dark:text-gray-200 mb-2">
                                                     <span className="font-bold mr-2">aceverse_demo</span>
-                                                    {assets.find(a => a.id === activeAssetId)?.content.headline} {assets.find(a => a.id === activeAssetId)?.content.body?.substring(0, 80)}...
+                                                    {assets.find(a => a.id === activeAssetId)?.content?.headline} {(assets.find(a => a.id === activeAssetId)?.content?.body || '').substring(0, 80)}...
                                                 </p>
                                                 <p className="text-xs text-blue-600 dark:text-blue-400">
-                                                    {assets.find(a => a.id === activeAssetId)?.content.hashtags?.map(h => `#${h} `)}
+                                                    {assets.find(a => a.id === activeAssetId)?.content?.hashtags?.map(h => `#${h} `)}
                                                 </p>
                                             </div>
                                         </div>
@@ -933,9 +933,9 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                             {attachStatus === 'success' && <Check size={18} />}
                                             {attachStatus === 'idle' && <Share2 size={18} />}
                                             
-                                            {attachStatus === 'loading' && `Ansluter till ${assets.find(a => a.id === activeAssetId)?.channel.split('_')[0]}...`}
+                                            {attachStatus === 'loading' && `Ansluter till ${(assets.find(a => a.id === activeAssetId)?.channel || '').split('_')[0]}...`}
                                             {attachStatus === 'success' && 'Bifogat!'}
-                                            {attachStatus === 'idle' && `Bifoga till ${assets.find(a => a.id === activeAssetId)?.channel.split('_')[0].replace(/^\w/, c => c.toUpperCase())}`}
+                                            {attachStatus === 'idle' && `Bifoga till ${(assets.find(a => a.id === activeAssetId)?.channel || '').split('_')[0].replace(/^\w/, c => c.toUpperCase())}`}
                                         </button>
                                     </div>
                                 </div>

@@ -264,12 +264,10 @@ const ReportSection = ({ user }: { user: User }) => {
                     <div className="grid grid-cols-2 gap-4 text-sm">
                         <div>
                             <span className="block text-xs font-bold text-gray-400 uppercase">Grundat</span>
-                            {/* FIX: Use summary.founded since companyOverview does not exist on CompanyReport interface */}
                             <span className="font-medium text-gray-900 dark:text-white">{report.summary?.founded || 'N/A'}</span>
                         </div>
                         <div>
                             <span className="block text-xs font-bold text-gray-400 uppercase">Anställda</span>
-                            {/* FIX: Use summary.employees since companyOverview does not exist on CompanyReport interface */}
                             <span className="font-medium text-gray-900 dark:text-white">{report.summary?.employees || 'N/A'}</span>
                         </div>
                     </div>
@@ -279,7 +277,6 @@ const ReportSection = ({ user }: { user: User }) => {
                     <section>
                         <h4 className="font-bold text-sm uppercase tracking-wider text-gray-900 dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2">Sammanfattning</h4>
                         <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-line">
-                            {/* FIX: executiveSummary does not exist, use summary information or a snippet from fullMarkdown */}
                             Denna rapport ger en djupgående analys av bolagets finansiella ställning, marknadsposition och tillväxtmöjligheter. Se den fullständiga rapporten under CRM-sektionen för detaljerade insikter.
                         </p>
                     </section>
@@ -290,26 +287,22 @@ const ReportSection = ({ user }: { user: User }) => {
                             <ul className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
                                 <li className="flex justify-between">
                                     <span className="text-gray-500 dark:text-gray-400">Omsättning:</span>
-                                    {/* FIX: Use summary.revenue since financials does not exist on CompanyReport interface */}
                                     <span className="font-medium">{report.summary?.revenue || 'N/A'}</span>
                                 </li>
                                 <li className="flex justify-between">
                                     <span className="text-gray-500 dark:text-gray-400">EBITDA:</span>
-                                    {/* FIX: Use summary.ebitda since financials does not exist on CompanyReport interface */}
                                     <span className="font-medium">{report.summary?.ebitda || 'N/A'}</span>
                                 </li>
                                 <li className="flex justify-between">
                                     <span className="text-gray-500 dark:text-gray-400">Soliditet:</span>
-                                    {/* FIX: Use summary.solvency since financials does not exist on CompanyReport interface */}
                                     <span className="font-medium text-green-600">{report.summary?.solvency || 'N/A'}</span>
                                 </li>
                             </ul>
                         </div>
                         <div>
                             <h4 className="font-bold text-sm uppercase tracking-wider text-gray-900 dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2">Källhänvisningar</h4>
-                            {/* FIX: marketAnalysis does not exist, display sources instead */}
                             <div className="flex flex-wrap gap-2">
-                                {report.sources?.slice(0, 5).map((source, i) => (
+                                {report.sources?.slice(0, 5)?.map((source, i) => (
                                     <span key={i} className="text-[10px] bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded-md text-gray-700 dark:text-gray-300 truncate max-w-[150px]" title={source.title}>
                                         {source.title}
                                     </span>

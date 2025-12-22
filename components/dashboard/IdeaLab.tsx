@@ -1,985 +1,447 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
-    ArrowRight, 
-    Sparkles, 
-    Maximize2, 
-    Minimize2, 
-    ZoomIn, 
-    ZoomOut, 
-    Target, 
-    Zap, 
-    Users, 
-    DollarSign,
-    Lightbulb,
-    CheckCircle2,
-    Lock,
-    BarChart3,
-    Search,
-    Globe,
-    Link as LinkIcon,
-    History,
-    Clock,
-    X,
-    Plus,
-    Gauge
+    Send, Sparkles, Layout, Database, CheckCircle2, 
+    AlertCircle, Search, History, Plus, X, ArrowRight,
+    ZoomIn, ZoomOut, Maximize2, Layers, Briefcase, 
+    Users, Target, Zap, TrendingUp, Shield, HelpCircle,
+    ChevronRight, ChevronDown, ListChecks, FileText, Loader2,
+    GripVertical, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
-import { GoogleGenAI } from "@google/genai";
-import { User, ChatMessage, Idea } from '../../types';
+import { User, Idea, ChatMessage, IdeaPhaseId, IdeaNode, IdeaEdge, IdeaCard, IdeaTask, IdeaEvidence } from '../../types';
 import { db } from '../../services/db';
-import { useLanguage } from '../../contexts/LanguageContext';
+import { GoogleGenAI } from "@google/genai";
 
-interface IdeaLabProps {
-    user: User;
-    isSidebarOpen?: boolean;
-    toggleSidebar?: () => void;
-}
+// --- SYSTEM PROMPT ---
+const COFOUNDER_SYSTEM_PROMPT = `
+DU ÄR: “AI Cofounder” i en krypterad produktutvecklingsworkspace.
+GUIDA ANVÄNDAREN genom 9 faser: 
+1) Identify Problem 2) Problem Scale 3) Problem Impact 4) Current Solutions 
+5) Audience & Persona 6) Define Product 7) Verify Demand 8) Business Strategy 9) Build MVP.
 
-// Enhanced Node Structure with World Coordinates
-interface MindMapNode {
-    id: string;
-    title: string;
-    content: string; 
-    x: number; // World coordinate X
-    y: number; // World coordinate Y
-    type: 'root' | 'category' | 'idea';
-    category?: 'problem' | 'solution' | 'market' | 'revenue';
-    parentId?: string;
-}
+VAR SKEPTISK, praktisk och evidensdriven. 
+Prioritera att de-risk:a: vad måste vara sant för att detta ska fungera?
 
-interface CameraState {
-    x: number;
-    y: number;
-    zoom: number;
-}
+OBLIGATORISK OUTPUT:
+A) Kort, konkret chatt-svar.
+B) En JSON PATCH i ett kodblock enligt schema "COFOUNDER_PATCH".
+`;
 
-// --- Rich Text Renderer for Beautiful AI Responses ---
-const RichTextRenderer: React.FC<{ text: string }> = ({ text }) => {
-    if (!text) return null;
+const PHASES = [
+    { id: '1', name: 'Problem', icon: <Target size={14}/> },
+    { id: '2', name: 'Scale', icon: <Search size={14}/> },
+    { id: '3', name: 'Impact', icon: <AlertCircle size={14}/> },
+    { id: '4', name: 'Solutions', icon: <Layers size={14}/> },
+    { id: '5', name: 'Persona', icon: <Users size={14}/> },
+    { id: '6', name: 'Product', icon: <Zap size={14}/> },
+    { id: '7', name: 'Demand', icon: <TrendingUp size={14}/> },
+    { id: '8', name: 'Strategy', icon: <Briefcase size={14}/> },
+    { id: '9', name: 'MVP', icon: <Layout size={14}/> },
+];
 
-    // Remove the META and NODE tags if they exist in the visible text
-    let cleanText = text.replace(/<META>.*?<\/META>/s, '');
-    cleanText = cleanText.replace(/<NODE>.*?<\/NODE>/gs, '').trim();
-
-    // Split by double newlines to handle paragraphs/blocks
-    const blocks = cleanText.split(/\n\n+/);
-
-    return (
-        <div className="space-y-4 text-gray-800 dark:text-gray-200">
-            {blocks.map((block, index) => {
-                // 1. Headers (## Title)
-                if (block.startsWith('##')) {
-                    return (
-                        <h3 key={index} className="font-serif-display text-xl md:text-2xl font-bold text-gray-900 dark:text-white mt-6 mb-2 leading-tight">
-                            {block.replace(/^##\s*/, '')}
-                        </h3>
-                    );
-                }
-                // 2. Headers (### Title)
-                if (block.startsWith('###')) {
-                    return (
-                        <h4 key={index} className="font-serif-display text-lg font-semibold text-gray-900 dark:text-gray-100 mt-4 mb-1">
-                            {block.replace(/^###\s*/, '')}
-                        </h4>
-                    );
-                }
-                // 3. Bullet Lists (- Item or * Item)
-                if (block.match(/^[\-*]\s/m)) {
-                    const items = block.split(/\n/).filter(line => line.trim().length > 0);
-                    return (
-                        <ul key={index} className="space-y-2 my-3 pl-1">
-                            {items.map((item, i) => (
-                                <li key={i} className="flex items-start gap-3 text-sm leading-relaxed">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white mt-2 shrink-0 opacity-60"></div>
-                                    <span dangerouslySetInnerHTML={{ 
-                                        __html: item.replace(/^[\-*]\s*/, '').replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-black dark:text-white">$1</strong>') 
-                                    }} />
-                                </li>
-                            ))}
-                        </ul>
-                    );
-                }
-                // 4. Standard Paragraphs with Bold support
-                return (
-                    <p key={index} className="text-sm leading-relaxed text-gray-700 dark:text-gray-300" dangerouslySetInnerHTML={{ 
-                        __html: block.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-gray-900 dark:text-white">$1</strong>') 
-                    }} />
-                );
-            })}
-        </div>
-    );
-};
-
-const IdeaLab: React.FC<IdeaLabProps> = ({ user, isSidebarOpen = true, toggleSidebar }) => {
-    const { t } = useLanguage();
-    const [mode, setMode] = useState<'input' | 'workspace'>('input');
-    const [ideaText, setIdeaText] = useState('');
-    const [isAnalyzing, setIsAnalyzing] = useState(false);
-    
-    // Workspace State
-    const [currentIdeaId, setCurrentIdeaId] = useState<string | null>(null);
-    const [currentChatSessionId, setCurrentChatSessionId] = useState<string | null>(null);
+const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: () => void }> = ({ user, isSidebarOpen, toggleSidebar }) => {
+    // --- UI State ---
+    const [view, setView] = useState<'list' | 'workspace'>('list');
+    const [activeIdea, setActiveIdea] = useState<Idea | null>(null);
+    const [ideas, setIdeas] = useState<Idea[]>([]);
+    const [activeTab, setActiveTab] = useState<'canvas' | 'cards' | 'tasks' | 'evidence'>('canvas');
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [chatInput, setChatInput] = useState('');
-    const [nodes, setNodes] = useState<MindMapNode[]>([]);
-    const [isTyping, setIsTyping] = useState(false);
+    const [isThinking, setIsThinking] = useState(false);
     
-    // Search Visualization State
-    const [isSearching, setIsSearching] = useState(false);
-    const [currentSearchQuery, setCurrentSearchQuery] = useState('');
-    const [activeSources, setActiveSources] = useState<string[]>([]);
-    
-    // History
-    const [showHistory, setShowHistory] = useState(false);
-    const [savedIdeas, setSavedIdeas] = useState<Idea[]>([]);
-    
-    // Deep Dive Context State
-    const [contextScore, setContextScore] = useState(10); // 0-100
-    
-    // AI Chat Session
-    const [chatSession, setChatSession] = useState<any | null>(null);
-    const [analysisPhase, setAnalysisPhase] = useState<string>('Fas 1: Djupintervju');
-
-    // Canvas State
-    const [camera, setCamera] = useState<CameraState>({ x: 0, y: 0, zoom: 1 });
-    const [isDragging, setIsDragging] = useState<{ type: 'canvas' | 'node', id?: string, startX: number, startY: number, initialCam?: CameraState, initialNode?: {x: number, y: number} } | null>(null);
-
-    const chatEndRef = useRef<HTMLDivElement>(null);
+    // --- Resizable States ---
+    const [chatWidth, setChatWidth] = useState(35); // Procent
+    const [isResizing, setIsResizing] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
-    const nodesRef = useRef(nodes); 
+    
+    const chatEndRef = useRef<HTMLDivElement>(null);
+    const [canvasZoom, setCanvasZoom] = useState(1);
 
-    // Sync nodes state to ref
+    // --- Resizing Logic ---
+    const startResizing = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        setIsResizing(true);
+    }, []);
+
+    const stopResizing = useCallback(() => {
+        setIsResizing(false);
+    }, []);
+
+    const resize = useCallback((e: MouseEvent) => {
+        if (!isResizing || !containerRef.current) return;
+        
+        const containerRect = containerRef.current.getBoundingClientRect();
+        const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+        
+        // Begränsningar: Chatten får vara mellan 20% och 60%
+        if (newWidth > 20 && newWidth < 60) {
+            setChatWidth(newWidth);
+        }
+    }, [isResizing]);
+
     useEffect(() => {
-        nodesRef.current = nodes;
-        const timer = setTimeout(() => {
-            if (currentIdeaId && nodes.length > 0) {
-                db.updateIdeaState(user.id, currentIdeaId, { nodes });
-            }
-        }, 2000);
-        return () => clearTimeout(timer);
-    }, [nodes, currentIdeaId, user.id]);
-
-    useEffect(() => {
-        const loadData = async () => {
-            const data = await db.getUserData(user.id);
-            if (data.ideas) setSavedIdeas(data.ideas);
-        };
-        loadData();
-    }, [user.id, mode]); 
-
-    // Scroll chat to bottom
-    useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages, isTyping, isSearching]);
-
-    const generateCoreConcept = (text: string): { title: string, tagline: string } => {
-        const words = text.split(' ');
-        let title = '';
-        if (text.length < 30) {
-            title = text;
+        if (isResizing) {
+            window.addEventListener('mousemove', resize);
+            window.addEventListener('mouseup', stopResizing);
+            document.body.style.cursor = 'col-resize';
         } else {
-            const ignore = ['i', 'want', 'to', 'build', 'a', 'an', 'the', 'for', 'jag', 'vill', 'bygga', 'en', 'ett', 'att'];
-            const significant = words.filter(w => !ignore.includes(w.toLowerCase()));
-            title = significant.slice(0, 3).join(' ');
-            title = title.charAt(0).toUpperCase() + title.slice(1);
+            window.removeEventListener('mousemove', resize);
+            window.removeEventListener('mouseup', stopResizing);
+            document.body.style.cursor = 'default';
         }
-        return {
-            title: title.length > 25 ? title.substring(0, 25) + '...' : title,
-            tagline: text.length > 60 ? text.substring(0, 60) + '...' : text
+        return () => {
+            window.removeEventListener('mousemove', resize);
+            window.removeEventListener('mouseup', stopResizing);
         };
+    }, [isResizing, resize, stopResizing]);
+
+    // --- Load Data ---
+    useEffect(() => { loadIdeas(); }, [user.id]);
+    useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
+    const loadIdeas = async () => {
+        const data = await db.getUserData(user.id);
+        setIdeas(data.ideas || []);
     };
 
-    const addMessage = (role: 'user' | 'ai', text: string, sources?: {title: string, uri: string}[]) => {
-        const newMsg: ChatMessage = {
-            id: Date.now().toString() + Math.random(),
-            role,
-            text,
-            timestamp: Date.now(),
-            sources,
-            sessionId: currentChatSessionId || undefined
+    const handleCreateNew = async () => {
+        const newIdea: Idea = {
+            id: Date.now().toString(),
+            title: 'Ny Idé',
+            description: '',
+            score: 10,
+            currentPhase: '1',
+            dateCreated: new Date().toISOString(),
+            chatSessionId: 'sess-' + Date.now(),
+            snapshot: { one_pager: '', problem_statement: '', icp: '', persona_summary: '', solution_hypothesis: '', uvp: '', pricing_hypothesis: '', mvp_definition: '', open_questions: [] },
+            nodes: [{ id: 'root', node_type: 'problem', label: 'Din Idé', parent_id: null, details: { text: 'Startpunkt för din resa', status: 'approved' }, x: 0, y: 0 }],
+            edges: [],
+            cards: [],
+            tasks: [],
+            evidence: [],
+            privacy_mode: true
         };
-        setMessages(prev => [...prev, newMsg]);
-    };
-
-    const initializeFullMindMap = () => {
-        // Only add if they don't exist yet
-        setNodes(prev => {
-            const existingIds = new Set(prev.map(n => n.id));
-            const categoryNodes: MindMapNode[] = [
-                { id: 'cat-1', title: 'Problemet', content: 'Vem har ont?', x: -300, y: -200, type: 'category', category: 'problem', parentId: 'root' },
-                { id: 'cat-2', title: 'Lösningen', content: 'Produkt & MVP', x: 300, y: -200, type: 'category', category: 'solution', parentId: 'root' },
-                { id: 'cat-3', title: 'Marknaden', content: 'Storlek & Konkurrens', x: -300, y: 200, type: 'category', category: 'market', parentId: 'root' },
-                { id: 'cat-4', title: 'Affärsmodell', content: 'Intäkter & Sälj', x: 300, y: 200, type: 'category', category: 'revenue', parentId: 'root' }
-            ];
-            
-            const newNodes = categoryNodes.filter(c => !existingIds.has(c.id));
-            return [...prev, ...newNodes];
-        });
-        
-        // Adjust camera slightly to show breadth
-        setCamera(prev => ({ ...prev, zoom: 0.6 }));
-    };
-
-    const getSystemInstruction = (ideaTitle: string) => `
-        ROLE: You are Aceverse, a world-class Venture Architect and Co-founder.
-        USER: ${user.firstName}.
-        IDEA: "${ideaTitle}".
-
-        GOAL: Guide the user through the 8-Phase Validation Framework to build a viable business.
-        
-        FRAMEWORK PHASES:
-        1. Discovery: Define exact Problem & Target Audience.
-        2. Market: Calculate TAM/SAM/SOM & Trends.
-        3. Competition: Identify Landscape & UVP.
-        4. Persona: Detailed User Avatar.
-        5. MVP: Core Features (Kill your darlings).
-        6. Validation: Proof of willingness to pay.
-        7. Roadmap: Tech & Time.
-        8. GTM: Go-To-Market Strategy.
-
-        BEHAVIOR:
-        - PROACTIVE: Do not just answer. DRIVE the conversation. Always end with a question that moves to the next logical step.
-        - CRITICAL BUT KIND: Challenge assumptions. Ask "Why?".
-        - STRUCTURED: Use **Bold** for key terms. Use bullet points.
-        - MAPPING AGENT: You MUST update the mind map when you establish a fact.
-
-        **CRITICAL INSTRUCTION FOR MIND MAP UPDATES:**
-        When you identify a key insight (a specific problem, a feature, a competitor, a revenue stream, or a target segment), you MUST output a hidden XML tag at the end of your response.
-        
-        Format:
-        <NODE>{"title": "Short Title (max 4 words)", "content": "Summary of the insight...", "category": "problem" | "solution" | "market" | "revenue"}</NODE>
-        
-        Example:
-        "...great point about subscription models.
-        <NODE>{"title": "Sub-model", "content": "99kr/month recurring revenue", "category": "revenue"}</NODE>"
-
-        You can output multiple <NODE> tags if multiple insights are found.
-        
-        ALSO: Update the phase tracker using <META> tag:
-        <META>{"contextScore": 25, "phase": "Fas 2: Marknad", "isReady": true}</META>
-    `;
-
-    const handleLoadIdea = async (idea: Idea) => {
-        setCurrentIdeaId(idea.id);
-        setMode('workspace');
-        setShowHistory(false);
-        setIdeaText(idea.title);
-        setCurrentChatSessionId(idea.chatSessionId || null);
-        
-        if (idea.nodes && idea.nodes.length > 0) {
-            setNodes(idea.nodes);
-        } else {
-            const { title, tagline } = generateCoreConcept(idea.title);
-            setNodes([{ id: 'root', title, content: tagline, x: 0, y: 0, type: 'root' }]);
-            initializeFullMindMap();
-        }
-
-        let ideaMessages: ChatMessage[] = [];
-        if (idea.chatSessionId) {
-            const data = await db.getUserData(user.id);
-            ideaMessages = data.chatHistory
-                .filter(m => m.sessionId === idea.chatSessionId)
-                .sort((a, b) => a.timestamp - b.timestamp);
-        }
-        setMessages(ideaMessages);
-
-        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-        
-        // Use sanitized history for the model
-        const history = ideaMessages.map(m => ({
-            role: m.role === 'user' ? 'user' : 'model',
-            parts: [{ text: m.text }]
-        }));
-
-        const chat = ai.chats.create({
-            model: 'gemini-2.5-flash',
-            config: { 
-                tools: [{googleSearch: {}}],
-                systemInstruction: getSystemInstruction(idea.title),
-            },
-            history: history
-        });
-        setChatSession(chat);
-
-        if (ideaMessages.length === 0) {
-             addMessage('ai', `Välkommen tillbaka till "${idea.title}". Jag har laddat din karta. Vad vill du fokusera på idag? Ska vi titta på marknaden eller putsa på lösningen?`);
-        }
-    };
-
-    const handleStartSession = async () => {
-        if (!ideaText.trim()) return;
-        setIsAnalyzing(true);
-        
-        try {
-            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const sessionId = Date.now().toString(); 
-            setCurrentChatSessionId(sessionId);
-            
-            const chat = ai.chats.create({
-                model: 'gemini-2.5-flash',
-                config: { 
-                    tools: [{googleSearch: {}}],
-                    systemInstruction: getSystemInstruction(ideaText),
-                },
-            });
-
-            setChatSession(chat);
-
-            const response = await chat.sendMessage({ 
-                message: "Starta Fas 1. Analysera min idé och börja ställa frågor för att förtydliga problemet. Skapa noder för det vi vet hittills." 
-            });
-
-            setMode('workspace');
-            if (isSidebarOpen && toggleSidebar) toggleSidebar();
-
-            const { title, tagline } = generateCoreConcept(ideaText);
-            
-            // FIX: Removed 'score: 0' as it is not allowed in Omit<Idea, 'id' | 'dateCreated' | 'score'>
-            const newIdea = await db.addIdea(user.id, {
-                title: title,
-                description: ideaText,
-                marketSize: '',
-                competition: '',
-                chatSessionId: sessionId
-            });
-            setCurrentIdeaId(newIdea.id);
-            setSavedIdeas(prev => [newIdea, ...prev]);
-
-            const initialNodes: MindMapNode[] = [
-                { id: 'root', title: title, content: tagline, x: 0, y: 0, type: 'root' }
-            ];
-            setNodes(initialNodes);
-            initializeFullMindMap();
-            setCamera({ x: window.innerWidth * 0.3, y: window.innerHeight * 0.4, zoom: 0.8 });
-
-            const text = response.text || "";
-            
-            // Process the response immediately for nodes
-            processAIResponse(text);
-
-            const grounding = response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({
-                title: c.web?.title || 'Källa',
-                uri: c.web?.uri || '#'
-            })) || [];
-
-            addMessage('ai', text, grounding);
-            
-            await db.addMessage(user.id, {
-                role: 'ai',
-                text: text,
-                sessionId: sessionId
-            });
-
-        } catch (error) {
-            console.error(error);
-            alert("Kunde inte starta sessionen.");
-        } finally {
-            setIsAnalyzing(false);
-        }
+        await db.addIdea(user.id, newIdea);
+        setIdeas([newIdea, ...ideas]);
+        setActiveIdea(newIdea);
+        setView('workspace');
+        setMessages([{ id: 'init', role: 'ai', text: "Välkommen till din Workspace. 👋 Jag är din AI Cofounder. För att börja: vad är det för problem du har identifierat som du vill lösa?", timestamp: Date.now() }]);
     };
 
     const handleSendMessage = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!chatInput.trim() || !chatSession) return;
+        if (!chatInput.trim() || isThinking || !activeIdea) return;
 
-        const userText = chatInput;
-        addMessage('user', userText);
+        const text = chatInput;
         setChatInput('');
-        
-        if (currentChatSessionId) {
-            await db.addMessage(user.id, { role: 'user', text: userText, sessionId: currentChatSessionId });
-        }
-        
-        setIsTyping(true);
-        setIsSearching(true);
-        setCurrentSearchQuery('Analyserar begäran...'); 
-        setActiveSources([]);
+        const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text, timestamp: Date.now() };
+        setMessages(prev => [...prev, userMsg]);
+        setIsThinking(true);
 
         try {
-            const tempAiMsgId = 'temp-' + Date.now();
-            setMessages(prev => [...prev, {
-                id: tempAiMsgId,
-                role: 'ai',
-                text: '',
-                timestamp: Date.now()
-            }]);
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const contextPack = {
+                project: { phase: activeIdea.currentPhase, privacy: activeIdea.privacy_mode },
+                snapshot: activeIdea.snapshot || {},
+                artifactsCount: activeIdea.cards?.length || 0,
+                canvasNodes: (activeIdea.nodes || []).map(n => ({ id: n.id, label: n.label, type: n.node_type })),
+                tasks: (activeIdea.tasks || []).filter(t => !t.completed)
+            };
 
-            const result = await chatSession.sendMessageStream({ message: userText });
+            const chat = ai.chats.create({
+                model: 'gemini-3-flash-preview',
+                config: { 
+                    systemInstruction: COFOUNDER_SYSTEM_PROMPT,
+                    temperature: 0.7 
+                },
+                history: (messages || []).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }))
+            });
+
+            const result = await chat.sendMessage({ message: `CONTEXT_PACK: ${JSON.stringify(contextPack)}\n\nUSER_INPUT: ${text}` });
+            const responseText = result.text || "";
+
+            const patchMatch = responseText.match(/```json\s*(COFOUNDER_PATCH[\s\S]*?|[\s\S]*?)\s*```/);
+            let cleanResponse = responseText.replace(/```json[\s\S]*?```/g, '').trim();
             
-            let fullResponseText = '';
-            let collectedSources: {title: string, uri: string}[] = [];
-
-            for await (const chunk of result) {
-                const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
-                if (groundingChunks && groundingChunks.length > 0) {
-                    const newSources = groundingChunks
-                        .filter((c: any) => c.web?.uri)
-                        .map((c: any) => ({
-                            title: c.web?.title || new URL(c.web.uri).hostname,
-                            uri: c.web?.uri
-                        }));
-                    
-                    if (newSources.length > 0) {
-                        collectedSources = [...collectedSources, ...newSources];
-                        setCurrentSearchQuery(`Hämtar data från ${newSources[0].title}...`);
-                        setActiveSources(prev => {
-                            const existing = new Set(prev);
-                            newSources.forEach(s => existing.add(s.title));
-                            return Array.from(existing);
-                        });
-                    }
-                }
-
-                const chunkText = chunk.text;
-                if (chunkText) {
-                    if (fullResponseText.length > 20) setIsSearching(false);
-                    fullResponseText += chunkText;
-                    
-                    setMessages(prev => prev.map(msg => 
-                        msg.id === tempAiMsgId 
-                            ? { ...msg, text: fullResponseText, sources: collectedSources }
-                            : msg
-                    ));
-                }
+            if (patchMatch) {
+                try {
+                    const patchStr = patchMatch[1].replace('COFOUNDER_PATCH', '').trim();
+                    const patch = JSON.parse(patchStr);
+                    applyPatch(patch);
+                } catch (err) { console.error("Patch parse failed", err); }
             }
 
-            if (currentChatSessionId) {
-                await db.addMessage(user.id, { role: 'ai', text: fullResponseText, sessionId: currentChatSessionId });
-            }
+            setMessages(prev => [...prev, { id: 'ai-' + Date.now(), role: 'ai', text: cleanResponse, timestamp: Date.now() }]);
 
-            // Post-process the full response to extract nodes and meta
-            processAIResponse(fullResponseText);
-
-        } catch (error) {
-            console.error("Chat Error", error);
-            setMessages(prev => prev.map(msg => 
-                msg.id.startsWith('temp-') 
-                ? { ...msg, text: "Jag stötte på ett problem. Försök igen." } 
-                : msg
-            ));
+        } catch (e) {
+            console.error(e);
         } finally {
-            setIsTyping(false);
-            setIsSearching(false);
-            setCurrentSearchQuery('');
+            setIsThinking(false);
         }
     };
 
-    const processAIResponse = (text: string) => {
-        // 1. Extract META Data
-        const metaRegex = /<META>(.*?)<\/META>/s;
-        const metaMatch = text.match(metaRegex);
-        if (metaMatch && metaMatch[1]) {
-            try {
-                const meta = JSON.parse(metaMatch[1]);
-                setContextScore(meta.contextScore || contextScore);
-                if (meta.phase) setAnalysisPhase(meta.phase);
-                
-                if (meta.isReady) {
-                    initializeFullMindMap(); // Ensure structure exists
+    const applyPatch = (patch: any) => {
+        if (!activeIdea) return;
+        let updated = { ...activeIdea };
+        if (patch.snapshot_patch) updated.snapshot = { ...(updated.snapshot || {}), ...patch.snapshot_patch };
+        if (patch.ui?.right_panel?.active_tab) setActiveTab(patch.ui.right_panel.active_tab);
+        if (patch.ui?.right_panel?.cards) updated.cards = [...patch.ui.right_panel.cards];
+        if (patch.canvas_ops) {
+            const currentNodes = [...(updated.nodes || [])];
+            patch.canvas_ops.forEach((op: any) => {
+                if (op.op === 'upsert_node') {
+                    const existingIdx = currentNodes.findIndex(n => n.id === op.id);
+                    if (existingIdx >= 0) currentNodes[existingIdx] = { ...currentNodes[existingIdx], ...op };
+                    else currentNodes.push({ ...op, x: Math.random() * 200 - 100, y: Math.random() * 200 - 100 });
                 }
-            } catch (e) { console.error("Meta parse error", e); }
+            });
+            updated.nodes = currentNodes;
         }
-
-        // 2. Extract NODE Data (Mind Map Updates)
-        const nodeRegex = /<NODE>(.*?)<\/NODE>/gs;
-        let nodeMatch;
-        while ((nodeMatch = nodeRegex.exec(text)) !== null) {
-            try {
-                const nodeData = JSON.parse(nodeMatch[1]);
-                addNode(nodeData.title, nodeData.content, nodeData.category);
-            } catch(e) {
-                console.error("Node parse error", e);
-            }
+        if (patch.evidence_add) {
+            const currentEvidence = [...(updated.evidence || [])];
+            patch.evidence_add.forEach((e: any) => {
+                currentEvidence.push({ id: 'ev-' + Date.now() + Math.random(), ...e });
+            });
+            updated.evidence = currentEvidence;
         }
+        setActiveIdea(updated);
+        db.updateIdeaState(user.id, updated.id, updated);
     };
 
-    const addNode = (title: string, content: string, category: 'problem' | 'solution' | 'market' | 'revenue') => {
-        // Ensure category parents exist
-        initializeFullMindMap(); 
-
-        const targetParentId = category === 'problem' ? 'cat-1' : category === 'solution' ? 'cat-2' : category === 'market' ? 'cat-3' : 'cat-4';
-        
-        // Wait for state update if nodes aren't populated yet, or find from ref
-        let parent = nodesRef.current.find(n => n.id === targetParentId);
-        
-        // Fallback parent coordinates if not found yet (race condition safety)
-        const fallbackCoords = {
-            'problem': { x: -300, y: -200 },
-            'solution': { x: 300, y: -200 },
-            'market': { x: -300, y: 200 },
-            'revenue': { x: 300, y: 200 }
-        };
-
-        const parentX = parent ? parent.x : fallbackCoords[category].x;
-        const parentY = parent ? parent.y : fallbackCoords[category].y;
-
-        // Calculate position to avoid overlap
-        const siblings = nodesRef.current.filter(n => n.parentId === targetParentId);
-        const count = siblings.length;
-        
-        // Spiral / Fan out logic
-        const baseAngle = category === 'problem' ? Math.PI * 1.25 : 
-                          category === 'solution' ? Math.PI * 1.75 : 
-                          category === 'market' ? Math.PI * 0.75 : 
-                          Math.PI * 0.25;
-        
-        const spread = 0.5; // Radians spread
-        const offset = (Math.random() - 0.5) * spread; 
-        const distance = 180 + (count * 20); // Push further out as more nodes are added
-        
-        const newNode: MindMapNode = {
-            id: Date.now().toString() + Math.random(),
-            title,
-            content,
-            x: parentX + Math.cos(baseAngle + offset) * distance,
-            y: parentY + Math.sin(baseAngle + offset) * distance,
-            type: 'idea',
-            parentId: targetParentId,
-            category
-        };
-
-        // Duplicate check
-        if (!nodesRef.current.some(n => n.title === title || n.content === content)) {
-            setNodes(prev => [...prev, newNode]);
-        }
-    };
-
-    const handleWheel = (e: React.WheelEvent) => {
-        const zoomSensitivity = 0.001;
-        const newZoom = Math.min(Math.max(0.2, camera.zoom - e.deltaY * zoomSensitivity), 3);
-        setCamera(prev => ({ ...prev, zoom: newZoom }));
-    };
-
-    const handlePointerDown = (e: React.PointerEvent, nodeId?: string) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (nodeId) {
-            const node = nodes.find(n => n.id === nodeId);
-            if (node) {
-                setIsDragging({ type: 'node', id: nodeId, startX: e.clientX, startY: e.clientY, initialNode: { x: node.x, y: node.y } });
-            }
-        } else {
-            setIsDragging({ type: 'canvas', startX: e.clientX, startY: e.clientY, initialCam: { ...camera } });
-        }
-    };
-
-    const handlePointerMove = (e: React.PointerEvent) => {
-        if (!isDragging) return;
-        e.preventDefault();
-        if (isDragging.type === 'canvas' && isDragging.initialCam) {
-            const dx = e.clientX - isDragging.startX;
-            const dy = e.clientY - isDragging.startY;
-            setCamera({ ...camera, x: isDragging.initialCam.x + dx, y: isDragging.initialCam.y + dy });
-        } else if (isDragging.type === 'node' && isDragging.initialNode && isDragging.id) {
-            const dx = (e.clientX - isDragging.startX) / camera.zoom;
-            const dy = (e.clientY - isDragging.startY) / camera.zoom;
-            setNodes(prev => prev.map(n => n.id === isDragging.id ? { ...n, x: isDragging.initialNode!.x + dx, y: isDragging.initialNode!.y + dy } : n));
-        }
-    };
-
-    const handlePointerUp = () => setIsDragging(null);
-    const updateZoom = (delta: number) => setCamera(prev => ({ ...prev, zoom: Math.min(Math.max(0.2, prev.zoom + delta), 3) }));
-
-    // --- Sub-component: MindMap Visualizer ---
-    const MindMapVisualizer = () => {
+    if (view === 'list') {
         return (
-            <div 
-                className={`w-full h-full bg-slate-50 dark:bg-gray-950 relative overflow-hidden select-none transition-colors ${isDragging?.type === 'canvas' ? 'cursor-grabbing' : 'cursor-grab'}`}
-                ref={containerRef}
-                onWheel={handleWheel}
-                onPointerDown={(e) => handlePointerDown(e)}
-                onPointerMove={handlePointerMove}
-                onPointerUp={handlePointerUp}
-                onPointerLeave={handlePointerUp}
-            >
-                <div 
-                    className="absolute left-0 top-0 w-full h-full origin-top-left transition-transform duration-75 ease-linear will-change-transform"
-                    style={{ transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}
-                >
-                    <div 
-                        className="absolute -inset-[5000px] opacity-[0.03] dark:opacity-[0.05] pointer-events-none" 
-                        style={{ backgroundImage: 'linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)', backgroundSize: '40px 40px' }}
-                    ></div>
-                    
-                    <svg className="absolute -inset-[5000px] w-[10000px] h-[10000px] pointer-events-none overflow-visible">
-                         <defs>
-                            <marker id="arrow" markerWidth="10" markerHeight="10" refX="20" refY="3" orient="auto" markerUnits="strokeWidth">
-                                <path d="M0,0 L0,6 L9,3 z" fill="#cbd5e1" />
-                            </marker>
-                        </defs>
-                        {nodes.map(node => {
-                            if (!node.parentId) return null;
-                            const parent = nodes.find(n => n.id === node.parentId);
-                            if (!parent) return null;
-                            const off = 5000;
-                            return (
-                                <path 
-                                    key={`line-${node.id}`}
-                                    d={`M ${parent.x + off} ${parent.y + off} Q ${parent.x + off} ${node.y + off} ${node.x + off} ${node.y + off}`}
-                                    fill="none"
-                                    stroke={node.type === 'idea' ? "#94a3b8" : "#cbd5e1"} 
-                                    strokeWidth={node.type === 'idea' ? "1.5" : "2"}
-                                    strokeDasharray={node.type === 'idea' ? "5,5" : "0"} 
-                                    className="transition-all duration-500 opacity-60 dark:stroke-gray-700"
-                                />
-                            );
-                        })}
-                    </svg>
-
-                    {nodes.map(node => (
-                        <div 
-                            key={node.id}
-                            onPointerDown={(e) => handlePointerDown(e, node.id)}
-                            className={`absolute transform -translate-x-1/2 -translate-y-1/2 transition-shadow duration-300 cursor-grab active:cursor-grabbing
-                                ${node.type === 'root' ? 'z-30' : node.type === 'category' ? 'z-20' : 'z-10'}
-                            `}
-                            style={{ left: node.x, top: node.y }}
-                        >
-                            {node.type === 'root' && (
-                                <div className="bg-black dark:bg-white text-white dark:text-black p-6 rounded-2xl shadow-2xl flex flex-col items-center justify-center border-4 border-white/50 dark:border-black/50 ring-1 ring-gray-900/10 dark:ring-white/10 w-[280px] text-center group">
-                                    <Lightbulb size={32} className="text-yellow-400 fill-yellow-400 mb-2" />
-                                    <span className="text-2xl font-serif-display tracking-tight leading-none mb-2">{node.title}</span>
-                                    <span className="text-xs text-gray-400 dark:text-gray-600 font-medium leading-normal opacity-80">{node.content}</span>
+            <div className="p-8 max-w-6xl mx-auto animate-fadeIn">
+                <div className="flex justify-between items-end mb-10">
+                    <div>
+                        <h1 className="font-serif-display text-4xl mb-2 text-gray-900 dark:text-white">Idélabbet</h1>
+                        <p className="text-gray-500 dark:text-gray-400">Dina strukturerade produktresor.</p>
+                    </div>
+                    <button onClick={handleCreateNew} className="bg-black dark:bg-white text-white dark:text-black px-6 py-3 rounded-full font-bold flex items-center gap-2 hover:opacity-90 transition-all shadow-lg">
+                        <Plus size={20} /> Starta ny resa
+                    </button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {ideas.map(idea => (
+                        <div key={idea.id} onClick={() => { setActiveIdea(idea); setView('workspace'); }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group border-b-4 border-b-black">
+                            <div className="flex justify-between items-start mb-6">
+                                <div className="w-10 h-10 bg-[#F3F0E8] rounded-xl flex items-center justify-center text-black"><Database size={20}/></div>
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Fas {idea.currentPhase}/9</div>
+                            </div>
+                            <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2">{idea.title}</h3>
+                            <p className="text-sm text-gray-500 line-clamp-2 mb-6">{idea.snapshot?.problem_statement || 'Ingen problembeskrivning än.'}</p>
+                            <div className="flex items-center justify-between mt-auto pt-4 border-t border-gray-100 dark:border-gray-800">
+                                <span className="text-[10px] font-bold text-gray-400 uppercase">{new Date(idea.dateCreated).toLocaleDateString()}</span>
+                                <div className="flex -space-x-2">
+                                    <div className="w-6 h-6 rounded-full bg-blue-100 border-2 border-white dark:border-gray-900"></div>
+                                    <div className="w-6 h-6 rounded-full bg-purple-100 border-2 border-white dark:border-gray-900"></div>
                                 </div>
-                            )}
-
-                            {node.type === 'category' && (
-                                <div className={`
-                                    w-48 p-4 rounded-xl shadow-lg border bg-white dark:bg-gray-900 flex flex-col items-center text-center backdrop-blur-sm transition-transform hover:scale-105 group
-                                    ${node.category === 'problem' ? 'border-red-100 dark:border-red-900 shadow-red-100/50 dark:shadow-red-900/20' : ''}
-                                    ${node.category === 'solution' ? 'border-blue-100 dark:border-blue-900 shadow-blue-100/50 dark:shadow-blue-900/20' : ''}
-                                    ${node.category === 'market' ? 'border-purple-100 dark:border-purple-900 shadow-purple-100/50 dark:shadow-purple-900/20' : ''}
-                                    ${node.category === 'revenue' ? 'border-emerald-100 dark:border-emerald-900 shadow-emerald-100/50 dark:shadow-emerald-900/20' : ''}
-                                `}>
-                                    <div className={`p-2 rounded-full mb-2 ${
-                                        node.category === 'problem' ? 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400' :
-                                        node.category === 'solution' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' :
-                                        node.category === 'market' ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400' :
-                                        'bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
-                                    }`}>
-                                        {node.category === 'problem' && <Target size={20} />}
-                                        {node.category === 'solution' && <Zap size={20} />}
-                                        {node.category === 'market' && <Users size={20} />}
-                                        {node.category === 'revenue' && <DollarSign size={20} />}
-                                    </div>
-                                    <span className="font-bold text-gray-900 dark:text-gray-100 text-sm">{node.title}</span>
-                                </div>
-                            )}
-
-                            {node.type === 'idea' && (
-                                <div className={`
-                                    w-64 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700 transition-all hover:shadow-xl hover:-translate-y-1 overflow-hidden group/card
-                                    ${node.category === 'problem' ? 'border-t-4 border-t-red-400 border-gray-100 dark:border-gray-700' : ''}
-                                    ${node.category === 'solution' ? 'border-t-4 border-t-blue-400 border-gray-100 dark:border-gray-700' : ''}
-                                    ${node.category === 'market' ? 'border-t-4 border-t-purple-400 border-gray-100 dark:border-gray-700' : ''}
-                                    ${node.category === 'revenue' ? 'border-t-4 border-t-emerald-400 border-gray-100 dark:border-gray-700' : ''}
-                                `}>
-                                    <div className="p-4">
-                                        <div className="flex justify-between items-start mb-2">
-                                            <h4 className="font-bold text-gray-900 dark:text-white text-base leading-tight">{node.title}</h4>
-                                            {/* Simulate icon based on content if it's auto-generated research */}
-                                            {node.title.includes('Market') && <BarChart3 size={16} className="text-gray-400" />}
-                                            {node.title.includes('Competitor') && <Search size={16} className="text-gray-400" />}
-                                        </div>
-                                        <div className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed max-h-32 overflow-hidden">
-                                            {node.content}
-                                        </div>
-                                    </div>
-                                    <div className="px-3 py-2 bg-gray-50 dark:bg-gray-700 border-t border-gray-50 dark:border-gray-600 flex justify-between items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
-                                        <span className="text-[10px] uppercase font-bold text-gray-400 dark:text-gray-300">{node.category}</span>
-                                        <CheckCircle2 size={14} className="text-green-500" />
-                                    </div>
-                                </div>
-                            )}
+                            </div>
                         </div>
                     ))}
-                </div>
-
-                <div className="absolute bottom-6 left-6 flex gap-2 z-50 pointer-events-auto">
-                    <button onClick={() => updateZoom(0.1)} className="bg-white dark:bg-gray-900 p-2.5 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-black dark:hover:text-white transition-colors"><ZoomIn size={18} /></button>
-                    <button onClick={() => updateZoom(-0.1)} className="bg-white dark:bg-gray-900 p-2.5 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition-colors"><ZoomOut size={18} /></button>
-                    <div className="bg-white dark:bg-gray-900 px-3 py-2.5 rounded-lg shadow-md border border-gray-100 dark:border-gray-700 text-xs font-mono text-gray-400">
-                        {Math.round(camera.zoom * 100)}%
-                    </div>
                 </div>
             </div>
         );
-    };
-
-    // --- Main Render ---
+    }
 
     return (
-        <div className="flex h-[calc(100vh-64px)] w-full overflow-hidden animate-[fadeIn_0.5s_ease-out_forwards] border-t border-gray-200 dark:border-gray-800 relative bg-white dark:bg-black transition-colors">
-            
-            {/* History Sidebar Overlay (Slide-in) */}
-            <div className={`absolute top-0 left-0 bottom-0 w-72 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 z-50 transform transition-transform duration-300 shadow-2xl ${showHistory ? 'translate-x-0' : '-translate-x-full'}`}>
-                <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
-                    <h3 className="font-bold text-gray-900 dark:text-white">Mina Projekt</h3>
-                    <button onClick={() => setShowHistory(false)} className="text-gray-500 hover:text-black dark:hover:text-white"><X size={16} /></button>
-                </div>
-                <div className="overflow-y-auto h-full p-2 space-y-1">
+        <div className="h-[calc(100vh-64px)] flex flex-col bg-[#F3F0E8] dark:bg-black transition-colors overflow-hidden animate-fadeIn" ref={containerRef}>
+            {/* Top Navigation - Phase Tracker */}
+            <div className="h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center px-4 justify-between shadow-sm z-30">
+                <div className="flex items-center gap-4">
                     <button 
-                        onClick={() => { setMode('input'); setShowHistory(false); }}
-                        className="w-full text-left p-3 rounded-lg text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/30 dark:text-blue-400 font-medium mb-4 flex items-center gap-2"
+                        onClick={() => toggleSidebar?.()} 
+                        className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500"
+                        title={isSidebarOpen ? "Dölj meny" : "Visa meny"}
                     >
-                        <Plus size={16} /> Ny Idé
+                        {isSidebarOpen ? <PanelLeftClose size={18}/> : <PanelLeftOpen size={18}/>}
                     </button>
-                    {savedIdeas.map(idea => (
-                        <button 
-                            key={idea.id}
-                            onClick={() => handleLoadIdea(idea)}
-                            className={`w-full text-left p-3 rounded-lg text-sm transition-colors group ${currentIdeaId === idea.id ? 'bg-black dark:bg-white text-white dark:text-black' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-900 dark:text-gray-300'}`}
-                        >
-                            <div className="font-medium truncate">{idea.title}</div>
-                            <div className={`text-xs flex items-center gap-1 mt-1 ${currentIdeaId === idea.id ? 'text-gray-400 dark:text-gray-600' : 'text-gray-500'}`}>
-                                <Clock size={10} /> {new Date(idea.dateCreated).toLocaleDateString()}
+                    <div className="h-6 w-px bg-gray-200 dark:bg-gray-800 mx-1"></div>
+                    <button onClick={() => setView('list')} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500"><X size={20}/></button>
+                    <h2 className="font-bold text-gray-900 dark:text-white truncate max-w-[150px]">{activeIdea?.title}</h2>
+                </div>
+                <div className="hidden md:flex items-center gap-1">
+                    {PHASES.map((p, idx) => (
+                        <React.Fragment key={p.id}>
+                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-bold transition-all ${activeIdea?.currentPhase === p.id ? 'bg-black text-white' : idx < PHASES.findIndex(f => f.id === activeIdea?.currentPhase) ? 'text-green-600' : 'text-gray-400'}`}>
+                                {idx < PHASES.findIndex(f => f.id === activeIdea?.currentPhase) ? <CheckCircle2 size={12}/> : p.icon}
+                                <span className="hidden lg:inline">{p.name}</span>
                             </div>
-                        </button>
+                            {idx < PHASES.length - 1 && <ChevronRight size={12} className="text-gray-200"/>}
+                        </React.Fragment>
                     ))}
-                    {savedIdeas.length === 0 && (
-                        <div className="p-4 text-center text-gray-400 text-xs italic">Inga sparade idéer än.</div>
-                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded-lg text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                        <Shield size={12} className="text-green-500"/> Privacy
+                    </div>
                 </div>
             </div>
 
-            {/* MAIN CONTENT AREA */}
-            <div className="flex-1 h-full w-full relative">
-                
-                {/* MODE 1: INPUT */}
-                {mode === 'input' && (
-                    <div className="max-w-4xl mx-auto py-12 px-6 h-full flex flex-col items-center justify-center relative">
-                        {/* History Toggle for Input Mode */}
-                        <button 
-                            onClick={() => setShowHistory(!showHistory)}
-                            className="absolute top-6 right-6 p-2 rounded-lg text-gray-400 hover:text-black dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                            title="Historik"
-                        >
-                            <History size={24} />
-                        </button>
-
-                        <div className="text-center mb-12 animate-[slideUp_0.8s_ease-out_forwards] w-full">
-                            <h1 className="font-serif-display text-5xl md:text-6xl mb-6 text-gray-900 dark:text-white">{t('dashboard.ideaLabContent.title')}</h1>
-                            <p className="text-gray-500 dark:text-gray-400 text-lg max-w-2xl mx-auto leading-relaxed">
-                                {t('dashboard.ideaLabContent.desc')}
-                            </p>
-                        </div>
-
-                        <div className="w-full max-w-3xl bg-white dark:bg-gray-900 p-2 rounded-xl border border-gray-200 dark:border-gray-800 shadow-lg animate-[fadeIn_0.8s_ease-out_0.2s_forwards]">
-                            <textarea 
-                                className="w-full h-40 p-6 bg-gray-50 dark:bg-gray-800 border-none rounded-lg focus:ring-0 text-lg resize-none placeholder:text-gray-400 dark:placeholder:text-gray-600 text-gray-900 dark:text-white"
-                                placeholder={t('dashboard.ideaLabContent.placeholder')}
-                                value={ideaText}
-                                onChange={(e) => setIdeaText(e.target.value)}
-                                autoFocus
-                            ></textarea>
-                            
-                            <div className="p-2 flex justify-between items-center bg-gray-50 dark:bg-gray-800 rounded-b-lg border-t border-gray-100 dark:border-gray-700">
-                                    <span className="text-xs text-gray-400 font-medium px-4 flex items-center gap-2">
-                                    <Globe size={12} /> Live Google Search Enabled
-                                    </span>
-                                    <button 
-                                    onClick={handleStartSession}
-                                    disabled={!ideaText || isAnalyzing}
-                                    className={`px-8 py-3 text-white dark:text-black font-medium rounded-lg transition-all flex items-center gap-2 shadow-md ${
-                                        isAnalyzing ? 'bg-gray-800 dark:bg-gray-200 cursor-wait' : 'bg-black dark:bg-white hover:bg-gray-900 dark:hover:bg-gray-200 hover:shadow-lg'
-                                    }`}
-                                >
-                                    {isAnalyzing ? (
-                                        <><Sparkles className="animate-spin" size={18} /> {t('dashboard.ideaLabContent.init')}</>
-                                    ) : (
-                                        <>{t('dashboard.ideaLabContent.start')} <ArrowRight size={18} /></>
-                                    )}
-                                </button>
+            <div className="flex-1 flex overflow-hidden relative">
+                {/* LEFT: CHAT */}
+                <div 
+                    style={{ width: `${chatWidth}%` }}
+                    className="flex flex-col bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 shadow-xl z-20 transition-[width] duration-0"
+                >
+                    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                        {(messages || []).map(msg => (
+                            <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-slideUp`}>
+                                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'ai' ? 'bg-black text-white' : 'bg-gray-100 text-gray-600'}`}>
+                                    {msg.role === 'ai' ? <Sparkles size={16}/> : <Users size={16}/>}
+                                </div>
+                                <div className={`max-w-[90%] px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-black text-white rounded-tr-none' : 'bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-tl-none text-gray-800 dark:text-gray-200'}`}>
+                                    {(msg.text || '').split('\n').map((line, i) => <p key={i} className={line.trim() === '' ? 'h-2' : 'mb-2'}>{line}</p>)}
+                                </div>
                             </div>
-                        </div>
+                        ))}
+                        {isThinking && (
+                            <div className="flex gap-4 items-center animate-pulse">
+                                <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"><Loader2 size={16} className="animate-spin text-gray-400"/></div>
+                                <span className="text-xs text-gray-400 font-medium">Analyse...</span>
+                            </div>
+                        )}
+                        <div ref={chatEndRef} />
                     </div>
-                )}
+                    <div className="p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
+                        <form onSubmit={handleSendMessage} className="relative flex items-center gap-2">
+                            <input 
+                                value={chatInput} 
+                                onChange={e => setChatInput(e.target.value)} 
+                                placeholder="Skriv svar..." 
+                                className="flex-1 h-11 bg-gray-50 dark:bg-gray-800 border-none rounded-xl px-4 text-sm focus:ring-1 ring-black transition-all outline-none"
+                            />
+                            <button type="submit" disabled={!chatInput.trim() || isThinking} className="w-11 h-11 bg-black dark:bg-white text-white dark:text-black rounded-xl flex items-center justify-center shadow hover:opacity-80 disabled:opacity-50 transition-all">
+                                <Send size={18}/>
+                            </button>
+                        </form>
+                    </div>
+                </div>
 
-                {/* MODE 2: WORKSPACE */}
-                {mode === 'workspace' && (
-                    <div className="flex h-full w-full">
-                        {/* Left Side - Mindmap (60%) */}
-                        <div className="w-[60%] h-full relative border-r border-gray-200 dark:border-gray-800 bg-slate-50 dark:bg-gray-950">
-                            
-                            {/* Top Controls */}
-                            <div className="absolute top-6 left-6 z-40 flex gap-2">
-                                <button 
-                                    onClick={() => setMode('input')}
-                                    className="bg-white dark:bg-gray-900 p-2.5 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-black dark:hover:text-white transition-colors"
-                                    title="Tillbaka till Input"
-                                >
-                                    <ArrowRight className="rotate-180" size={20} />
-                                </button>
-                                
-                                <button 
-                                    onClick={() => setShowHistory(!showHistory)}
-                                    className={`p-2.5 rounded-lg shadow-md border transition-colors ${showHistory ? 'bg-black dark:bg-white text-white dark:text-black border-black dark:border-white' : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 text-gray-500 hover:text-black dark:hover:text-white'}`}
-                                    title="Byt Projekt"
-                                >
-                                    <History size={20} />
-                                </button>
+                {/* RESIZE HANDLE */}
+                <div 
+                    onMouseDown={startResizing}
+                    className={`w-1.5 hover:w-2 hover:bg-black/10 dark:hover:bg-white/10 cursor-col-resize z-30 flex items-center justify-center transition-all ${isResizing ? 'bg-black/20 dark:bg-white/20' : ''}`}
+                >
+                    <div className="h-8 w-0.5 bg-gray-300 dark:bg-gray-700 rounded-full"></div>
+                </div>
 
-                                {toggleSidebar && (
-                                    <button 
-                                        onClick={toggleSidebar}
-                                        className="bg-white dark:bg-gray-900 p-2.5 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 text-gray-500 hover:text-black dark:hover:text-white transition-colors"
-                                    >
-                                        {isSidebarOpen ? <Maximize2 size={20} /> : <Minimize2 size={20} />}
-                                    </button>
-                                )}
-                            </div>
+                {/* RIGHT: WORKSPACE */}
+                <div className="flex-1 flex flex-col relative overflow-hidden bg-[#F3F0E8] dark:bg-black/20">
+                    <div className="p-3 flex gap-2 no-print overflow-x-auto">
+                        {[
+                            { id: 'canvas', label: 'Canvas', icon: <Layers size={14}/> },
+                            { id: 'cards', label: 'Cards', icon: <FileText size={14}/> },
+                            { id: 'tasks', label: 'Tasks', icon: <ListChecks size={14}/> },
+                            { id: 'evidence', label: 'Evidence', icon: <Database size={14}/> },
+                        ].map(t => (
+                            <button 
+                                key={t.id} 
+                                onClick={() => setActiveTab(t.id as any)}
+                                className={`px-4 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider flex items-center gap-2 transition-all shrink-0 ${activeTab === t.id ? 'bg-black text-white shadow-lg' : 'bg-white/60 dark:bg-gray-800/60 backdrop-blur hover:bg-white text-gray-500'}`}
+                            >
+                                {t.icon} {t.label}
+                            </button>
+                        ))}
+                    </div>
 
-                            {/* Phase Tracker Overlay */}
-                            <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 bg-white/90 dark:bg-gray-900/90 backdrop-blur border border-gray-200 dark:border-gray-700 rounded-full px-6 py-2 shadow-sm flex items-center gap-4">
-                                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('dashboard.ideaLabContent.currentPhase')}</span>
-                                <div className="flex items-center gap-2">
-                                    <div className="w-2 h-2 rounded-full bg-black dark:bg-white animate-pulse"></div>
-                                    <span className="text-sm font-semibold text-gray-900 dark:text-white">{analysisPhase}</span>
-                                </div>
-                            </div>
-                            <MindMapVisualizer />
-                        </div>
-
-                        {/* Right Side - Chat (40%) */}
-                        <div className="w-[40%] h-full flex flex-col bg-white dark:bg-gray-900 shadow-xl z-20 border-l border-gray-200 dark:border-gray-800">
-                            <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-white dark:bg-gray-900 z-10">
-                                <div>
-                                    <h3 className="font-serif-display text-lg text-gray-900 dark:text-white">{t('dashboard.ideaLabContent.aiName')}</h3>
-                                    <p className="text-xs text-gray-500 flex items-center gap-1">
-                                        <Lock size={10} /> Active Agent Mode
-                                    </p>
-                                </div>
-                                
-                                {/* Context Quality Score */}
-                                <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700">
-                                    <Gauge size={14} className={contextScore > 80 ? 'text-green-500' : contextScore > 40 ? 'text-yellow-500' : 'text-red-500'} />
-                                    <div className="flex flex-col">
-                                        <span className="text-[9px] text-gray-400 uppercase font-bold tracking-wider">Kontext</span>
-                                        <div className="w-16 h-1 bg-gray-200 dark:bg-gray-700 rounded-full mt-0.5">
-                                            <div 
-                                                className={`h-full rounded-full transition-all duration-1000 ${contextScore > 80 ? 'bg-green-500' : contextScore > 40 ? 'bg-yellow-500' : 'bg-red-500'}`} 
-                                                style={{width: `${contextScore}%`}}
-                                            ></div>
-                                        </div>
+                    <div className="flex-1 relative overflow-hidden">
+                        {activeTab === 'canvas' && (
+                            <div className="h-full relative overflow-hidden bg-slate-50 dark:bg-transparent rounded-tl-3xl border-t border-l border-gray-200 dark:border-gray-800 shadow-inner">
+                                <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'linear-gradient(#000 1px, transparent 1px), linear-gradient(90deg, #000 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
+                                <div className="absolute inset-0 flex items-center justify-center p-20 overflow-visible">
+                                    <div className="relative" style={{ transform: `scale(${canvasZoom})` }}>
+                                        {(activeIdea?.nodes || []).map(node => (
+                                            <div key={node.id} className="absolute bg-white dark:bg-gray-900 border-2 border-black rounded-xl p-4 shadow-xl min-w-[180px] group transition-all hover:scale-105" style={{ left: node.x, top: node.y }}>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <div className={`w-2 h-2 rounded-full ${node.details?.status === 'approved' ? 'bg-green-500' : 'bg-yellow-500'}`}></div>
+                                                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">{node.node_type}</span>
+                                                </div>
+                                                <h4 className="font-bold text-sm text-gray-900 dark:text-white leading-tight">{node.label}</h4>
+                                                <p className="text-[10px] text-gray-500 mt-2 line-clamp-3">{node.details?.text}</p>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
-
-                                <button onClick={() => setMode('input')} className="text-xs font-medium text-gray-400 hover:text-black dark:hover:text-white underline decoration-1 underline-offset-4">
-                                    {t('dashboard.ideaLabContent.exit')}
-                                </button>
+                                <div className="absolute bottom-6 right-6 flex gap-2">
+                                    <button onClick={() => setCanvasZoom(z => Math.max(0.5, z - 0.1))} className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 hover:bg-gray-50 transition-colors"><ZoomOut size={18}/></button>
+                                    <button onClick={() => setCanvasZoom(z => Math.min(2, z + 0.1))} className="p-3 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700 hover:bg-gray-50 transition-colors"><ZoomIn size={18}/></button>
+                                </div>
                             </div>
+                        )}
 
-                            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50/30 dark:bg-gray-900/30">
-                                {messages.length === 0 && (
-                                    <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 opacity-60">
-                                        <Sparkles size={32} className="mb-2" />
-                                        <p className="text-sm">Starta konversationen...</p>
+                        {activeTab === 'cards' && (
+                            <div className="h-full overflow-y-auto p-6 space-y-6">
+                                {(activeIdea?.cards || []).length === 0 && (
+                                    <div className="flex flex-col items-center justify-center h-64 text-gray-400 opacity-40">
+                                        <FileText size={48} className="mb-4"/>
+                                        <p className="font-bold uppercase tracking-widest text-xs">Inga artefakter än</p>
                                     </div>
                                 )}
-                                {messages.map((msg) => (
-                                    <div key={msg.id} className={`flex flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'} animate-[slideUp_0.3s_ease-out_forwards]`}>
-                                        <div className={`flex gap-3 max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                                            <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center shadow-sm ${msg.role === 'ai' ? 'bg-black text-white dark:bg-white dark:text-black' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700'}`}>
-                                                {msg.role === 'ai' ? <Sparkles size={14} /> : <div className="font-bold text-[10px]">DU</div>}
-                                            </div>
-                                            <div className={`rounded-2xl px-6 py-4 shadow-sm relative overflow-hidden ${
-                                                msg.role === 'user' 
-                                                    ? 'bg-black dark:bg-white text-white dark:text-black rounded-br-none text-sm' 
-                                                    : 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-bl-none'
-                                            }`}>
-                                                {/* Use RichTextRenderer for AI messages */}
-                                                {msg.role === 'ai' ? (
-                                                    <RichTextRenderer text={msg.text} />
-                                                ) : (
-                                                    <p className="whitespace-pre-wrap">{msg.text}</p>
-                                                )}
-                                                
-                                                {/* Typewriter Cursor Effect */}
-                                                {isTyping && msg.role === 'ai' && msg.id === messages[messages.length - 1].id && (
-                                                    <span className="inline-block w-1.5 h-3.5 bg-gray-400 ml-1 animate-pulse align-middle"></span>
-                                                )}
-                                            </div>
+                                {(activeIdea?.cards || []).map(card => (
+                                    <div key={card.card_id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-8 shadow-sm">
+                                        <div className="flex justify-between items-start mb-6">
+                                            <h3 className="font-serif-display text-2xl font-bold uppercase tracking-tighter text-black dark:text-white">{card.title}</h3>
+                                            <div className="px-3 py-1 bg-green-50 text-green-600 rounded-full text-[10px] font-bold uppercase">Verifierad</div>
                                         </div>
-                                        
-                                        {/* Sources / Citations */}
-                                        {msg.role === 'ai' && msg.sources && msg.sources.length > 0 && (
-                                            <div className="ml-11 flex flex-wrap gap-2 max-w-[85%] animate-[fadeIn_0.5s_ease-out_forwards]">
-                                                {msg.sources.slice(0,3).map((source, i) => (
-                                                    <a 
-                                                        key={i} 
-                                                        href={source.uri} 
-                                                        target="_blank" 
-                                                        rel="noreferrer"
-                                                        className="text-[10px] flex items-center gap-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-full px-2 py-1 text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-200 dark:hover:border-blue-800 transition-colors"
-                                                    >
-                                                        <LinkIcon size={8} />
-                                                        {source.title.length > 20 ? source.title.substring(0, 20) + '...' : source.title}
-                                                    </a>
-                                                ))}
-                                            </div>
-                                        )}
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                            {(card.sections || []).map((sec, i) => (
+                                                <div key={i}>
+                                                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">{sec.heading}</h4>
+                                                    <ul className="space-y-2">
+                                                        {(sec.bullets || []).map((b, j) => (
+                                                            <li key={j} className="flex items-start gap-3 text-sm text-gray-700 dark:text-gray-300">
+                                                                <div className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white mt-1.5 shrink-0"></div>
+                                                                {b}
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            ))}
+                                        </div>
                                     </div>
                                 ))}
-                                
-                                {/* Active Thinking/Search Box - Enhanced */}
-                                {isSearching && (
-                                    <div className="flex gap-3 animate-[slideUp_0.3s_ease-out_forwards] ml-1">
-                                        <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center shadow-sm bg-black dark:bg-white text-white dark:text-black">
-                                            <Sparkles size={14} />
-                                        </div>
-                                        <div className="flex flex-col gap-2 max-w-[85%]">
-                                            <div className="bg-white dark:bg-gray-800 border border-blue-200 dark:border-blue-900 shadow-[0_0_20px_rgba(59,130,246,0.15)] rounded-xl rounded-bl-none p-4 flex items-center gap-4 animate-pulse relative overflow-hidden">
-                                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-50/50 to-transparent animate-[shimmer_2s_infinite]"></div>
-                                                <div className="w-8 h-8 bg-blue-50 dark:bg-blue-900 rounded-full flex items-center justify-center text-blue-500 dark:text-blue-300 shrink-0 border border-blue-100 dark:border-blue-800 z-10">
-                                                    <Globe size={16} className="animate-[spin_3s_linear_infinite]" />
-                                                </div>
-                                                <div className="flex flex-col min-w-0 z-10">
-                                                    <span className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-0.5">
-                                                        Live Search
-                                                    </span>
-                                                    <span className="text-sm text-gray-600 dark:text-gray-300 truncate">
-                                                        {currentSearchQuery || "Scanning web..."}
-                                                    </span>
-                                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'tasks' && (
+                            <div className="h-full overflow-y-auto p-6">
+                                <div className="max-w-md mx-auto space-y-4">
+                                    <h3 className="font-serif-display text-2xl mb-6 text-gray-900 dark:text-white">Definition of Done</h3>
+                                    {(activeIdea?.tasks || []).map(task => (
+                                        <div key={task.id} className="flex items-center gap-4 p-4 bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm transition-all hover:translate-x-1">
+                                            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${task.completed ? 'bg-green-500 border-green-500 text-white' : 'border-gray-200'}`}>
+                                                {task.completed && <CheckCircle2 size={14}/>}
                                             </div>
-                                            {activeSources.length > 0 && (
-                                                <div className="ml-2 flex gap-2">
-                                                    {activeSources.slice(-3).map((src, i) => (
-                                                        <span key={i} className="text-[9px] bg-white/50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 px-2 py-1 rounded-md text-gray-500 dark:text-gray-400 animate-fadeIn">
-                                                            {src}
-                                                        </span>
-                                                    ))}
-                                                </div>
-                                            )}
+                                            <span className={`text-sm font-medium ${task.completed ? 'text-gray-400 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'evidence' && (
+                            <div className="h-full overflow-y-auto p-6 space-y-4">
+                                {(activeIdea?.evidence || []).map(ev => (
+                                    <div key={ev.id} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6 shadow-sm">
+                                        <div className="flex justify-between mb-4">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-[10px] font-bold uppercase text-gray-400">{ev.source_type}</span>
+                                                <div className="w-1 h-1 rounded-full bg-gray-300"></div>
+                                                <span className="text-[10px] font-bold text-blue-600">Verifierad</span>
+                                            </div>
+                                            <div className="text-[10px] font-mono text-gray-400">Match: {Math.round(ev.confidence * 100)}%</div>
+                                        </div>
+                                        <p className="text-sm italic text-gray-600 dark:text-gray-400 border-l-4 border-black dark:border-white pl-4 mb-4">"{ev.quote}"</p>
+                                        <p className="text-sm text-gray-900 dark:text-white font-medium mb-4">{ev.summary}</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {(ev.tags || []).map(t => <span key={t} className="px-2 py-0.5 bg-gray-50 dark:bg-gray-800 rounded text-[9px] font-bold uppercase text-gray-500">#{t}</span>)}
                                         </div>
                                     </div>
-                                )}
-                                
-                                <div ref={chatEndRef} />
+                                ))}
                             </div>
-
-                            <div className="p-4 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
-                                <form onSubmit={handleSendMessage} className="relative">
-                                    <input 
-                                        type="text" 
-                                        value={chatInput}
-                                        onChange={(e) => setChatInput(e.target.value)}
-                                        placeholder={isTyping ? "AI analyserar..." : "Skriv ditt svar..."}
-                                        disabled={isTyping}
-                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg pl-4 pr-12 py-3.5 text-sm focus:outline-none focus:border-black dark:focus:border-white focus:ring-1 focus:ring-black dark:focus:ring-white transition-all shadow-inner disabled:bg-gray-100 dark:disabled:bg-gray-900 disabled:text-gray-400 text-gray-900 dark:text-white"
-                                    />
-                                    <button 
-                                        type="submit"
-                                        disabled={!chatInput.trim() || isTyping}
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-white dark:bg-gray-700 rounded-md text-gray-900 dark:text-white hover:text-black hover:bg-gray-100 dark:hover:bg-gray-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm border border-gray-100 dark:border-gray-600"
-                                    >
-                                        <ArrowRight size={18} />
-                                    </button>
-                                </form>
-                            </div>
-                        </div>
+                        )}
                     </div>
-                )}
+                </div>
             </div>
         </div>
     );

@@ -137,7 +137,7 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
             // Spara till DB
             await db.addPitch(user.id, {
                 type: 'deck',
-                name: deckData.deck.title,
+                name: deckData.deck?.title || 'Okänd Pitch',
                 content: JSON.stringify(deckData),
                 contextScore: 100
             });
@@ -149,7 +149,7 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
     const handleExport = async () => {
         if (!currentDeck) return;
         const pptx = await renderPptx(currentDeck);
-        pptx.writeFile({ fileName: `${currentDeck.deck.title.replace(/\s/g, '_')}.pptx` });
+        pptx.writeFile({ fileName: `${(currentDeck.deck?.title || 'Pitch').replace(/\s/g, '_')}.pptx` });
     };
 
     if (isLoading) {
@@ -248,14 +248,14 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                         <div className="max-w-2xl mx-auto space-y-8 animate-slideUp">
                             <h2 className="text-3xl font-serif-display">Bara några frågor till...</h2>
                             <div className="space-y-6">
-                                {questions.map(q => (
+                                {(questions || []).map(q => (
                                     <div key={q.id} className="bg-gray-50 dark:bg-gray-900 p-6 rounded-3xl border border-gray-100 dark:border-gray-800">
                                         <label className="block font-bold mb-3">{q.question}</label>
                                         {q.type === 'text' ? (
                                             <input className="w-full p-3 bg-white dark:bg-gray-800 rounded-xl outline-none" onChange={e => setAnswers({...answers, [q.id]: e.target.value})} />
                                         ) : (
                                             <div className="flex flex-wrap gap-2">
-                                                {q.options?.map(opt => (
+                                                {(q.options || []).map(opt => (
                                                     <button 
                                                         key={opt} 
                                                         onClick={() => setAnswers({...answers, [q.id]: opt})}
@@ -280,13 +280,13 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                         <div className="max-w-3xl mx-auto space-y-8 animate-slideUp">
                             <h2 className="text-3xl font-serif-display">Presentationens ryggrad</h2>
                             <div className="space-y-4">
-                                {outline.sections.map((section, idx) => (
+                                {(outline.sections || []).map((section, idx) => (
                                     <div key={idx} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl overflow-hidden">
                                         <div className="p-4 bg-gray-50 dark:bg-gray-800 font-bold text-sm uppercase tracking-widest text-gray-400">{section.title}</div>
                                         <div className="p-2 space-y-1">
-                                            {section.slides.map((s, sidx) => (
+                                            {(section.slides || []).map((s, sidx) => (
                                                 <div key={sidx} className="flex items-center gap-4 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-xl transition-colors group">
-                                                    <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-bold">{s.type.substring(0,2).toUpperCase()}</div>
+                                                    <div className="w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-bold">{(s.type || 'SL').substring(0,2).toUpperCase()}</div>
                                                     <div className="flex-1">
                                                         <div className="font-bold text-sm">{s.title}</div>
                                                         <div className="text-xs text-gray-500">{s.keyMessage}</div>
@@ -308,8 +308,8 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                         <div className="animate-fadeIn">
                             <div className="flex justify-between items-center mb-8 sticky top-0 bg-gray-50 dark:bg-gray-950 py-4 z-20">
                                 <div>
-                                    <h2 className="text-2xl font-bold">{currentDeck.deck.title}</h2>
-                                    <p className="text-sm text-gray-500">{currentDeck.slides.length} slides • Designad för {currentDeck.deck.audience}</p>
+                                    <h2 className="text-2xl font-bold">{currentDeck.deck?.title || 'Pitch Deck'}</h2>
+                                    <p className="text-sm text-gray-500">{(currentDeck.slides || []).length} slides • Designad för {currentDeck.deck?.audience || 'målgrupp'}</p>
                                 </div>
                                 <button onClick={handleExport} className="bg-black dark:bg-white text-white dark:text-black px-8 py-3 rounded-full font-bold flex items-center gap-2 hover:scale-105 transition-transform shadow-xl">
                                     <Download size={20}/> Exportera till PPTX
@@ -317,7 +317,7 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-20">
-                                {currentDeck.slides.map((slide, idx) => (
+                                {(currentDeck.slides || []).map((slide, idx) => (
                                     <div key={slide.id} className="group relative">
                                         <div className="absolute -left-4 top-0 bottom-0 w-1 bg-black opacity-0 group-hover:opacity-100 transition-opacity rounded-full"></div>
                                         <div className="aspect-video bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm p-8 flex flex-col relative overflow-hidden">
@@ -332,7 +332,7 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                                             <h3 className="text-xl font-bold mb-4 line-clamp-2">{slide.title}</h3>
                                             
                                             <div className="flex-1 space-y-2 overflow-hidden">
-                                                {slide.bullets?.map((b, bidx) => (
+                                                {(slide.bullets || []).map((b, bidx) => (
                                                     <div key={bidx} className="flex gap-2 text-sm text-gray-600 dark:text-gray-400">
                                                         <div className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white mt-1.5 shrink-0" />
                                                         <span>{b}</span>
@@ -340,7 +340,7 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                                                 ))}
                                                 {slide.type === 'kpi' && slide.kpis && (
                                                     <div className="grid grid-cols-3 gap-2 mt-4">
-                                                        {slide.kpis.map((k, ki) => (
+                                                        {(slide.kpis || []).map((k, ki) => (
                                                             <div key={ki} className="bg-gray-50 dark:bg-gray-800 p-2 rounded-lg text-center">
                                                                 <div className="font-bold text-black dark:text-white">{k.value}</div>
                                                                 <div className="text-[8px] text-gray-400 uppercase">{k.label}</div>
@@ -351,7 +351,7 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                                             </div>
                                             
                                             <div className="mt-4 pt-4 border-t border-gray-50 dark:border-gray-800 flex justify-between items-center">
-                                                <span className="text-[9px] text-gray-300 italic">Key: {slide.speakerNotes?.[0]?.substring(0, 30)}...</span>
+                                                <span className="text-[9px] text-gray-300 italic">Key: {(slide.speakerNotes?.[0] || '').substring(0, 30)}...</span>
                                                 <div className="flex gap-1">
                                                     <button className="p-1 hover:bg-gray-100 rounded text-gray-400"><Trash2 size={12}/></button>
                                                 </div>
