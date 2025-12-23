@@ -190,7 +190,9 @@ class DatabaseService {
 
   async getUserData(userId: string): Promise<UserData> {
     let remoteData: any = {};
-    if (!userId.startsWith('local-')) {
+    const isLocal = userId.startsWith('local-');
+
+    if (!isLocal) {
         const results = await Promise.allSettled([
             this.safeSupabaseCall(supabase.from('leads').select('*').eq('user_id', userId).order('created_at', { ascending: false })),
             this.safeSupabaseCall(supabase.from('ideas').select('*').eq('user_id', userId).order('created_at', { ascending: false })),
@@ -202,15 +204,36 @@ class DatabaseService {
     }
 
     const getL = (k: string) => JSON.parse(localStorage.getItem(getLocalKey(k, userId)) || '[]');
-    const merge = (r: any[] = [], l: any[]) => { const ids = new Set(r.map(i => i.id)); return [...l.filter(i => !ids.has(i.id)), ...r]; };
+    
+    // Förbättrad merge: Om vi är online och har data från remote, använd den som facit för existerande ID:n.
+    // Men behåll lokala objekt som inte hunnit laddas upp än.
+    const merge = (table: string, r: any[] = [], l: any[]) => {
+        if (isLocal) return l;
+        if (r.length === 0 && l.length > 0) return l; // Offline mode eller tomt i molnet
+        
+        // Uppdatera lokal cache för att matcha molnet (förhindrar resurrection av raderade objekt)
+        const remoteIds = new Set(r.map(i => i.id));
+        const syncedLocal = l.filter(i => {
+            // Om den finns i molnet, trust molnet (vi lägger till den från r senare)
+            if (remoteIds.has(i.id)) return false;
+            // Om den inte finns i molnet OCH inte börjar med 'temp-', anta att den raderats i molnet
+            if (!i.id.startsWith('temp-')) return false;
+            return true;
+        });
+
+        const finalData = [...syncedLocal, ...r];
+        // Spara ner den rensade listan lokalt för att hålla cachen fräsch
+        localStorage.setItem(getLocalKey(table, userId), JSON.stringify(finalData));
+        return finalData;
+    };
 
     return { 
-        leads: merge(remoteData[0]?.map((d: any) => ({ ...d, value: Number(d.value) || 0 })), getL('leads')),
-        ideas: merge(remoteData[1], getL('ideas')),
-        pitches: merge(remoteData[2]?.map((d: any) => ({ ...d, dateCreated: d.created_at, chatSessionId: d.chat_session_id, contextScore: d.context_score })), getL('pitches')),
-        chatHistory: merge(remoteData[3]?.map((d: any) => ({ ...d, sessionId: d.session_id, timestamp: new Date(d.created_at).getTime() })), getL('chat_messages')),
+        leads: merge('leads', remoteData[0]?.map((d: any) => ({ ...d, value: Number(d.value) || 0 })), getL('leads')),
+        ideas: merge('ideas', remoteData[1], getL('ideas')),
+        pitches: merge('pitches', remoteData[2]?.map((d: any) => ({ ...d, dateCreated: d.created_at, chatSessionId: d.chat_session_id, contextScore: d.context_score })), getL('pitches')),
+        chatHistory: merge('chat_messages', remoteData[3]?.map((d: any) => ({ ...d, sessionId: d.session_id, timestamp: new Date(d.created_at).getTime() })), getL('chat_messages')),
         coaches: getL('coaches'),
-        sessions: merge(remoteData[4]?.map((d: any) => ({ id: d.id, name: d.name, lastMessageAt: d.last_message_at ? new Date(d.last_message_at).getTime() : Date.now(), preview: d.preview, group: d.group_name })), getL('chat_sessions')),
+        sessions: merge('chat_sessions', remoteData[4]?.map((d: any) => ({ id: d.id, name: d.name, lastMessageAt: d.last_message_at ? new Date(d.last_message_at).getTime() : Date.now(), preview: d.preview, group: d.group_name })), getL('chat_sessions')),
         notifications: getL('notifications'),
         invoices: getL('invoices'),
         settings: JSON.parse(localStorage.getItem(getLocalKey('settings', userId)) || 'null') || { notifications: { email: true, push: true, marketing: false }, privacy: { publicProfile: false, dataSharing: false } },
@@ -250,7 +273,7 @@ class DatabaseService {
       const pitch: Pitch = { id: this.generateId(), dateCreated: new Date().toISOString(), ...pitchData };
       this.saveLocal('pitches', userId, pitch);
       if (!userId.startsWith('local-')) {
-          this.safeSupabaseCall(supabase.from('pitches').insert({ id: pitch.id, user_id: userId, type: pitch.type, name: pitch.name, content: pitch.content, chat_session_id: pitch.chatSessionId, context_score: pitch.contextScore, created_at: pitch.dateCreated }));
+          await this.safeSupabaseCall(supabase.from('pitches').insert({ id: pitch.id, user_id: userId, type: pitch.type, name: pitch.name, content: pitch.content, chat_session_id: pitch.chatSessionId, context_score: pitch.contextScore, created_at: pitch.dateCreated }));
       }
       return pitch;
   }
@@ -259,12 +282,30 @@ class DatabaseService {
       const key = getLocalKey('pitches', userId);
       const filtered = JSON.parse(localStorage.getItem(key) || '[]').filter((p: any) => p.id !== pitchId);
       localStorage.setItem(key, JSON.stringify(filtered));
-      if (!userId.startsWith('local-')) this.safeSupabaseCall(supabase.from('pitches').delete().eq('id', pitchId).eq('user_id', userId));
+      if (!userId.startsWith('local-')) {
+          await this.safeSupabaseCall(supabase.from('pitches').delete().eq('id', pitchId).eq('user_id', userId));
+      }
   }
 
   async addIdea(userId: string, ideaData: Omit<Idea, 'id' | 'dateCreated' | 'score'>): Promise<Idea> {
     const idea: Idea = { id: this.generateId(), dateCreated: new Date().toISOString(), score: 0, ...ideaData };
     this.saveLocal('ideas', userId, idea);
+    if (!userId.startsWith('local-')) {
+        await this.safeSupabaseCall(supabase.from('ideas').insert({
+            id: idea.id,
+            user_id: userId,
+            title: idea.title,
+            description: idea.description,
+            current_phase: idea.currentPhase,
+            snapshot: idea.snapshot,
+            nodes: idea.nodes,
+            edges: idea.edges,
+            cards: idea.cards,
+            tasks: idea.tasks,
+            evidence: idea.evidence,
+            created_at: idea.dateCreated
+        }));
+    }
     return idea;
   }
 
@@ -275,6 +316,18 @@ class DatabaseService {
     if (idx >= 0) {
       ideas[idx] = { ...ideas[idx], ...updates };
       localStorage.setItem(key, JSON.stringify(ideas));
+      
+      if (!userId.startsWith('local-')) {
+          // Mappa till snake_case för Supabase
+          const p: any = {};
+          if (updates.title) p.title = updates.title;
+          if (updates.currentPhase) p.current_phase = updates.currentPhase;
+          if (updates.snapshot) p.snapshot = updates.snapshot;
+          if (updates.nodes) p.nodes = updates.nodes;
+          if (updates.tasks) p.tasks = updates.tasks;
+          
+          await this.safeSupabaseCall(supabase.from('ideas').update(p).eq('id', ideaId).eq('user_id', userId));
+      }
     }
   }
 
@@ -282,15 +335,26 @@ class DatabaseService {
     const key = getLocalKey('ideas', userId);
     const filtered = JSON.parse(localStorage.getItem(key) || '[]').filter((i: any) => i.id !== ideaId);
     localStorage.setItem(key, JSON.stringify(filtered));
+    
     if (!userId.startsWith('local-')) {
-        this.safeSupabaseCall(supabase.from('ideas').delete().eq('id', ideaId).eq('user_id', userId));
+        // Cascade delete i molnet om RLS inte sköter det
+        await this.safeSupabaseCall(supabase.from('ideas').delete().eq('id', ideaId).eq('user_id', userId));
     }
   }
 
   async addMessage(userId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>): Promise<ChatMessage> {
       const msg: ChatMessage = { id: this.generateId(), timestamp: Date.now(), ...message };
       this.saveLocal('chat_messages', userId, msg);
-      if (!userId.startsWith('local-')) this.safeSupabaseCall(supabase.from('chat_messages').insert({ id: msg.id, user_id: userId, session_id: msg.sessionId, role: msg.role, text: msg.text, created_at: new Date(msg.timestamp).toISOString() }));
+      if (!userId.startsWith('local-')) {
+          await this.safeSupabaseCall(supabase.from('chat_messages').insert({ 
+              id: msg.id, 
+              user_id: userId, 
+              session_id: msg.sessionId, 
+              role: msg.role, 
+              text: msg.text, 
+              created_at: new Date(msg.timestamp).toISOString() 
+          }));
+      }
       return msg;
   }
 
@@ -298,7 +362,13 @@ class DatabaseService {
     const session: ChatSession = { id: this.generateId(), name, lastMessageAt: Date.now(), preview: 'Starta konversationen...' };
     this.saveLocal('chat_sessions', userId, session);
     if (!userId.startsWith('local-')) {
-        this.safeSupabaseCall(supabase.from('chat_sessions').insert({ id: session.id, user_id: userId, name: session.name, last_message_at: new Date(session.lastMessageAt).toISOString(), preview: session.preview }));
+        await this.safeSupabaseCall(supabase.from('chat_sessions').insert({ 
+            id: session.id, 
+            user_id: userId, 
+            name: session.name, 
+            last_message_at: new Date(session.lastMessageAt).toISOString(), 
+            preview: session.preview 
+        }));
     }
     return session;
   }
@@ -329,7 +399,16 @@ class DatabaseService {
     if (!session) {
         session = { id: this.generateId(), name: 'UF-läraren', group: 'System', lastMessageAt: Date.now(), preview: 'Starta konversationen...' };
         this.saveLocal('chat_sessions', userId, session);
-        if (!userId.startsWith('local-')) this.safeSupabaseCall(supabase.from('chat_sessions').insert({ id: session.id, user_id: userId, name: session.name, group_name: session.group, last_message_at: new Date(session.lastMessageAt).toISOString(), preview: session.preview }));
+        if (!userId.startsWith('local-')) {
+            await this.safeSupabaseCall(supabase.from('chat_sessions').insert({ 
+                id: session.id, 
+                user_id: userId, 
+                name: session.name, 
+                group_name: session.group, 
+                last_message_at: new Date(session.lastMessageAt).toISOString(), 
+                preview: session.preview 
+            }));
+        }
     }
     return session;
   }
@@ -338,13 +417,16 @@ class DatabaseService {
       const key = getLocalKey('chat_sessions', userId);
       const sessions = JSON.parse(localStorage.getItem(key) || '[]');
       const idx = sessions.findIndex((s: any) => s.id === sessionId);
-      if (idx >= 0) { sessions[idx] = { ...sessions[idx], ...updates }; localStorage.setItem(key, JSON.stringify(sessions)); }
+      if (idx >= 0) { 
+          sessions[idx] = { ...sessions[idx], ...updates }; 
+          localStorage.setItem(key, JSON.stringify(sessions)); 
+      }
       if (!userId.startsWith('local-')) {
           const p: any = {};
           if (updates.name) p.name = updates.name;
           if (updates.lastMessageAt) p.last_message_at = new Date(updates.lastMessageAt).toISOString();
           if (updates.preview) p.preview = updates.preview;
-          this.safeSupabaseCall(supabase.from('chat_sessions').update(p).eq('id', sessionId).eq('user_id', userId));
+          await this.safeSupabaseCall(supabase.from('chat_sessions').update(p).eq('id', sessionId).eq('user_id', userId));
       }
   }
 
@@ -403,12 +485,21 @@ class DatabaseService {
     const current = JSON.parse(localStorage.getItem(key) || '[]');
     if (item.id) {
         const existingIndex = current.findIndex((i: any) => i.id === item.id);
-        if (existingIndex >= 0) { current[existingIndex] = item; localStorage.setItem(key, JSON.stringify(current)); return; }
+        if (existingIndex >= 0) { 
+            current[existingIndex] = item; 
+            localStorage.setItem(key, JSON.stringify(current)); 
+            return; 
+        }
     }
     localStorage.setItem(key, JSON.stringify([item, ...current]));
   }
 
-  private generateId() { return typeof crypto !== 'undefined' ? crypto.randomUUID() : Math.random().toString(36).substring(2); }
+  private generateId() { 
+      // Skapa en temporär ID för lokala objekt så vi vet att de ska synkas senare
+      const prefix = 'temp-';
+      const uuid = typeof crypto !== 'undefined' ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+      return prefix + uuid;
+  }
 
   private mapUser(supabaseUser: any): User {
     const metadata = supabaseUser.user_metadata || {};
