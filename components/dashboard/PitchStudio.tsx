@@ -15,6 +15,7 @@ import {
     SYSTEMPROMPT_DECKSPEC, 
     SYSTEMPROMPT_QUALITY_PASS 
 } from '../../features/presentations/ai/prompts';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 interface PitchStudioProps {
     user: User;
@@ -29,6 +30,9 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
     const [savedPitches, setSavedPitches] = useState<Pitch[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [loadingMsg, setLoadingMsg] = useState('');
+    
+    // --- DELETE MODAL STATE ---
+    const [pitchToDelete, setPitchToDelete] = useState<Pitch | null>(null);
 
     // --- FORM STATE ---
     const [brief, setBrief] = useState({
@@ -63,6 +67,23 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
     const handleCreateNew = () => {
         setStep('brief');
         setView('generator');
+    };
+
+    const confirmDelete = async () => {
+        if (!pitchToDelete) return;
+        
+        const id = pitchToDelete.id;
+        // Optimistic UI Update - Ta bort direkt från skärmen
+        setSavedPitches(prev => prev.filter(p => p.id !== id));
+        setPitchToDelete(null);
+
+        try {
+            await db.deletePitch(user.id, id);
+        } catch (err) {
+            console.error(err);
+            // Revert if failed (optional, but good for stability)
+            loadHistory();
+        }
     };
 
     // --- STEP 1 -> 2: CLARIFICATIONS ---
@@ -125,7 +146,6 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
             
             let deckData = JSON.parse(response.text || '{}');
             
-            // Inject theme
             deckData.theme = {
                 palette: { primary: brandKit.primary, secondary: '#666666', accent: '#D24726', background: brandKit.background },
                 fonts: { heading: brandKit.fontHeading, body: brandKit.fontBody }
@@ -134,7 +154,6 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
             setCurrentDeck(deckData);
             setStep('preview');
 
-            // Spara till DB
             await db.addPitch(user.id, {
                 type: 'deck',
                 name: deckData.deck?.title || 'Okänd Pitch',
@@ -168,7 +187,13 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
 
     return (
         <div className="h-full flex flex-col max-w-7xl mx-auto w-full">
-            {/* Header */}
+            <DeleteConfirmModal 
+                isOpen={!!pitchToDelete}
+                onClose={() => setPitchToDelete(null)}
+                onConfirm={confirmDelete}
+                itemName={pitchToDelete?.name || ''}
+            />
+
             <div className="flex justify-between items-end mb-8 no-print px-4">
                 <div>
                     <h1 className="font-serif-display text-4xl mb-1 text-gray-900 dark:text-white">Pitch Studio PRO</h1>
@@ -187,28 +212,37 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                         <span className="font-bold">Skapa ny presentation</span>
                     </div>
                     {savedPitches.map(p => (
-                        <div key={p.id} onClick={() => { setCurrentDeck(JSON.parse(p.content)); setStep('preview'); setView('generator'); }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group border-b-4 border-b-black">
+                        <div key={p.id} onClick={() => { setCurrentDeck(JSON.parse(p.content)); setStep('preview'); setView('generator'); }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group border-b-4 border-b-black relative overflow-hidden">
                             <div className="flex justify-between items-start mb-6">
                                 <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center text-black dark:text-white"><Presentation size={24}/></div>
                                 <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{new Date(p.dateCreated).toLocaleDateString()}</div>
                             </div>
-                            <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2 line-clamp-2">{p.name}</h3>
+                            <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2 line-clamp-2 pr-8">{p.name}</h3>
                             <div className="mt-auto flex items-center gap-2 text-xs font-bold text-green-500">
                                 <CheckCircle2 size={14}/> Redo för export
                             </div>
+                            
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPitchToDelete(p);
+                                }}
+                                className="absolute top-4 right-4 w-10 h-10 bg-red-50 dark:bg-red-900/30 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center hover:bg-red-600 hover:text-white active:scale-90"
+                                title="Ta bort"
+                            >
+                                <Trash2 size={18}/>
+                            </button>
                         </div>
                     ))}
                 </div>
             ) : (
                 <div className="flex-1 overflow-y-auto px-4 pb-20">
-                    {/* Progress Bar */}
                     <div className="flex justify-center gap-2 mb-12">
                         {['brief', 'clarify', 'outline', 'preview'].map((s, idx) => (
                             <div key={s} className={`h-1.5 w-16 rounded-full transition-colors ${idx <= ['brief', 'clarify', 'outline', 'preview'].indexOf(step) ? 'bg-black dark:bg-white' : 'bg-gray-200 dark:bg-gray-800'}`} />
                         ))}
                     </div>
 
-                    {/* Step 1: BRIEF */}
                     {step === 'brief' && (
                         <div className="max-w-2xl mx-auto space-y-8 animate-slideUp">
                             <div className="space-y-4">
@@ -221,7 +255,6 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                                     className="w-full h-40 p-6 bg-gray-50 dark:bg-gray-900 border-none rounded-3xl text-lg focus:ring-2 ring-black outline-none resize-none shadow-inner"
                                 />
                             </div>
-                            
                             <div className="grid grid-cols-2 gap-6">
                                 <div>
                                     <label className="block text-xs font-bold uppercase text-gray-400 mb-2">Målgrupp</label>
@@ -236,14 +269,12 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                                     </select>
                                 </div>
                             </div>
-
                             <button onClick={generateClarifications} disabled={!brief.topic} className="w-full py-5 bg-black dark:bg-white text-white dark:text-black rounded-full font-bold text-xl shadow-lg hover:opacity-90 transition-all flex items-center justify-center gap-3 disabled:opacity-50">
                                 Nästa steg <ArrowRight size={24}/>
                             </button>
                         </div>
                     )}
 
-                    {/* Step 2: CLARIFY */}
                     {step === 'clarify' && (
                         <div className="max-w-2xl mx-auto space-y-8 animate-slideUp">
                             <h2 className="text-3xl font-serif-display">Bara några frågor till...</h2>
@@ -275,7 +306,6 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                         </div>
                     )}
 
-                    {/* Step 3: OUTLINE */}
                     {step === 'outline' && outline && (
                         <div className="max-w-3xl mx-auto space-y-8 animate-slideUp">
                             <h2 className="text-3xl font-serif-display">Presentationens ryggrad</h2>
@@ -303,10 +333,10 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                         </div>
                     )}
 
-                    {/* Step 4: PREVIEW */}
                     {step === 'preview' && currentDeck && (
                         <div className="animate-fadeIn">
                             <div className="flex justify-between items-center mb-8 sticky top-0 bg-gray-50 dark:bg-gray-950 py-4 z-20">
+                                <button onClick={() => setView('history')} className="p-2 bg-gray-100 dark:bg-gray-800 rounded-lg"><ArrowLeft size={18}/></button>
                                 <div>
                                     <h2 className="text-2xl font-bold">{currentDeck.deck?.title || 'Pitch Deck'}</h2>
                                     <p className="text-sm text-gray-500">{(currentDeck.slides || []).length} slides • Designad för {currentDeck.deck?.audience || 'målgrupp'}</p>
@@ -321,16 +351,12 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                                     <div key={slide.id} className="group relative">
                                         <div className="absolute -left-4 top-0 bottom-0 w-1 bg-black opacity-0 group-hover:opacity-100 transition-opacity rounded-full"></div>
                                         <div className="aspect-video bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm p-8 flex flex-col relative overflow-hidden">
-                                            {/* Design Elements based on type */}
                                             <div className="absolute top-0 left-0 w-full h-1 bg-black dark:bg-white"></div>
-                                            
                                             <div className="flex justify-between mb-4">
                                                 <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Slide {idx+1} • {slide.type}</span>
                                                 <button className="text-gray-300 hover:text-black"><Edit3 size={14}/></button>
                                             </div>
-
                                             <h3 className="text-xl font-bold mb-4 line-clamp-2">{slide.title}</h3>
-                                            
                                             <div className="flex-1 space-y-2 overflow-hidden">
                                                 {(slide.bullets || []).map((b, bidx) => (
                                                     <div key={bidx} className="flex gap-2 text-sm text-gray-600 dark:text-gray-400">
@@ -338,23 +364,6 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                                                         <span>{b}</span>
                                                     </div>
                                                 ))}
-                                                {slide.type === 'kpi' && slide.kpis && (
-                                                    <div className="grid grid-cols-3 gap-2 mt-4">
-                                                        {(slide.kpis || []).map((k, ki) => (
-                                                            <div key={ki} className="bg-gray-50 dark:bg-gray-800 p-2 rounded-lg text-center">
-                                                                <div className="font-bold text-black dark:text-white">{k.value}</div>
-                                                                <div className="text-[8px] text-gray-400 uppercase">{k.label}</div>
-                                                            </div>
-                                                        ))}
-                                                    </div>
-                                                )}
-                                            </div>
-                                            
-                                            <div className="mt-4 pt-4 border-t border-gray-50 dark:border-gray-800 flex justify-between items-center">
-                                                <span className="text-[9px] text-gray-300 italic">Key: {(slide.speakerNotes?.[0] || '').substring(0, 30)}...</span>
-                                                <div className="flex gap-1">
-                                                    <button className="p-1 hover:bg-gray-100 rounded text-gray-400"><Trash2 size={12}/></button>
-                                                </div>
                                             </div>
                                         </div>
                                     </div>

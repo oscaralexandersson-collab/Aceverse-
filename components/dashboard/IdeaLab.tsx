@@ -6,11 +6,12 @@ import {
     ZoomIn, ZoomOut, Maximize2, Layers, Briefcase, 
     Users, Target, Zap, TrendingUp, Shield, HelpCircle,
     ChevronRight, ChevronDown, ListChecks, FileText, Loader2,
-    GripVertical, PanelLeftClose, PanelLeftOpen
+    GripVertical, PanelLeftClose, PanelLeftOpen, Trash2
 } from 'lucide-react';
 import { User, Idea, ChatMessage, IdeaPhaseId, IdeaNode, IdeaEdge, IdeaCard, IdeaTask, IdeaEvidence } from '../../types';
 import { db } from '../../services/db';
 import { GoogleGenAI } from "@google/genai";
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 // --- FULL SYSTEM PROMPT ---
 const COFOUNDER_SYSTEM_PROMPT = `
@@ -228,7 +229,7 @@ You ask:
 You avoid:
 - interviews
 - long questionnaires
-- vague prompts
+- nomadic prompts
 
 Each question must have a clear purpose tied to the current phase.
 
@@ -314,6 +315,9 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
     const [chatInput, setChatInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
     
+    // --- DELETE MODAL STATE ---
+    const [ideaToDelete, setIdeaToDelete] = useState<Idea | null>(null);
+
     // --- Resizable States ---
     const [chatWidth, setChatWidth] = useState(35); // Procent
     const [isResizing, setIsResizing] = useState(false);
@@ -390,6 +394,22 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
         setActiveIdea(newIdea);
         setView('workspace');
         setMessages([{ id: 'init', role: 'ai', text: "Välkommen till din Workspace. 👋 Jag är din AI Cofounder. Som din medgrundare är mitt jobb att minska risken i ditt projekt genom att ställa svåra frågor. Vad är det för problem du har identifierat som du vill lösa?", timestamp: Date.now() }]);
+    };
+
+    const confirmDelete = async () => {
+        if (!ideaToDelete) return;
+        const id = ideaToDelete.id;
+        
+        // Optimistic UI Update
+        setIdeas(prev => prev.filter(i => i.id !== id));
+        setIdeaToDelete(null);
+
+        try {
+            await db.deleteIdea(user.id, id);
+        } catch (err) {
+            console.error(err);
+            loadIdeas(); // Revert on failure
+        }
     };
 
     const handleSendMessage = async (e: React.FormEvent) => {
@@ -499,6 +519,13 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
     if (view === 'list') {
         return (
             <div className="p-8 max-w-6xl mx-auto animate-fadeIn">
+                <DeleteConfirmModal 
+                    isOpen={!!ideaToDelete}
+                    onClose={() => setIdeaToDelete(null)}
+                    onConfirm={confirmDelete}
+                    itemName={ideaToDelete?.title || ''}
+                />
+
                 <div className="flex justify-between items-end mb-10">
                     <div>
                         <h1 className="font-serif-display text-4xl mb-2 text-gray-900 dark:text-white">Idélabbet</h1>
@@ -510,12 +537,12 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {ideas.map(idea => (
-                        <div key={idea.id} onClick={() => { setActiveIdea(idea); setView('workspace'); }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group border-b-4 border-b-black">
+                        <div key={idea.id} onClick={() => { setActiveIdea(idea); setView('workspace'); }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group border-b-4 border-b-black relative">
                             <div className="flex justify-between items-start mb-6">
                                 <div className="w-10 h-10 bg-[#F3F0E8] rounded-xl flex items-center justify-center text-black"><Database size={20}/></div>
                                 <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Fas {idea.currentPhase}/9</div>
                             </div>
-                            <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2">{idea.title}</h3>
+                            <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2 line-clamp-1 pr-8">{idea.title}</h3>
                             <p className="text-sm text-gray-500 line-clamp-2 mb-6">{idea.snapshot?.problem_statement || 'Ingen problembeskrivning än.'}</p>
                             <div className="flex items-center justify-between mt-auto pt-4 border-t border-gray-100 dark:border-gray-800">
                                 <span className="text-[10px] font-bold text-gray-400 uppercase">{new Date(idea.dateCreated).toLocaleDateString()}</span>
@@ -524,6 +551,17 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
                                     <div className="w-6 h-6 rounded-full bg-purple-100 border-2 border-white dark:border-gray-900"></div>
                                 </div>
                             </div>
+                            
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIdeaToDelete(idea);
+                                }}
+                                className="absolute top-6 right-6 w-10 h-10 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center hover:bg-red-600 hover:text-white active:scale-90"
+                                title="Ta bort"
+                            >
+                                <Trash2 size={18}/>
+                            </button>
                         </div>
                     ))}
                 </div>

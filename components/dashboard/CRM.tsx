@@ -12,6 +12,7 @@ import { User, Lead, CompanyReport, CompanyReportEntry } from '../../types';
 import { db } from '../../services/db';
 import { GoogleGenAI } from "@google/genai";
 import { useLanguage } from '../../contexts/LanguageContext';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 interface CRMProps {
     user: User;
@@ -31,6 +32,9 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const [loadingMessage, setLoadingMessage] = useState('');
     const [activeReport, setActiveReport] = useState<CompanyReportEntry | null>(null);
     const [copyStatus, setCopyStatus] = useState(false);
+    
+    // DELETE STATE
+    const [reportToDelete, setReportToDelete] = useState<CompanyReportEntry | null>(null);
 
     useEffect(() => {
         loadData();
@@ -160,16 +164,20 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         }
     };
 
-    const handleDeleteCurrentReport = async () => {
-        if (!activeReport) return;
-        if (!confirm("Vill du ta bort denna rapport permanent?")) return;
-        const idToDelete = activeReport.id;
-        setActiveReport(null);
+    const confirmDeleteReport = async () => {
+        if (!reportToDelete) return;
+        const idToDelete = reportToDelete.id;
+        
+        // Optimistic UI Update
         setReports(prev => prev.filter(r => r.id !== idToDelete));
+        if (activeReport?.id === idToDelete) setActiveReport(null);
+        setReportToDelete(null);
+
         try {
             await db.deleteReport(user.id, idToDelete);
         } catch (err) {
             console.error(err);
+            loadData(); // Revert
         }
     };
 
@@ -272,6 +280,13 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
     return (
         <div className="h-full flex flex-col animate-fadeIn">
+            <DeleteConfirmModal 
+                isOpen={!!reportToDelete}
+                onClose={() => setReportToDelete(null)}
+                onConfirm={confirmDeleteReport}
+                itemName={reportToDelete?.title || ''}
+            />
+
             <div className="flex justify-between items-end mb-6 no-print px-1">
                 <div>
                     <h1 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-1">{t('dashboard.crmContent.title')}</h1>
@@ -306,9 +321,18 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {reports.map(report => (
-                                        <div key={report.id} onClick={() => setActiveReport(report)} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 transition-all hover:shadow-lg cursor-pointer group border-b-4 border-b-black">
-                                            <h4 className="font-bold text-gray-900 dark:text-white truncate text-lg mb-1">{report.title}</h4>
+                                        <div key={report.id} onClick={() => setActiveReport(report)} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 transition-all hover:shadow-lg cursor-pointer group border-b-4 border-b-black relative overflow-hidden">
+                                            <h4 className="font-bold text-gray-900 dark:text-white truncate text-lg mb-1 pr-8">{report.title}</h4>
                                             <p className="text-xs text-gray-500">Comprehensive Market Analysis</p>
+                                            <button 
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setReportToDelete(report);
+                                                }}
+                                                className="absolute top-4 right-4 p-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
                                         </div>
                                     ))}
                                 </div>
@@ -335,7 +359,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                             {isDownloading ? <Loader2 className="animate-spin" size={14} /> : <Download size={14}/>}
                                             {isDownloading ? 'Genererar...' : 'Ladda ned PDF'}
                                         </button>
-                                        <button onClick={handleDeleteCurrentReport} className="p-2 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-lg hover:bg-red-100 transition-colors"><Trash2 size={20}/></button>
+                                        <button onClick={() => setReportToDelete(activeReport)} className="p-2 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-lg hover:bg-red-100 transition-colors"><Trash2 size={20}/></button>
                                     </div>
                                 </div>
 

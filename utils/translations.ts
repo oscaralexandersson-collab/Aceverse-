@@ -1,8 +1,13 @@
 
-
-
 export const translations = {
   sv: {
+    common: {
+      deleteConfirm: "Är du säker på att du vill radera \"{name}\"?",
+      deleteWarning: "Denna åtgärd går inte att ångra och all tillhörande data försvinner.",
+      yesDelete: "Ja, radera permanent",
+      cancel: "Avbryt",
+      deleting: "Raderar..."
+    },
     nav: {
       product: 'Produkt',
       solutions: 'Lösningar',
@@ -208,7 +213,7 @@ export const translations = {
       ],
       values: {
         title: 'Våra värderingar',
-        v1: { title: 'Empowerment', desc: 'Vi tror att alla har en entreprenör inom sig. Vi tillhandahåller bara verktyg för att släppa lös den.' },
+        v1: { title: 'Empowerment', desc: 'Vi tror att alla har en entreprenör inom sig. Vi tillhandåller bara verktyg för att släppa lös den.' },
         v2: { title: 'Tillgänglighet', desc: 'Avancerad affärsstrategi ska inte bara vara för de med stort kapital. Vi demokratiserar kunskap.' },
         v3: { title: 'Innovation', desc: 'Vi använder AI för att förstärka mänsklig kreativitet, inte ersätta den. Människan i förarsätet.' }
       },
@@ -320,7 +325,7 @@ export const translations = {
             sent: "E-post skickat till mottagaren (Simulering).",
             template: {
                 subject: "Ämne: Skala upp {company}s tillväxt",
-                body: "Hej {name},\n\nJag undersökte {company} och såg att ni expanderar er verksamhet. Baserat på er senaste tillväxt tror jag att vår lösning kan hjälpa er automatisera er kundanskaffning.\n\n{prompt}Skulle du vara öppen för ett 10-minuters samtal nästa tisdag?\n\nBest regards,\n{sender}"
+                body: "Hej {name},\n\nJag undersökte {company} och saw att ni expanderar er verksamhet. Baserat på er senaste tillväxt tror jag att vår lösning kan hjälpa er automatisera er kundanskaffning.\n\n{prompt}Skulle du vara öppen för ett 10-minuters samtal nästa tisdag?\n\nBest regards,\n{sender}"
             },
             promptPrefix: "Angående din notering om \"{prompt}\": vi specialiserar oss exakt på detta område.\n\n"
         },
@@ -397,7 +402,7 @@ export const translations = {
             revenue: "Intäkter & GTM"
         },
         aiMessages: {
-            intro: "Välkommen till Idélabbet. Jag är din AI-medgrundare.\n\nJag har analyserat ditt koncept: \"{title}\".\n\nFör att bygga ett livskraftigt företag behöver jag förstå tre grundpelare: Problemet, Målgruppen och Lösningen.\n\nVi har konceptet. Nu, var specifik: **Vem exakt är målgruppen för detta?** (t.ex. \"studenter\", \"HR-chefer\", \"ensamstående föräldrar\")",
+            intro: "Välkommen till Idélabbet. Jag är din AI-medgrundare.\n\nJag har analyserat ditt koncept: \"{title}\".\n\nFör att bygga ett livskraftigt företag behöver jag förstå tre grundpelare: Problemet, Målgruppen och Lösningen.\n\nWe have the konceptet. Nu, var specifik: **Vem exakt är målgruppen för detta?** (t.ex. \"studenter\", \"HR-chefer\", \"ensamstående föräldrar\")",
             audience: "Uppfattat. Fokuserar på {audience}.\n\nNu, **hur löser din produkt deras problem annorlunda** än vad de använder idag? Vad är den specifika \"magin\"?",
             solution: "Utmärkt. Vi har grunden.\n\nProblem: {problem}...\nMålgrupp: {audience}\nLösning: {solution}\n\nJag går nu vidare till **Fas 2: Marknadsanalys**.\n\nJag kör en snabb marknadsscanning för denna bransch...",
             marketDone: "**Marknadsanalys Klar**\n\nJag har genererat en marknadsöversikt baserat på ditt koncept. \n\n{data}\n\nStämmer denna Total Addressable Market (TAM) överens med dina förväntningar, eller tror du att vi riktar in oss på ett smalare segment?",
@@ -494,7 +499,7 @@ export const translations = {
             objPlaceholder: "t.ex. Lansera vår nya sommalkollektion...",
             audience: "Målgrupp",
             audPlaceholder: "t.ex. Studenter i storstäder",
-            platform: "Plattform",
+            platform: "Platform",
             generateBtn: "Generera Assets",
             generating: "Skapar kampanj...",
             results: "Genererade Resultat",
@@ -524,6 +529,13 @@ export const translations = {
     }
   },
   en: {
+    common: {
+      deleteConfirm: "Are you sure you want to delete \"{name}\"?",
+      deleteWarning: "This action cannot be undone and all associated data will be lost.",
+      yesDelete: "Yes, delete permanently",
+      cancel: "Cancel",
+      deleting: "Deleting..."
+    },
     nav: {
       product: 'Product',
       solutions: 'Solutions',

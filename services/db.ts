@@ -22,20 +22,26 @@ class DatabaseService {
   async signup(email: string, password: string, firstName: string, lastName: string): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
     
-    if (cleanEmail.endsWith('@local.dev')) {
+    // Handle bypass accounts in signup
+    if (cleanEmail.endsWith('@local.dev') || cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se') {
         const localUser: User = {
-            id: 'local-' + Date.now(),
+            id: cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se' ? 'local-demo' : 'local-' + Date.now(),
             email: cleanEmail,
             firstName,
             lastName,
             company: 'Local Startup',
             createdAt: new Date().toISOString(),
-            onboardingCompleted: false,
-            plan: 'free'
+            onboardingCompleted: cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se',
+            plan: 'pro'
         };
         
         const existingUsers = JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '[]');
         if (existingUsers.some((u: User) => u.email === cleanEmail)) {
+            // For demo/test, just login instead of throwing error if user wants to "register" again
+            if (cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se') {
+                this.setSession(localUser, true);
+                return localUser;
+            }
             throw new Error('Användaren finns redan (Lokalt). Logga in istället.');
         }
         existingUsers.push({ ...localUser, password });
@@ -70,7 +76,10 @@ class DatabaseService {
   async login(email: string, password: string, rememberMe: boolean = true): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
 
-    if (cleanEmail === 'demo@aceverse.se') return this.createDemoUser();
+    // Explicit bypass for demo/test accounts
+    if (cleanEmail === 'demo@aceverse.se' || cleanEmail === 'test@aceverse.se') {
+        return this.createDemoUser();
+    }
 
     if (cleanEmail.endsWith('@local.dev')) {
         const existingUsers = JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '[]');
@@ -116,7 +125,16 @@ class DatabaseService {
   }
 
   async createDemoUser(): Promise<User> {
-    const mockUser: User = { id: 'local-demo', email: 'demo@aceverse.se', firstName: 'Demo', lastName: 'User', company: 'Demo Corp', createdAt: new Date().toISOString(), onboardingCompleted: false, plan: 'pro' };
+    const mockUser: User = { 
+        id: 'local-demo', 
+        email: 'demo@aceverse.se', 
+        firstName: 'Demo', 
+        lastName: 'User', 
+        company: 'Demo Corp', 
+        createdAt: new Date().toISOString(), 
+        onboardingCompleted: true, 
+        plan: 'pro' 
+    };
     this.setSession(mockUser, true);
     return mockUser;
   }
@@ -205,7 +223,6 @@ class DatabaseService {
     };
   }
 
-  // Added search method for global search functionality
   async search(userId: string, query: string): Promise<SearchResult[]> {
     const data = await this.getUserData(userId);
     const q = query.toLowerCase();
@@ -218,8 +235,8 @@ class DatabaseService {
     });
 
     data.ideas.forEach(i => {
-      if (i.title.toLowerCase().includes(q) || i.description.toLowerCase().includes(q)) {
-        results.push({ id: i.id, type: 'idea', title: i.title, subtitle: i.description.substring(0, 40) + '...', view: 'ideas' });
+      if (i.title.toLowerCase().includes(q) || (i.snapshot?.problem_statement || '').toLowerCase().includes(q)) {
+        results.push({ id: i.id, type: 'idea', title: i.title, subtitle: (i.snapshot?.problem_statement || '').substring(0, 40) + '...', view: 'ideas' });
       }
     });
 
@@ -241,23 +258,6 @@ class DatabaseService {
       return pitch;
   }
 
-  async updatePitch(userId: string, pitchId: string, updates: Partial<Pitch>): Promise<void> {
-      const key = getLocalKey('pitches', userId);
-      const pitches = JSON.parse(localStorage.getItem(key) || '[]');
-      const idx = pitches.findIndex((p: any) => p.id === pitchId);
-      if (idx >= 0) {
-          pitches[idx] = { ...pitches[idx], ...updates };
-          localStorage.setItem(key, JSON.stringify(pitches));
-      }
-      if (!userId.startsWith('local-')) {
-          const payload: any = {};
-          if (updates.content) payload.content = updates.content;
-          if (updates.contextScore !== undefined) payload.context_score = updates.contextScore;
-          if (updates.name) payload.name = updates.name;
-          this.safeSupabaseCall(supabase.from('pitches').update(payload).eq('id', pitchId).eq('user_id', userId));
-      }
-  }
-
   async deletePitch(userId: string, pitchId: string): Promise<void> {
       const key = getLocalKey('pitches', userId);
       const filtered = JSON.parse(localStorage.getItem(key) || '[]').filter((p: any) => p.id !== pitchId);
@@ -265,14 +265,12 @@ class DatabaseService {
       if (!userId.startsWith('local-')) this.safeSupabaseCall(supabase.from('pitches').delete().eq('id', pitchId).eq('user_id', userId));
   }
 
-  // Added addIdea method
   async addIdea(userId: string, ideaData: Omit<Idea, 'id' | 'dateCreated' | 'score'>): Promise<Idea> {
     const idea: Idea = { id: this.generateId(), dateCreated: new Date().toISOString(), score: 0, ...ideaData };
     this.saveLocal('ideas', userId, idea);
     return idea;
   }
 
-  // Added updateIdeaState method
   async updateIdeaState(userId: string, ideaId: string, updates: Partial<Idea>): Promise<void> {
     const key = getLocalKey('ideas', userId);
     const ideas = JSON.parse(localStorage.getItem(key) || '[]');
@@ -283,6 +281,15 @@ class DatabaseService {
     }
   }
 
+  async deleteIdea(userId: string, ideaId: string): Promise<void> {
+    const key = getLocalKey('ideas', userId);
+    const filtered = JSON.parse(localStorage.getItem(key) || '[]').filter((i: any) => i.id !== ideaId);
+    localStorage.setItem(key, JSON.stringify(filtered));
+    if (!userId.startsWith('local-')) {
+        this.safeSupabaseCall(supabase.from('ideas').delete().eq('id', ideaId).eq('user_id', userId));
+    }
+  }
+
   async addMessage(userId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>): Promise<ChatMessage> {
       const msg: ChatMessage = { id: this.generateId(), timestamp: Date.now(), ...message };
       this.saveLocal('chat_messages', userId, msg);
@@ -290,21 +297,18 @@ class DatabaseService {
       return msg;
   }
 
-  // Added createChatSession method
   async createChatSession(userId: string, name: string): Promise<ChatSession> {
     const session: ChatSession = { id: this.generateId(), name, lastMessageAt: Date.now(), preview: 'Starta konversationen...' };
     this.saveLocal('chat_sessions', userId, session);
     return session;
   }
 
-  // Added deleteChatSession method
   async deleteChatSession(userId: string, sessionId: string): Promise<void> {
     const key = getLocalKey('chat_sessions', userId);
     const filtered = JSON.parse(localStorage.getItem(key) || '[]').filter((s: any) => s.id !== sessionId);
     localStorage.setItem(key, JSON.stringify(filtered));
   }
 
-  // Added renameChatSession method
   async renameChatSession(userId: string, sessionId: string, name: string): Promise<void> {
     await this.updateChatSession(userId, sessionId, { name });
   }
@@ -334,7 +338,6 @@ class DatabaseService {
       }
   }
 
-  // Added report management methods
   async addReportToHistory(userId: string, report: CompanyReport): Promise<CompanyReportEntry> {
     const entry: CompanyReportEntry = {
         id: this.generateId(),
@@ -352,7 +355,6 @@ class DatabaseService {
     localStorage.setItem(key, JSON.stringify(filtered));
   }
 
-  // Added settings and GDPR methods
   async saveSettings(userId: string, settings: UserSettings): Promise<void> {
     localStorage.setItem(getLocalKey('settings', userId), JSON.stringify(settings));
   }
@@ -371,7 +373,6 @@ class DatabaseService {
     await this.logout();
   }
 
-  // Added contact request and marketing methods
   async submitContactRequest(request: ContactRequest): Promise<void> {
     const req = { ...request, id: this.generateId(), created_at: new Date().toISOString() };
     const key = 'aceverse_contact_requests';

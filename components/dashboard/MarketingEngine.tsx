@@ -59,7 +59,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         const data = await db.getUserData(user.id);
         if (data.brandDNAs && data.brandDNAs.length > 0) {
             setDnas(data.brandDNAs.sort((a,b) => new Date(b.meta.generatedAt).getTime() - new Date(a.meta.generatedAt).getTime()));
-            // Optionally load latest? No, start on onboarding/list if no active DNA.
         }
         if (data.marketingCampaigns) {
             setCampaigns(data.marketingCampaigns);
@@ -100,7 +99,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         if(window.innerWidth < 768) setIsSidebarOpen(false);
     };
 
-    // --- 1. DNA EXTRACTION ENGINE (Pomelli Logic) ---
+    // --- 1. DNA EXTRACTION ENGINE ---
     const analyzeBrandDNA = async () => {
         if (!brandUrl) return;
         setIsProcessing(true);
@@ -110,8 +109,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
-            // Phase 1: Simulated "Pre-DNA" Construction via Search Grounding
-            // We ask Gemini to "crawl" the site via search tool
             const analysisPrompt = `
                 ACT AS A SENIOR BRAND STRATEGIST.
                 TARGET URL: ${brandUrl}
@@ -152,17 +149,15 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
             `;
 
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3-flash-preview',
                 contents: analysisPrompt,
                 config: { 
                     tools: [{googleSearch: {}}]
-                    // NOTE: We CANNOT use responseMimeType: 'application/json' when tools are enabled.
                 }
             });
 
             let jsonText = response.text || '{}';
             
-            // Robust JSON extraction (removes markdown code blocks if present)
             const match = jsonText.match(/```json\s*([\s\S]*?)\s*```/) || jsonText.match(/```\s*([\s\S]*?)\s*```/);
             if (match) {
                 jsonText = match[1];
@@ -170,7 +165,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
 
             const resultJSON = JSON.parse(jsonText);
             
-            // Fallback visuals if AI fails to find specific hex codes (common with text-only scraping)
             if (!resultJSON.visual?.primaryColors?.length) {
                 resultJSON.visual = {
                     primaryColors: [{ hex: '#000000', role: 'primary', usageHint: 'Fallback' }],
@@ -181,7 +175,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                 };
             }
 
-            // ADD ID TO DNA
             resultJSON.id = Date.now().toString();
 
             setDna(resultJSON);
@@ -198,7 +191,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         }
     };
 
-    // --- 2. CAMPAIGN IDEATION (Pomelli Logic) ---
+    // --- 2. CAMPAIGN IDEATION ---
     const generateCampaignIdeas = async () => {
         if (!dna || !campaignGoal) return;
         setIsProcessing(true);
@@ -233,7 +226,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
             `;
 
             const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3-flash-preview',
                 contents: prompt,
                 config: { responseMimeType: 'application/json' }
             });
@@ -249,7 +242,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         }
     };
 
-    // --- 3. ASSET GENERATION (Optimized: Text First, Images Background) ---
+    // --- 3. ASSET GENERATION ---
     const generateAssets = async (idea: CampaignIdea, isAppending = false) => {
         setIsProcessing(true);
         setLoadingMessage(isAppending ? 'Genererar fler varianter...' : 'Skapar copy och design för alla kanaler...');
@@ -258,7 +251,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
-            // A. Generate Text Assets
             const textPrompt = `
                 ACT AS A SENIOR COPYWRITER.
                 DNA VOICE: ${JSON.stringify(dna?.voice)}
@@ -279,14 +271,13 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
             `;
 
             const textResponse = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3-flash-preview',
                 contents: textPrompt,
                 config: { responseMimeType: 'application/json' }
             });
 
             const textAssets: CampaignAsset[] = JSON.parse(textResponse.text || '[]');
             
-            // 1. UPDATE UI IMMEDIATELY WITH TEXT
             if (isAppending) {
                 setAssets(prev => [...prev, ...textAssets]);
             } else {
@@ -295,20 +286,18 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                 setStep('asset_generation');
             }
             
-            setIsProcessing(false); // Stop full-screen loader, now we load images in background
+            setIsProcessing(false);
 
-            // 2. TRIGGER BACKGROUND IMAGE GENERATION
             textAssets.forEach(asset => {
                 if (asset.channel !== 'email_intro') {
                     generateImageForAsset(asset);
                 }
             });
 
-            // Save Campaign to DB (Text only initially, updated later via state/effect or explicit save)
             if (!isAppending) {
                 const campaignRecord: MarketingCampaign = {
                     id: Date.now().toString(),
-                    brandDnaId: dna?.id, // Link to DNA
+                    brandDnaId: dna?.id,
                     name: idea.name,
                     brief: { goal: campaignGoal, audience: campaignAudience, timeframe: campaignTimeframe, constraints: '' },
                     selectedIdea: idea,
@@ -326,13 +315,11 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
     };
 
     const generateImageForAsset = async (asset: CampaignAsset) => {
-        // Set loading state for this specific image
         setGeneratingImages(prev => ({ ...prev, [asset.id]: true }));
 
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-            // 1. Generate Image Prompt
             const promptGenPrompt = `
                 Create a text-to-image prompt for this campaign asset.
                 Context: ${asset.content?.body || 'Marketing image'}
@@ -341,10 +328,9 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                 Output: Just the prompt string.
             `;
             
-            const promptRes = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: promptGenPrompt });
+            const promptRes = await ai.models.generateContent({ model: 'gemini-3-flash-preview', contents: promptGenPrompt });
             const imagePrompt = promptRes.text?.trim() || "";
 
-            // 2. Generate Image
             const imgRes = await ai.models.generateContent({
                 model: 'gemini-2.5-flash-image',
                 contents: { parts: [{ text: imagePrompt }] },
@@ -356,7 +342,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                 imgData = imgRes.candidates[0].content.parts[0].inlineData.data;
             }
 
-            // 3. Update Asset State with Image
             setAssets(prev => prev.map(a => 
                 a.id === asset.id 
                 ? { ...a, image: { prompt: imagePrompt, url: imgData ? `data:image/jpeg;base64,${imgData}` : undefined } }
@@ -381,7 +366,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         }
     };
 
-    // HELPER: Download Image from Base64
     const downloadImage = (base64Data: string, filename: string) => {
         const link = document.createElement('a');
         link.href = base64Data;
@@ -391,11 +375,9 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         document.body.removeChild(link);
     };
 
-    // REAL ATTACH FUNCTIONALITY
     const handleAttachToPlatform = async (asset: CampaignAsset) => {
         setAttachStatus('loading');
         
-        // 1. COPY TEXT TO CLIPBOARD (Universal step)
         const textToCopy = `${asset.content?.headline || ''}\n\n${asset.content?.body || ''}\n\n${asset.content?.hashtags?.map(h => `#${h}`).join(' ') || ''}`;
         try {
             await navigator.clipboard.writeText(textToCopy);
@@ -403,21 +385,18 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
             console.error("Clipboard failed", err);
         }
 
-        // 2. DOWNLOAD IMAGE (If exists)
         let imageAction = '';
         if (asset.image?.url) {
             downloadImage(asset.image.url, `aceverse_${asset.channel}_${Date.now()}.png`);
             imageAction = 'Bild nedladdad';
         }
 
-        // 3. OPEN PLATFORM (Deep linking / Web fallback)
-        await new Promise(resolve => setTimeout(resolve, 800)); // Slight delay for UX
+        await new Promise(resolve => setTimeout(resolve, 800));
 
         let platformName = '';
         
         if (asset.channel === 'instagram_feed') {
             platformName = 'Instagram';
-            // Open Create/Select or Root. Deep linking to composer with pre-filled content is restricted on web.
             window.open('https://www.instagram.com/', '_blank'); 
         } else if (asset.channel === 'linkedin_post') {
             platformName = 'LinkedIn';
@@ -436,16 +415,12 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
 
         setShowToast({ message: toastMsg, subMessage: subMsg, visible: true });
         
-        // Reset status
         setTimeout(() => {
             setAttachStatus('idle');
             setShowToast({ message: '', visible: false });
         }, 5000);
     };
 
-    // --- RENDERERS ---
-
-    // 1. Loading State
     if (isProcessing) {
         return (
             <div className="h-full flex flex-col items-center justify-center bg-white dark:bg-gray-900 animate-fadeIn">
@@ -463,7 +438,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
     return (
         <div className="flex h-[calc(100vh-64px)] w-full overflow-hidden bg-white dark:bg-gray-950 border-t border-gray-200 dark:border-gray-800 relative">
             
-            {/* TOAST NOTIFICATION */}
             {showToast.visible && (
                 <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 bg-black dark:bg-white text-white dark:text-black px-6 py-4 rounded-xl shadow-2xl flex items-start gap-3 animate-[slideUp_0.5s_ease-out_forwards] max-w-sm">
                     <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center shrink-0 mt-0.5">
@@ -476,7 +450,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                 </div>
             )}
 
-            {/* --- HISTORY SIDEBAR --- */}
             <div className={`bg-gray-50 dark:bg-black border-r border-gray-200 dark:border-gray-800 flex-shrink-0 transition-all duration-300 flex flex-col ${isSidebarOpen ? 'w-72' : 'w-0 overflow-hidden'}`}>
                 <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center">
                     <h2 className="font-serif-display text-lg text-gray-900 dark:text-white">Mina Varumärken</h2>
@@ -494,7 +467,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                     {dnas.length === 0 && <div className="text-center text-xs text-gray-400 mt-4">Inga analyser sparade än.</div>}
 
                     {dnas.map(d => {
-                        // Filter campaigns for this DNA
                         const dnaCampaigns = campaigns.filter(c => c.brandDnaId === d.id);
                         const isActive = dna?.id === d.id;
 
@@ -532,9 +504,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                 </div>
             </div>
 
-            {/* --- MAIN CONTENT --- */}
             <div className="flex-1 flex flex-col h-full relative overflow-y-auto">
-                {/* Toggle Button (Visible when sidebar closed) */}
                 {!isSidebarOpen && (
                     <button 
                         onClick={() => setIsSidebarOpen(true)}
@@ -544,7 +514,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                     </button>
                 )}
 
-                {/* 2. Onboarding / URL Input */}
                 {step === 'onboarding' && (
                     <div className="h-full flex flex-col items-center justify-center p-8 animate-fadeIn">
                         <div className="max-w-2xl text-center">
@@ -574,12 +543,11 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                     Analysera
                                 </button>
                             </div>
-                            <p className="mt-4 text-xs text-gray-400 font-medium tracking-wide uppercase">Powered by Google Gemini 2.5</p>
+                            <p className="mt-4 text-xs text-gray-400 font-medium tracking-wide uppercase">Powered by Google Gemini 3</p>
                         </div>
                     </div>
                 )}
 
-                {/* 3. DNA Review */}
                 {step === 'dna_review' && dna && (
                     <div className="flex flex-col max-w-5xl mx-auto p-8 w-full animate-fadeIn">
                         <div className="flex justify-between items-end mb-8">
@@ -598,7 +566,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                         </div>
 
                         <div className="grid md:grid-cols-2 gap-8">
-                            {/* Visual Card */}
                             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-8 shadow-sm">
                                 <div className="flex items-center gap-3 mb-6">
                                     <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg text-purple-600 dark:text-purple-400"><Palette size={20} /></div>
@@ -639,7 +606,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                 </div>
                             </div>
 
-                            {/* Voice Card */}
                             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-8 shadow-sm">
                                 <div className="flex items-center gap-3 mb-6">
                                     <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400"><Megaphone size={20} /></div>
@@ -686,7 +652,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* 4. Campaign Brief Input */}
                 {step === 'campaign_brief' && (
                     <div className="h-full flex items-center justify-center p-6 animate-fadeIn">
                         <div className="max-w-xl w-full bg-white dark:bg-gray-900 p-10 rounded-3xl shadow-xl border border-gray-100 dark:border-gray-800">
@@ -722,7 +687,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                         onChange={e => setCampaignTimeframe(e.target.value)}
                                     >
                                         <option>Kommande 4 veckor</option>
-                                        <option>Nästa kvartal</option>
+                                        <option>Next kvartal</option>
                                         <option>Inför helgen</option>
                                     </select>
                                 </div>
@@ -739,7 +704,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* 5. Campaign Selection */}
                 {step === 'campaign_selection' && (
                     <div className="h-full max-w-6xl mx-auto p-6 animate-fadeIn overflow-y-auto">
                         <div className="text-center mb-12">
@@ -781,10 +745,8 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* 6. Asset Workspace (The Final View) */}
                 {step === 'asset_generation' && (
                     <div className="h-full flex flex-col md:flex-row bg-gray-50 dark:bg-gray-950 animate-fadeIn overflow-hidden">
-                        {/* Left Sidebar: Assets List */}
                         <div className="w-full md:w-80 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 flex flex-col h-full">
                             <div className="p-6 border-b border-gray-100 dark:border-gray-800">
                                 <button onClick={() => setStep('campaign_selection')} className="text-xs font-bold text-gray-400 hover:text-black dark:hover:text-white mb-2 flex items-center gap-1"><ChevronRight className="rotate-180" size={12} /> Tillbaka</button>
@@ -828,18 +790,16 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                             </div>
                         </div>
 
-                        {/* Main Content: Editor & Preview */}
                         <div className="flex-1 overflow-y-auto p-6 md:p-12">
                             {activeAssetId && assets.find(a => a.id === activeAssetId) && (
                                 <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-12">
-                                    {/* Editor Column */}
                                     <div className="space-y-6">
                                         <div>
                                             <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Rubrik</label>
                                             <input 
                                                 className="w-full bg-transparent border-b-2 border-gray-200 dark:border-gray-700 py-2 text-xl font-serif-display text-gray-900 dark:text-white focus:border-black dark:focus:border-white outline-none transition-colors"
                                                 value={assets.find(a => a.id === activeAssetId)?.content?.headline || ''}
-                                                onChange={() => {}}
+                                                readOnly
                                             />
                                         </div>
                                         <div>
@@ -847,7 +807,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                             <textarea 
                                                 className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-4 text-sm leading-relaxed text-gray-700 dark:text-gray-300 h-64 resize-none focus:ring-1 focus:ring-black dark:focus:ring-white outline-none"
                                                 value={assets.find(a => a.id === activeAssetId)?.content?.body || ''}
-                                                onChange={() => {}}
+                                                readOnly
                                             />
                                         </div>
                                         <div>
@@ -855,17 +815,15 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                             <input 
                                                 className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-3 text-sm font-medium text-gray-900 dark:text-white"
                                                 value={assets.find(a => a.id === activeAssetId)?.content?.cta || ''}
-                                                onChange={() => {}}
+                                                readOnly
                                             />
                                         </div>
                                     </div>
 
-                                    {/* Preview Column */}
                                     <div>
                                         <label className="block text-xs font-bold text-gray-400 uppercase mb-4">Förhandsgranskning</label>
                                         
                                         <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-800 overflow-hidden">
-                                            {/* Mock Platform Header */}
                                             <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-2">
                                                 <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700"></div>
                                                 <div>
@@ -874,7 +832,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                                 </div>
                                             </div>
 
-                                            {/* Image */}
                                             {assets.find(a => a.id === activeAssetId)?.image && (
                                                 <div className="relative aspect-square bg-gray-100 dark:bg-gray-800 overflow-hidden group">
                                                     {assets.find(a => a.id === activeAssetId)?.image?.url ? (
@@ -895,7 +852,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                                         </div>
                                                     )}
                                                     
-                                                    {/* Regen Overlay */}
                                                     <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                                         <button 
                                                             onClick={() => handleRegenerateImage(assets.find(a => a.id === activeAssetId)!)}
@@ -908,7 +864,6 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                                                 </div>
                                             )}
 
-                                            {/* Caption Preview */}
                                             <div className="p-4">
                                                 <p className="text-sm text-gray-800 dark:text-gray-200 mb-2">
                                                     <span className="font-bold mr-2">aceverse_demo</span>

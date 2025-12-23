@@ -246,7 +246,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
             const rawHistory = messages.slice(-15);
             
             // 2. Format: Ensure strict alternating roles (User -> Model -> User)
-            // This prevents API crashes if multiple user messages are sent in a row.
             const history = [];
             let lastRole = '';
             
@@ -268,7 +267,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
             }
 
             // 3. Last Check: If history ends with User, we must merge current input to it
-            // because startChat expects to answer the *next* turn. If history ends in User, model is confused.
             if (history.length > 0 && history[history.length - 1].role === 'user') {
                 const lastHistoryItem = history.pop();
                 if (lastHistoryItem) {
@@ -291,7 +289,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
             `;
 
             const chat = ai.chats.create({
-                model: 'gemini-2.5-flash',
+                model: 'gemini-3-flash-preview',
                 config: { systemInstruction: specificInstruction },
                 history: history
             });
