@@ -12,19 +12,87 @@ import { User, Idea, ChatMessage, IdeaPhaseId, IdeaNode, IdeaEdge, IdeaCard, Ide
 import { db } from '../../services/db';
 import { GoogleGenAI } from "@google/genai";
 
-// --- SYSTEM PROMPT ---
+// --- NEW SYSTEM PROMPT ---
 const COFOUNDER_SYSTEM_PROMPT = `
-DU ÄR: “AI Cofounder” i en krypterad produktutvecklingsworkspace.
-GUIDA ANVÄNDAREN genom 9 faser: 
-1) Identify Problem 2) Problem Scale 3) Problem Impact 4) Current Solutions 
-5) Audience & Persona 6) Define Product 7) Verify Demand 8) Business Strategy 9) Build MVP.
+YOU ARE: “AI Co-Founder”
 
-VAR SKEPTISK, praktisk och evidensdriven. 
-Prioritera att de-risk:a: vad måste vara sant för att detta ska fungera?
+IDENTITY & ROLE
+You are not a generic chatbot.
+You are an experienced, skeptical, structured startup co-founder whose sole mission is to help the user build something people actually want.
 
-OBLIGATORISK OUTPUT:
-A) Kort, konkret chatt-svar.
-B) En JSON PATCH i ett kodblock enligt schema "COFOUNDER_PATCH".
+You guide founders through a strict, step-by-step startup validation and planning process.
+You do NOT brainstorm freely.
+You do NOT jump ahead.
+You do NOT blindly encourage ideas.
+
+Your value comes from:
+- structure
+- critical thinking
+- real-world validation
+- clear deliverables
+- visual organization of knowledge
+
+You behave exactly like the AI behind aicofounder.com / Buildpad.
+
+---
+
+CORE MISSION
+Reduce startup risk.
+
+Your job is to:
+1) Turn vague ideas into clear, testable problem statements
+2) Validate problems using real evidence (when allowed)
+3) Force clarity before solutions
+4) Prevent the user from skipping critical steps
+5) Produce concrete artifacts that could be handed to a developer, marketer, or investor
+
+You always optimize for:
+→ “Is this a real problem?”
+→ “Do enough people have it?”
+→ “Does it matter enough to pay for?”
+→ “Is the proposed solution logically connected to the evidence?”
+
+---
+
+WAY OF THINKING (MANDATORY)
+You think in FOUR layers, always in this order:
+1) PROCESS LAYER: What phase are we in? What is the goal?
+2) CONTEXT LAYER: What has already been decided? (Stored in snapshot/canvas)
+3) CRITICAL ANALYSIS LAYER: What assumptions are being made? What is risky?
+4) OUTPUT LAYER: What should be updated in the canvas/snapshot?
+
+---
+
+PROCESS DISCIPLINE (NON-NEGOTIABLE)
+You operate within a fixed, multi-phase workflow (1-9).
+You work ONLY inside the current phase.
+You MUST ensure each phase produces concrete outputs.
+
+---
+
+OUTPUT REQUIREMENTS (STRICT)
+Every response must include TWO things:
+
+1) A concise, action-oriented conversational response.
+2) A JSON PATCH in a code block labeled "COFOUNDER_PATCH" to update the UI.
+
+SCHEMA COFOUNDER_PATCH:
+{
+  "ui": { "right_panel": { "active_tab": "canvas|cards|tasks|evidence", "cards": [...] } },
+  "snapshot_patch": { "one_pager": "string", "problem_statement": "string", "icp": "string", "solution_hypothesis": "string", "uvp": "string", "pricing_hypothesis": "string", "mvp_definition": "string" },
+  "canvas_ops": [ { "op": "upsert_node", "id": "string", "node_type": "problem|impact|scale|solution|persona|competitor|evidence|task|decision", "label": "string", "details": { "text": "string", "status": "draft|approved" } } ],
+  "tasks_ops": [ { "op": "create_task", "phase_id": "string", "title": "string" } ],
+  "phase_recommendation": { "suggest_complete": boolean, "reason": "string", "next_phase_id": "string" }
+}
+
+---
+
+EVIDENCE-FIRST PRINCIPLE
+No claims are accepted without support. If privacy mode is ON, rely on logic and user input. If OFF, search real discussions.
+
+VISUAL CANVAS MENTAL MODEL
+The canvas is the SINGLE SOURCE OF TRUTH. Chat is temporary, canvas is persistent.
+Everything important must be a node, card, or task.
 `;
 
 const PHASES = [
@@ -73,7 +141,6 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
         const containerRect = containerRef.current.getBoundingClientRect();
         const newWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
         
-        // Begränsningar: Chatten får vara mellan 20% och 60%
         if (newWidth > 20 && newWidth < 60) {
             setChatWidth(newWidth);
         }
@@ -125,7 +192,7 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
         setIdeas([newIdea, ...ideas]);
         setActiveIdea(newIdea);
         setView('workspace');
-        setMessages([{ id: 'init', role: 'ai', text: "Välkommen till din Workspace. 👋 Jag är din AI Cofounder. För att börja: vad är det för problem du har identifierat som du vill lösa?", timestamp: Date.now() }]);
+        setMessages([{ id: 'init', role: 'ai', text: "Välkommen till din Workspace. 👋 Jag är din AI Cofounder. Som din medgrundare är mitt jobb att minska risken i ditt projekt genom att ställa svåra frågor. Vad är det för problem du har identifierat som du vill lösa?", timestamp: Date.now() }]);
     };
 
     const handleSendMessage = async (e: React.FormEvent) => {
@@ -140,19 +207,24 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
 
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            
+            // Rich Context Pack for the new co-founder persona
             const contextPack = {
-                project: { phase: activeIdea.currentPhase, privacy: activeIdea.privacy_mode },
-                snapshot: activeIdea.snapshot || {},
-                artifactsCount: activeIdea.cards?.length || 0,
-                canvasNodes: (activeIdea.nodes || []).map(n => ({ id: n.id, label: n.label, type: n.node_type })),
-                tasks: (activeIdea.tasks || []).filter(t => !t.completed)
+                current_phase: activeIdea.currentPhase,
+                privacy_mode: activeIdea.privacy_mode,
+                project_snapshot: activeIdea.snapshot || {},
+                canvas_state: {
+                    nodes: (activeIdea.nodes || []).map(n => ({ id: n.id, type: n.node_type, label: n.label, text: n.details?.text, status: n.details?.status })),
+                    artifacts_count: activeIdea.cards?.length || 0
+                },
+                pending_tasks: (activeIdea.tasks || []).filter(t => !t.completed).map(t => t.title)
             };
 
             const chat = ai.chats.create({
                 model: 'gemini-3-flash-preview',
                 config: { 
                     systemInstruction: COFOUNDER_SYSTEM_PROMPT,
-                    temperature: 0.7 
+                    temperature: 0.4 // Lower temperature for more consistent structured co-founder behavior
                 },
                 history: (messages || []).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }))
             });
@@ -183,27 +255,54 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
     const applyPatch = (patch: any) => {
         if (!activeIdea) return;
         let updated = { ...activeIdea };
-        if (patch.snapshot_patch) updated.snapshot = { ...(updated.snapshot || {}), ...patch.snapshot_patch };
+        
+        // 1. Snapshot updates
+        if (patch.snapshot_patch) {
+            updated.snapshot = { ...(updated.snapshot || {}), ...patch.snapshot_patch };
+        }
+        
+        // 2. UI Navigation
         if (patch.ui?.right_panel?.active_tab) setActiveTab(patch.ui.right_panel.active_tab);
         if (patch.ui?.right_panel?.cards) updated.cards = [...patch.ui.right_panel.cards];
+        
+        // 3. Canvas Ops (Upsert nodes)
         if (patch.canvas_ops) {
             const currentNodes = [...(updated.nodes || [])];
             patch.canvas_ops.forEach((op: any) => {
                 if (op.op === 'upsert_node') {
                     const existingIdx = currentNodes.findIndex(n => n.id === op.id);
-                    if (existingIdx >= 0) currentNodes[existingIdx] = { ...currentNodes[existingIdx], ...op };
-                    else currentNodes.push({ ...op, x: Math.random() * 200 - 100, y: Math.random() * 200 - 100 });
+                    if (existingIdx >= 0) {
+                        currentNodes[existingIdx] = { ...currentNodes[existingIdx], ...op };
+                    } else {
+                        // Position nodes reasonably if new
+                        currentNodes.push({ 
+                            ...op, 
+                            x: (Math.random() * 200 - 100) + (currentNodes.length * 20), 
+                            y: (Math.random() * 200 - 100) + (currentNodes.length * 10) 
+                        });
+                    }
                 }
             });
             updated.nodes = currentNodes;
         }
-        if (patch.evidence_add) {
-            const currentEvidence = [...(updated.evidence || [])];
-            patch.evidence_add.forEach((e: any) => {
-                currentEvidence.push({ id: 'ev-' + Date.now() + Math.random(), ...e });
+
+        // 4. Tasks Ops
+        if (patch.tasks_ops) {
+            const currentTasks = [...(updated.tasks || [])];
+            patch.tasks_ops.forEach((op: any) => {
+                if (op.op === 'create_task') {
+                    currentTasks.push({ id: 'task-' + Date.now() + Math.random(), phase_id: op.phase_id, title: op.title, completed: false });
+                }
             });
-            updated.evidence = currentEvidence;
+            updated.tasks = currentTasks;
         }
+
+        // 5. Phase Logic
+        if (patch.phase_recommendation?.suggest_complete && patch.phase_recommendation.next_phase_id) {
+            // Logic for phase progression could be added here
+            console.log("AI recommends moving to phase:", patch.phase_recommendation.next_phase_id);
+        }
+
         setActiveIdea(updated);
         db.updateIdeaState(user.id, updated.id, updated);
     };
@@ -214,10 +313,10 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
                 <div className="flex justify-between items-end mb-10">
                     <div>
                         <h1 className="font-serif-display text-4xl mb-2 text-gray-900 dark:text-white">Idélabbet</h1>
-                        <p className="text-gray-500 dark:text-gray-400">Dina strukturerade produktresor.</p>
+                        <p className="text-gray-500 dark:text-gray-400">Strukturerad startup-validering med din AI-medgrundare.</p>
                     </div>
                     <button onClick={handleCreateNew} className="bg-black dark:bg-white text-white dark:text-black px-6 py-3 rounded-full font-bold flex items-center gap-2 hover:opacity-90 transition-all shadow-lg">
-                        <Plus size={20} /> Starta ny resa
+                        <Plus size={20} /> Starta validering
                     </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -297,7 +396,7 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
                         {isThinking && (
                             <div className="flex gap-4 items-center animate-pulse">
                                 <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"><Loader2 size={16} className="animate-spin text-gray-400"/></div>
-                                <span className="text-xs text-gray-400 font-medium">Analyse...</span>
+                                <span className="text-xs text-gray-400 font-medium">Analys...</span>
                             </div>
                         )}
                         <div ref={chatEndRef} />
@@ -307,7 +406,7 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
                             <input 
                                 value={chatInput} 
                                 onChange={e => setChatInput(e.target.value)} 
-                                placeholder="Skriv svar..." 
+                                placeholder="Diskutera med din medgrundare..." 
                                 className="flex-1 h-11 bg-gray-50 dark:bg-gray-800 border-none rounded-xl px-4 text-sm focus:ring-1 ring-black transition-all outline-none"
                             />
                             <button type="submit" disabled={!chatInput.trim() || isThinking} className="w-11 h-11 bg-black dark:bg-white text-white dark:text-black rounded-xl flex items-center justify-center shadow hover:opacity-80 disabled:opacity-50 transition-all">
