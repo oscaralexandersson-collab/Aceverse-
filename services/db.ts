@@ -22,7 +22,6 @@ class DatabaseService {
   async signup(email: string, password: string, firstName: string, lastName: string): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
     
-    // Handle bypass accounts in signup
     if (cleanEmail.endsWith('@local.dev') || cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se') {
         const localUser: User = {
             id: cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se' ? 'local-demo' : 'local-' + Date.now(),
@@ -37,7 +36,6 @@ class DatabaseService {
         
         const existingUsers = JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '[]');
         if (existingUsers.some((u: User) => u.email === cleanEmail)) {
-            // For demo/test, just login instead of throwing error if user wants to "register" again
             if (cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se') {
                 this.setSession(localUser, true);
                 return localUser;
@@ -76,7 +74,6 @@ class DatabaseService {
   async login(email: string, password: string, rememberMe: boolean = true): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
 
-    // Explicit bypass for demo/test accounts
     if (cleanEmail === 'demo@aceverse.se' || cleanEmail === 'test@aceverse.se') {
         return this.createDemoUser();
     }
@@ -211,9 +208,9 @@ class DatabaseService {
         leads: merge(remoteData[0]?.map((d: any) => ({ ...d, value: Number(d.value) || 0 })), getL('leads')),
         ideas: merge(remoteData[1], getL('ideas')),
         pitches: merge(remoteData[2]?.map((d: any) => ({ ...d, dateCreated: d.created_at, chatSessionId: d.chat_session_id, contextScore: d.context_score })), getL('pitches')),
-        chatHistory: merge(remoteData[3], getL('chat_messages')),
+        chatHistory: merge(remoteData[3]?.map((d: any) => ({ ...d, sessionId: d.session_id, timestamp: new Date(d.created_at).getTime() })), getL('chat_messages')),
         coaches: getL('coaches'),
-        sessions: merge(remoteData[4]?.map((d: any) => ({ id: d.id, name: d.name, lastMessageAt: d.last_message_at ? new Date(d.last_message_at).getTime() : Date.now(), preview: d.preview })), getL('chat_sessions')),
+        sessions: merge(remoteData[4]?.map((d: any) => ({ id: d.id, name: d.name, lastMessageAt: d.last_message_at ? new Date(d.last_message_at).getTime() : Date.now(), preview: d.preview, group: d.group_name })), getL('chat_sessions')),
         notifications: getL('notifications'),
         invoices: getL('invoices'),
         settings: JSON.parse(localStorage.getItem(getLocalKey('settings', userId)) || 'null') || { notifications: { email: true, push: true, marketing: false }, privacy: { publicProfile: false, dataSharing: false } },
@@ -300,13 +297,26 @@ class DatabaseService {
   async createChatSession(userId: string, name: string): Promise<ChatSession> {
     const session: ChatSession = { id: this.generateId(), name, lastMessageAt: Date.now(), preview: 'Starta konversationen...' };
     this.saveLocal('chat_sessions', userId, session);
+    if (!userId.startsWith('local-')) {
+        this.safeSupabaseCall(supabase.from('chat_sessions').insert({ id: session.id, user_id: userId, name: session.name, last_message_at: new Date(session.lastMessageAt).toISOString(), preview: session.preview }));
+    }
     return session;
   }
 
   async deleteChatSession(userId: string, sessionId: string): Promise<void> {
-    const key = getLocalKey('chat_sessions', userId);
-    const filtered = JSON.parse(localStorage.getItem(key) || '[]').filter((s: any) => s.id !== sessionId);
-    localStorage.setItem(key, JSON.stringify(filtered));
+    const sessionKey = getLocalKey('chat_sessions', userId);
+    const msgKey = getLocalKey('chat_messages', userId);
+    
+    const filteredSessions = JSON.parse(localStorage.getItem(sessionKey) || '[]').filter((s: any) => s.id !== sessionId);
+    localStorage.setItem(sessionKey, JSON.stringify(filteredSessions));
+    
+    const filteredMessages = JSON.parse(localStorage.getItem(msgKey) || '[]').filter((m: any) => m.sessionId !== sessionId);
+    localStorage.setItem(msgKey, JSON.stringify(filteredMessages));
+
+    if (!userId.startsWith('local-')) {
+        await this.safeSupabaseCall(supabase.from('chat_messages').delete().eq('session_id', sessionId).eq('user_id', userId));
+        await this.safeSupabaseCall(supabase.from('chat_sessions').delete().eq('id', sessionId).eq('user_id', userId));
+    }
   }
 
   async renameChatSession(userId: string, sessionId: string, name: string): Promise<void> {
