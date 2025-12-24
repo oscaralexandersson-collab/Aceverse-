@@ -8,7 +8,6 @@ const LOCAL_USERS_KEY = 'aceverse_local_users_db';
 const TOMBSTONE_KEY = (userId: string) => `aceverse_${userId}_tombstones`;
 
 class DatabaseService {
-  // Session-baserad spärrlista (för snabb åtkomst)
   private deletedIds: Set<string> = new Set();
   
   private async safeSupabaseCall(promise: Promise<any>, timeoutMs = 4000) {
@@ -21,7 +20,6 @@ class DatabaseService {
       }
   }
 
-  // Hjälpmetoder för Tombstones (beständiga raderingar)
   private getTombstones(userId: string): Set<string> {
       try {
           const stored = localStorage.getItem(TOMBSTONE_KEY(userId));
@@ -237,24 +235,16 @@ class DatabaseService {
         } catch(e) { return []; }
     };
     
-    // SYNC ENGINE: Remote is the source of truth, with persistent Tombstone filtering
-    const merge = (table: string, remote: any[] | null, local: any[]) => {
-        if (isLocal) return (local || []).filter(i => i && !tombstones.has(i.id));
-        if (remote === null) return (local || []).filter(i => i && !tombstones.has(i.id));
+    const merge = (table: string, remote: any[] | null | undefined, local: any[]) => {
+        const localSafe = Array.isArray(local) ? local : [];
+        const base = localSafe.filter(i => i && !tombstones.has(i.id));
+        
+        if (isLocal || !Array.isArray(remote)) return base;
 
         const remoteIds = new Set(remote.map(i => i.id));
-        
-        // Filter out items that are marked for deletion (Tombstones)
-        const pending = (local || []).filter(i => 
-            i && 
-            i.pending === true && 
-            !remoteIds.has(i.id) && 
-            !tombstones.has(i.id)
-        );
+        const pending = base.filter(i => i.pending === true && !remoteIds.has(i.id));
 
-        // Filter the remote results through the beständiga tombstone-listan
         const sanitizedRemote = remote.filter(i => i && !tombstones.has(i.id));
-
         const finalData = [...pending, ...sanitizedRemote];
         try {
             localStorage.setItem(getLocalKey(table, userId), JSON.stringify(finalData));
@@ -283,19 +273,19 @@ class DatabaseService {
     const q = query.toLowerCase();
     const results: SearchResult[] = [];
 
-    data.leads.forEach(l => {
+    (data.leads || []).forEach(l => {
       if (l.name.toLowerCase().includes(q) || l.company.toLowerCase().includes(q)) {
         results.push({ id: l.id, type: 'lead', title: l.name, subtitle: l.company, view: 'crm' });
       }
     });
 
-    data.ideas.forEach(i => {
+    (data.ideas || []).forEach(i => {
       if (i.title.toLowerCase().includes(q) || (i.snapshot?.problem_statement || '').toLowerCase().includes(q)) {
         results.push({ id: i.id, type: 'idea', title: i.title, subtitle: (i.snapshot?.problem_statement || '').substring(0, 40) + '...', view: 'ideas' });
       }
     });
 
-    data.pitches.forEach(p => {
+    (data.pitches || []).forEach(p => {
       if (p.name.toLowerCase().includes(q)) {
         results.push({ id: p.id, type: 'pitch', title: p.name, subtitle: `Pitch Deck - ${new Date(p.dateCreated).toLocaleDateString()}`, view: 'pitch' });
       }
@@ -304,12 +294,75 @@ class DatabaseService {
     return results;
   }
 
+  async addLead(userId: string, leadData: Omit<Lead, 'id' | 'dateAdded'>): Promise<Lead> {
+      const lead: Lead = { 
+          id: this.generateId(), 
+          dateAdded: new Date().toISOString(), 
+          ...leadData 
+      };
+      const key = getLocalKey('leads', userId);
+      const current = JSON.parse(localStorage.getItem(key) || '[]');
+      localStorage.setItem(key, JSON.stringify([lead, ...current]));
+
+      if (!userId.startsWith('local-')) {
+          await this.safeSupabaseCall(supabase.from('leads').insert({
+              id: lead.id,
+              user_id: userId,
+              name: lead.name,
+              company: lead.company,
+              email: lead.email,
+              phone: lead.phone,
+              linkedin: lead.linkedin,
+              website: lead.website,
+              notes: lead.notes,
+              status: lead.status,
+              value: lead.value,
+              created_at: lead.dateAdded
+          }));
+      }
+      return lead;
+  }
+
+  async updateLead(userId: string, leadId: string, updates: Partial<Lead>): Promise<void> {
+    const key = getLocalKey('leads', userId);
+    try {
+        const current = JSON.parse(localStorage.getItem(key) || '[]');
+        const idx = current.findIndex((l: any) => l.id === leadId);
+        if (idx >= 0) {
+            current[idx] = { ...current[idx], ...updates };
+            localStorage.setItem(key, JSON.stringify(current));
+        }
+
+        if (!userId.startsWith('local-')) {
+            const p: any = {};
+            if (updates.status) p.status = updates.status;
+            if (updates.value !== undefined) p.value = updates.value;
+            if (updates.notes) p.notes = updates.notes;
+            await this.safeSupabaseCall(supabase.from('leads').update(p).eq('id', leadId).eq('user_id', userId));
+        }
+    } catch(e) {
+        console.error("Update lead failed", e);
+    }
+  }
+
+  async deleteLead(userId: string, leadId: string): Promise<void> {
+      this.addTombstone(userId, leadId);
+      const key = getLocalKey('leads', userId);
+      const current = JSON.parse(localStorage.getItem(key) || '[]');
+      const filtered = current.filter((l: any) => l.id !== leadId);
+      localStorage.setItem(key, JSON.stringify(filtered));
+
+      if (!userId.startsWith('local-')) {
+          await this.safeSupabaseCall(supabase.from('leads').delete().eq('id', leadId).eq('user_id', userId));
+      }
+  }
+
   async addPitch(userId: string, pitchData: Omit<Pitch, 'id' | 'dateCreated'>): Promise<Pitch> {
       const pitch: any = { id: this.generateId(), dateCreated: new Date().toISOString(), ...pitchData, pending: true };
       this.saveLocal('pitches', userId, pitch);
       
       if (!userId.startsWith('local-')) {
-          const { error } = await supabase.from('pitches').insert({ id: pitch.id, user_id: userId, type: pitch.type, name: pitch.name, content: pitch.content, chat_session_id: pitch.chatSessionId, context_score: pitch.contextScore, created_at: pitch.dateCreated });
+          const { error } = await supabase.from('pitches').insert({ id: pitch.id, user_id: userId, type: pitch.type, name: pitch.name, content: pitch.content, chat_session_id: pitch.chatSessionId, context_score: pitch.context_score, created_at: pitch.dateCreated });
           if (!error) {
               pitch.pending = false;
               this.saveLocal('pitches', userId, pitch);
@@ -376,7 +429,7 @@ class DatabaseService {
   }
 
   async deleteIdea(userId: string, ideaId: string): Promise<void> {
-    this.addTombstone(userId, ideaId); // Markera som permanent raderad
+    this.addTombstone(userId, ideaId);
     this.removeFromLocal('ideas', userId, ideaId);
     if (!userId.startsWith('local-')) {
         await supabase.from('ideas').delete().eq('id', ideaId).eq('user_id', userId);
@@ -445,7 +498,7 @@ class DatabaseService {
 
   async ensureSystemSession(userId: string): Promise<ChatSession> {
     const data = await this.getUserData(userId);
-    let session = data.sessions.find(s => s.name === 'UF-läraren');
+    let session = (data.sessions || []).find(s => s.name === 'UF-läraren');
     if (!session) {
         return await this.createChatSession(userId, 'UF-läraren');
     }
