@@ -16,7 +16,11 @@ import DeleteConfirmModal from './DeleteConfirmModal';
 // --- FULL SYSTEM PROMPT ---
 const COFOUNDER_SYSTEM_PROMPT = `
 YOU ARE: “AI Co-Founder”
-... (rest of the prompt remains the same)
+MISSION: Help entrepreneurs validate their startup ideas using a 9-phase framework.
+BEHAVIOR:
+- Ask deep, challenging questions.
+- Maintain a highly structured snapshot of the project.
+- Use JSON patches to update the UI workspace.
 `;
 
 const PHASES = [
@@ -95,19 +99,15 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
 
     const loadIdeas = async () => {
         const data = await db.getUserData(user.id);
+        // Ensure we don't display items already removed in this session
         setIdeas(data.ideas || []);
     };
 
     const handleCreateNew = async () => {
-        const newId = 'temp-' + Date.now();
-        const newIdea: Idea = {
-            id: newId,
+        const newIdeaData: Omit<Idea, 'id' | 'dateCreated' | 'score'> = {
             title: 'Ny Idé',
             description: '',
-            score: 10,
             currentPhase: '1',
-            dateCreated: new Date().toISOString(),
-            chatSessionId: 'sess-' + Date.now(),
             snapshot: { one_pager: '', problem_statement: '', icp: '', persona_summary: '', solution_hypothesis: '', uvp: '', pricing_hypothesis: '', mvp_definition: '', open_questions: [] },
             nodes: [{ id: 'root', node_type: 'problem', label: 'Din Idé', parent_id: null, details: { text: 'Startpunkt för din resa', status: 'approved' }, x: 0, y: 0 }],
             edges: [],
@@ -116,8 +116,8 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
             evidence: [],
             privacy_mode: true
         };
-        await db.addIdea(user.id, newIdea);
-        setIdeas([newIdea, ...ideas]);
+        const newIdea = await db.addIdea(user.id, newIdeaData);
+        setIdeas(prev => [newIdea, ...prev]);
         setActiveIdea(newIdea);
         setView('workspace');
         setMessages([{ id: 'init', role: 'ai', text: "Välkommen till din Workspace. 👋 Jag är din AI Cofounder. Som din medgrundare är mitt jobb att minska risken i ditt projekt genom att ställa svåra frågor. Vad är det för problem du har identifierat som du vill lösa?", timestamp: Date.now() }]);
@@ -127,17 +127,20 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
         if (!ideaToDelete) return;
         const id = ideaToDelete.id;
         
-        // Optimistic UI Update
+        // Step 1: Optimistic UI Update - Remove immediately from local state
         setIdeas(prev => prev.filter(i => i.id !== id));
+        if (activeIdea?.id === id) setActiveIdea(null);
         setIdeaToDelete(null);
 
         try {
+            // Step 2: Delete from DB (which now also blacklists the ID in this session)
             await db.deleteIdea(user.id, id);
-            // Efter radering, ladda om för att vara säker på att state är i synk
-            await loadIdeas();
+            // DO NOT call loadIdeas() immediately to avoid race condition with slow cloud sync
+            // The db.deleteIdea logic will handle persistent exclusion
         } catch (err) {
             console.error("Delete failed:", err);
-            await loadIdeas(); // Revert on failure
+            // Revert on failure only
+            await loadIdeas(); 
         }
     };
 
@@ -147,7 +150,7 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
 
         const text = chatInput;
         setChatInput('');
-        const userMsg: ChatMessage = { id: 'temp-' + Date.now(), role: 'user', text, timestamp: Date.now() };
+        const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text, timestamp: Date.now() };
         setMessages(prev => [...prev, userMsg]);
         setIsThinking(true);
 
@@ -278,12 +281,18 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
                                     e.stopPropagation();
                                     setIdeaToDelete(idea);
                                 }}
-                                className="absolute top-6 right-6 w-10 h-10 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center hover:bg-red-600 hover:text-white active:scale-90"
+                                className="absolute top-4 right-4 w-10 h-10 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-xl opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center hover:bg-red-600 hover:text-white active:scale-90"
                             >
                                 <Trash2 size={18}/>
                             </button>
                         </div>
                     ))}
+                    {ideas.length === 0 && (
+                        <div className="col-span-full py-20 text-center text-gray-400">
+                            <Database size={40} className="mx-auto mb-4 opacity-20" />
+                            <p>Inga idéer än. Klicka på knappen ovan för att starta din första validering.</p>
+                        </div>
+                    )}
                 </div>
             </div>
         );
@@ -390,7 +399,6 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
                                 </div>
                             </div>
                         )}
-                        {/* More tabs (cards, tasks, etc.) would be here - omitted for brevity but remain in the component */}
                     </div>
                 </div>
             </div>

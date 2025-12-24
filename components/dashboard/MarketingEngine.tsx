@@ -177,8 +177,8 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
 
             resultJSON.id = Date.now().toString();
 
-            setDna(resultJSON);
             await db.addBrandDNA(user.id, resultJSON);
+            setDna(resultJSON);
             setDnas(prev => [resultJSON, ...prev]);
             setStep('dna_review');
 
@@ -338,8 +338,14 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
             });
             
             let imgData = '';
-            if (imgRes.candidates?.[0]?.content?.parts?.[0]?.inlineData) {
-                imgData = imgRes.candidates[0].content.parts[0].inlineData.data;
+            // Robust part extraction according to docs
+            if (imgRes.candidates && imgRes.candidates[0].content?.parts) {
+                for (const part of imgRes.candidates[0].content.parts) {
+                    if (part.inlineData) {
+                        imgData = part.inlineData.data;
+                        break;
+                    }
+                }
             }
 
             setAssets(prev => prev.map(a => 
