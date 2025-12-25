@@ -63,7 +63,6 @@ class CryptoService {
       const key = await this.getKey(userId);
       const iv = crypto.getRandomValues(new Uint8Array(12));
       const encoded = new TextEncoder().encode(JSON.stringify(data));
-      // Fix for services/db.ts: Access static member ALGO via CryptoService class name instead of 'this'
       const ciphertext = await crypto.subtle.encrypt({ name: CryptoService.ALGO, iv }, key, encoded);
       
       const combined = new Uint8Array(iv.length + ciphertext.byteLength);
@@ -73,7 +72,7 @@ class CryptoService {
       return btoa(String.fromCharCode(...combined));
     } catch (e) {
       console.error("Encryption failed", e);
-      return JSON.stringify(data); // Fallback to JSON if crypto unavailable
+      return JSON.stringify(data);
     }
   }
 
@@ -84,11 +83,9 @@ class CryptoService {
       const iv = combined.slice(0, 12);
       const ciphertext = combined.slice(12);
       
-      // Fix for services/db.ts: Access static member ALGO via CryptoService class name instead of 'this'
       const decrypted = await crypto.subtle.decrypt({ name: CryptoService.ALGO, iv }, key, ciphertext);
       return JSON.parse(new TextDecoder().decode(decrypted));
     } catch (e) {
-      // If it's already JSON (pre-migration data), return as is
       try { return JSON.parse(cipherBase64); } catch { return null; }
     }
   }
@@ -98,56 +95,96 @@ class CryptoService {
 
 class IndexedDBEngine {
   private db: IDBDatabase | null = null;
+  private openingPromise: Promise<IDBDatabase> | null = null;
 
   private async getDB(): Promise<IDBDatabase> {
     if (this.db) return this.db;
-    return new Promise((resolve, reject) => {
+    if (this.openingPromise) return this.openingPromise;
+
+    this.openingPromise = new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
+      
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains('userdata')) {
           db.createObjectStore('userdata');
         }
       };
+
       request.onsuccess = () => {
         this.db = request.result;
+        
+        // Handle unexpected closure or version changes from other tabs
+        this.db.onversionchange = () => {
+          this.db?.close();
+          this.db = null;
+          console.warn("IndexedDB connection closed due to version change.");
+        };
+        
+        this.db.onclose = () => {
+          this.db = null;
+        };
+
+        this.openingPromise = null;
         resolve(this.db);
       };
-      request.onerror = () => reject(request.error);
+
+      request.onerror = () => {
+        this.openingPromise = null;
+        reject(request.error);
+      };
     });
+
+    return this.openingPromise;
+  }
+
+  /**
+   * Helper to perform a transaction with auto-retry on connection closure
+   */
+  private async performTransaction<T>(
+    mode: IDBTransactionMode, 
+    callback: (store: IDBObjectStore) => IDBRequest<T>,
+    retries = 1
+  ): Promise<T> {
+    try {
+      const db = await this.getDB();
+      return await new Promise((resolve, reject) => {
+        try {
+          const tx = db.transaction('userdata', mode);
+          const store = tx.objectStore('userdata');
+          const request = callback(store);
+          
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+          tx.onerror = () => reject(tx.error);
+        } catch (e: any) {
+          // Detect closed/closing connection error
+          if (e.name === 'InvalidStateError' || e.message?.includes('closing')) {
+            this.db = null; // Clear stale connection
+            reject(e);
+          } else {
+            reject(e);
+          }
+        }
+      });
+    } catch (e: any) {
+      if (retries > 0 && (e.name === 'InvalidStateError' || e.message?.includes('closing'))) {
+        return this.performTransaction(mode, callback, retries - 1);
+      }
+      throw e;
+    }
   }
 
   async set(key: string, value: string): Promise<void> {
-    const db = await this.getDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('userdata', 'readwrite');
-      const store = tx.objectStore('userdata');
-      store.put(value, key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    await this.performTransaction('readwrite', (store) => store.put(value, key));
   }
 
   async get(key: string): Promise<string | null> {
-    const db = await this.getDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('userdata', 'readonly');
-      const store = tx.objectStore('userdata');
-      const request = store.get(key);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
+    return await this.performTransaction('readonly', (store) => store.get(key));
   }
 
   async delete(key: string): Promise<void> {
-    const db = await this.getDB();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction('userdata', 'readwrite');
-      const store = tx.objectStore('userdata');
-      store.delete(key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
+    await this.performTransaction('readwrite', (store) => store.delete(key));
   }
 }
 
@@ -160,9 +197,8 @@ class DatabaseService {
   private backoffMs = 500;
   private isSyncing = false;
   
-  // Caching layer
   private userDataCache: Map<string, { data: UserData, expiry: number }> = new Map();
-  private CACHE_TTL = 30000; // 30 seconds
+  private CACHE_TTL = 30000;
 
   private validateId(id: string | undefined): string {
     if (!id || typeof id !== 'string') throw new AceverseDatabaseError("Invalid ID provided", DBErrorCode.VALIDATION_ERROR);
@@ -228,10 +264,15 @@ class DatabaseService {
   }
 
   private async getLocal(table: string, userId: string): Promise<any[]> {
-    const cipher = await this.storage.get(`ace_${userId}_${table}`);
-    if (!cipher) return [];
-    const decrypted = await this.crypt.decrypt(cipher, userId);
-    return Array.isArray(decrypted) ? decrypted : [];
+    try {
+      const cipher = await this.storage.get(`ace_${userId}_${table}`);
+      if (!cipher) return [];
+      const decrypted = await this.crypt.decrypt(cipher, userId);
+      return Array.isArray(decrypted) ? decrypted : [];
+    } catch (e) {
+      console.error("Local read failed", e);
+      return [];
+    }
   }
 
   private async saveLocal(table: string, userId: string, item: any) {
@@ -284,7 +325,6 @@ class DatabaseService {
     throw new AceverseDatabaseError('Misslyckades.');
   }
 
-  // Fix for Login.tsx: Update signature to accept 3 arguments
   async login(email: string, pass: string, rememberMe = true): Promise<User> {
     const validEmail = this.validateEmail(email);
     if (['demo@aceverse.se', 'test@aceverse.se'].includes(validEmail)) return this.createDemoUser();
@@ -294,7 +334,6 @@ class DatabaseService {
     throw new AceverseDatabaseError('Misslyckades.');
   }
 
-  // Fix for Login.tsx: Add missing loginWithOAuth method
   async loginWithOAuth(provider: 'google' | 'apple') {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
@@ -385,7 +424,6 @@ class DatabaseService {
     return results;
   }
 
-  // Optimized CRUD triggers
   private async performCRUD(table: string, userId: string, op: 'insert' | 'update' | 'delete', item: any, id?: string) {
     this.validateId(userId);
     const isLocal = userId.startsWith('local-');
@@ -415,7 +453,6 @@ class DatabaseService {
 
   async addMessage(userId: string, m: Omit<ChatMessage, 'id' | 'timestamp'>) { const id = crypto.randomUUID(); const ts = Date.now(); await this.performCRUD('chat_messages', userId, 'insert', { id, timestamp: ts, ...m }); return { id, timestamp: ts, ...m } as ChatMessage; }
   
-  // Fix for Advisor.tsx: Add missing createChatSession method
   async createChatSession(userId: string, name: string): Promise<ChatSession> {
     const id = crypto.randomUUID();
     const session = { id, name, lastMessageAt: Date.now() };
@@ -435,7 +472,6 @@ class DatabaseService {
 
   async updateChatSession(userId: string, id: string, u: Partial<ChatSession>) { await this.performCRUD('chat_sessions', userId, 'update', u, id); }
   
-  // Fix for Advisor.tsx: Add missing renameChatSession method
   async renameChatSession(userId: string, id: string, name: string) {
     await this.updateChatSession(userId, id, { name });
   }

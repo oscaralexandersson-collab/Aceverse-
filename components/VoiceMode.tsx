@@ -15,7 +15,7 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
     const [status, setStatus] = useState<string>('Initierar...');
     const [error, setError] = useState<string | null>(null);
     const [mode, setMode] = useState<'listening' | 'speaking' | 'processing'>('listening');
-    const [volume, setVolume] = useState(0); 
+    const [smoothVolume, setSmoothVolume] = useState(0); 
     const [isMuted, setIsMuted] = useState(false);
     
     // --- Audio Logic Refs ---
@@ -28,10 +28,10 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
     const currentSourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
     const sessionPromiseRef = useRef<Promise<any> | null>(null);
     const initializedRef = useRef(false);
-    const isSessionActiveRef = useRef(false); // Gate to prevent sending to closed session
+    const isSessionActiveRef = useRef(false); 
     
-    // Create a ref for mute state to access it inside the audio callback closure
     const isMutedRef = useRef(false);
+    const volumeRef = useRef(0);
 
     useEffect(() => {
         let cleanupFn = () => {};
@@ -46,10 +46,25 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
         };
     }, [isOpen]);
 
+    // Glättnings-loop för volymvisualisering
+    useEffect(() => {
+        if (!isOpen) return;
+        
+        let frameId: number;
+        const updateSmoothVolume = () => {
+            setSmoothVolume(prev => prev + (volumeRef.current - prev) * 0.2); // Lerp smoothing
+            frameId = requestAnimationFrame(updateSmoothVolume);
+        };
+        
+        frameId = requestAnimationFrame(updateSmoothVolume);
+        return () => cancelAnimationFrame(frameId);
+    }, [isOpen]);
+
     const toggleMute = () => {
         const newState = !isMuted;
         setIsMuted(newState);
         isMutedRef.current = newState;
+        if (newState) volumeRef.current = 0;
     };
 
     const startSession = async () => {
@@ -61,23 +76,19 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
         setStatus('Ansluter till Aceverse...');
         
         try {
-            // 1. Setup Audio Context
             const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-            const ctx = new AudioContextClass(); 
+            const ctx = new AudioContextClass({ sampleRate: 16000 }); 
             audioContextRef.current = ctx;
 
-            // 2. Get Mic with constraints
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
                     autoGainControl: true,
-                    channelCount: 1,
-                    sampleRate: 16000 
+                    channelCount: 1
                 }
             });
             
-            // Check if session was cancelled while waiting for permission
             if (!isSessionActiveRef.current) {
                 stream.getTracks().forEach(t => t.stop());
                 ctx.close();
@@ -86,7 +97,6 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
 
             streamRef.current = stream;
 
-            // 3. Connect to Gemini
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
             sessionPromiseRef.current = ai.live.connect({
@@ -96,11 +106,11 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                     speechConfig: {
                         voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName } },
                     },
-                    systemInstruction: { parts: [{ text: systemInstruction }] },
+                    systemInstruction: systemInstruction,
                 },
                 callbacks: {
                     onopen: async () => {
-                        if (!isSessionActiveRef.current) return; // Abort if closed while connecting
+                        if (!isSessionActiveRef.current) return;
                         setStatus('Ansluten');
                         setMode('listening');
                         await setupAudioProcessing();
@@ -110,12 +120,9 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                         handleServerMessage(message);
                     },
                     onclose: () => {
-                        console.log("Session closed by server");
                         setStatus('Frånkopplad');
                     },
                     onerror: (err) => {
-                        console.error("Session Error:", err);
-                        // Only show error if we didn't intentionally close it
                         if (isSessionActiveRef.current) {
                             setError("Anslutningen bröts.");
                         }
@@ -124,18 +131,15 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
             });
 
         } catch (e: any) {
-            console.error("Session Start Error", e);
             initializedRef.current = false;
             isSessionActiveRef.current = false;
             
-            // Cleanup audio context if created
             if (audioContextRef.current) {
                 audioContextRef.current.close().catch(() => {});
                 audioContextRef.current = null;
             }
             
-            // Handle permission errors explicitly
-            if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError' || e.message.includes('permission') || e.message.includes('not allowed')) {
+            if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError' || e.message.includes('permission')) {
                 setError("Åtkomst nekas. Tillåt mikrofonen i din webbläsare.");
             } else {
                 setError("Kunde inte starta ljudet. Försök igen.");
@@ -148,60 +152,39 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
         
         const ctx = audioContextRef.current;
         if (ctx.state === 'suspended') {
-            try {
-                await ctx.resume();
-            } catch (e) {
-                console.error("Audio resume failed", e);
-            }
+            await ctx.resume();
         }
 
         const source = ctx.createMediaStreamSource(streamRef.current);
         sourceRef.current = source;
 
-        // Use 4096 buffer size for stability
         const processor = ctx.createScriptProcessor(4096, 1, 1);
         processorRef.current = processor;
 
         processor.onaudioprocess = (e) => {
-            // STOP IMMEDIATELY if session is closed to prevent "Thread cancelled" error
             if (!isSessionActiveRef.current) return;
-
-            // Check mute ref
             if (isMutedRef.current) {
-                setVolume(0); 
+                volumeRef.current = 0; 
                 return;
             }
 
             const inputData = e.inputBuffer.getChannelData(0);
             
-            // Visualizer Logic (RMS)
             let sum = 0;
             for (let i = 0; i < inputData.length; i += 10) { 
                 sum += inputData[i] * inputData[i];
             }
             const rms = Math.sqrt(sum / (inputData.length / 10));
-            setVolume(Math.min(rms * 10, 1)); 
+            volumeRef.current = Math.min(rms * 10, 1.2); 
 
-            // NOISE GATE: Filter out small noises (RMS < 0.04)
-            if (rms < 0.04) {
+            if (rms < 0.02) {
                 inputData.fill(0);
             }
 
-            // Resample if needed
-            const targetRate = 16000;
-            const sourceRate = ctx.sampleRate;
-            let finalData = inputData;
-
-            if (sourceRate !== targetRate) {
-                finalData = resampleAudio(inputData, sourceRate, targetRate);
-            }
-
-            // Convert to Int16 PCM
-            const pcmData = floatTo16BitPCM(finalData);
+            const pcmData = floatTo16BitPCM(inputData);
             const base64Data = arrayBufferToBase64(pcmData);
 
-            // Send only if valid
-            if (finalData.length > 0 && isSessionActiveRef.current) {
+            if (isSessionActiveRef.current) {
                 sessionPromiseRef.current?.then(session => {
                     if (isSessionActiveRef.current) {
                         try {
@@ -211,13 +194,9 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                                     data: base64Data
                                 }
                             });
-                        } catch (sendError) {
-                            console.warn("Send audio failed", sendError);
-                        }
+                        } catch (sendError) { }
                     }
-                }).catch(err => {
-                    console.debug("Send cancelled (expected if closing)");
-                });
+                }).catch(() => {});
             }
         };
 
@@ -226,23 +205,20 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
     };
 
     const handleServerMessage = (message: LiveServerMessage) => {
-        // Audio Output
         const audioData = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
         if (audioData) {
             setMode('speaking');
             queueAudio(audioData);
         }
 
-        // Interruption Handling
         if (message.serverContent?.interrupted) {
-            console.log("Interruption detected");
             audioQueueRef.current = []; 
             try {
                 if (currentSourceNodeRef.current) {
                     currentSourceNodeRef.current.stop();
                     currentSourceNodeRef.current = null;
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) { }
             
             setMode('listening');
             isPlayingRef.current = false;
@@ -270,7 +246,6 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
         const audioData = audioQueueRef.current.shift()!;
 
         try {
-            // Gemini sends 24kHz audio back
             const buffer = ctx.createBuffer(1, audioData.length, 24000);
             buffer.getChannelData(0).set(audioData);
 
@@ -288,25 +263,23 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
 
             source.start();
         } catch(e) {
-            console.error("Audio playback error", e);
             isPlayingRef.current = false;
         }
     };
 
     const stopSession = () => {
-        // 1. Set Flag FIRST to stop all pending data sends
         isSessionActiveRef.current = false;
         initializedRef.current = false;
         isPlayingRef.current = false;
         isMutedRef.current = false;
         setIsMuted(false);
+        volumeRef.current = 0;
         audioQueueRef.current = [];
 
-        // 2. Disconnect Audio Processing
         try {
             if (processorRef.current) {
                 processorRef.current.disconnect();
-                processorRef.current.onaudioprocess = null; // Important: Nullify handler
+                processorRef.current.onaudioprocess = null; 
                 processorRef.current = null;
             }
             if (sourceRef.current) {
@@ -321,42 +294,20 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                 try { currentSourceNodeRef.current.stop(); } catch (e) {}
                 currentSourceNodeRef.current = null;
             }
-        } catch (e) {
-            console.error("Audio cleanup error", e);
-        }
+        } catch (e) { }
 
-        // 3. Close Session Connection
         if (sessionPromiseRef.current) {
             sessionPromiseRef.current.then(session => {
-                try { session.close(); } catch(e) { console.log("Session close ignored"); }
+                try { session.close(); } catch(e) { }
             }).catch(() => {});
             sessionPromiseRef.current = null;
         }
 
-        // 4. Close Audio Context
         if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
             audioContextRef.current.close().catch(() => {});
             audioContextRef.current = null;
         }
     };
-
-    // --- High Quality Resampler (Linear Interpolation) ---
-    function resampleAudio(audioBuffer: Float32Array, oldSampleRate: number, newSampleRate: number) {
-        const ratio = oldSampleRate / newSampleRate;
-        const newLength = Math.round(audioBuffer.length / ratio);
-        const result = new Float32Array(newLength);
-        
-        for (let i = 0; i < newLength; i++) {
-            const originalIndex = i * ratio;
-            const index1 = Math.floor(originalIndex);
-            const index2 = Math.min(Math.ceil(originalIndex), audioBuffer.length - 1);
-            const fraction = originalIndex - index1;
-            result[i] = (1 - fraction) * audioBuffer[index1] + fraction * audioBuffer[index2];
-        }
-        return result;
-    }
-
-    // --- Helpers ---
 
     function floatTo16BitPCM(float32Array: Float32Array): ArrayBuffer {
         const buffer = new ArrayBuffer(float32Array.length * 2);
@@ -396,70 +347,81 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/95 backdrop-blur-xl animate-fadeIn pointer-events-auto">
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/95 backdrop-blur-2xl animate-fadeIn pointer-events-auto transition-all duration-700">
             
-            {/* Status Header */}
-            <div className="absolute top-12 left-0 right-0 flex justify-center">
-                <div className={`flex items-center gap-3 px-6 py-2 rounded-full border backdrop-blur-md transition-all ${
-                    error ? 'bg-red-900/30 border-red-500/50' : 'bg-white/10 border-white/10'
+            {/* Header / Info Area */}
+            <div className="absolute top-12 left-0 right-0 flex flex-col items-center gap-6 px-8 text-center animate-[slideUp_0.8s_ease-out]">
+                <div className={`flex items-center gap-3 px-6 py-2.5 rounded-full border backdrop-blur-md transition-all duration-500 shadow-2xl ${
+                    error ? 'bg-red-900/30 border-red-500/50' : 'bg-white/5 border-white/10'
                 }`}>
-                    {error ? <AlertCircle size={16} className="text-red-400" /> : <Wifi size={16} className={mode === 'listening' ? 'text-white/50' : 'text-green-400'} />}
-                    <span className="text-sm font-medium text-white/90">{error || status}</span>
+                    {error ? <AlertCircle size={16} className="text-red-400" /> : <Wifi size={16} className={mode === 'listening' ? 'text-white/30' : 'text-green-400 animate-pulse'} />}
+                    <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/90">{error || status}</span>
                 </div>
-            </div>
-
-            {/* GDPR Notice */}
-            <div className="absolute top-28 left-0 right-0 flex justify-center">
-                <div className="flex items-center gap-2 text-xs text-white/50 bg-black/40 px-3 py-1 rounded-full border border-white/5">
+                
+                <div className="flex items-center gap-2 text-[10px] font-bold text-white/30 bg-white/5 px-4 py-1.5 rounded-full border border-white/5 uppercase tracking-widest">
                     <ShieldCheck size={12} />
-                    <span>GDPR-Säkrad: Ljudfiler raderas omedelbart efter transkribering.</span>
+                    <span>Helt anonymt • Inget lagras</span>
                 </div>
             </div>
 
             {/* Close Button */}
             <button 
                 onClick={onClose}
-                className="absolute top-8 right-8 text-white/40 hover:text-white p-3 rounded-full hover:bg-white/10 transition-all z-20"
+                className="absolute top-8 right-8 text-white/20 hover:text-white p-4 rounded-full hover:bg-white/5 transition-all z-20 group"
             >
-                <X size={28} />
+                <X size={32} strokeWidth={1} className="group-hover:rotate-90 transition-transform duration-300" />
             </button>
 
-            {/* Main Visualizer - Siri Style */}
-            <div className="relative mb-24 flex items-center justify-center">
+            {/* Central Fluid Visualizer */}
+            <div className="relative mb-20 flex items-center justify-center">
                 
-                {/* 1. Ambient Glow (Breathing) */}
+                {/* Visualizer Layers */}
+                {/* 1. Deep Glow */}
                 <div 
-                    className={`absolute w-[400px] h-[400px] rounded-full blur-[100px] transition-all duration-1000 ${
-                        mode === 'speaking' ? 'bg-green-500/20 scale-110' : 
-                        mode === 'processing' ? 'bg-blue-500/20 scale-100' : 'bg-purple-500/10 scale-90'
+                    className={`absolute w-[500px] h-[500px] rounded-full blur-[120px] transition-all duration-1000 ${
+                        mode === 'speaking' ? 'bg-blue-500/10 scale-125' : 
+                        mode === 'processing' ? 'bg-purple-500/10' : 'bg-white/5'
                     }`}
                 ></div>
 
-                {/* 2. Interactive Ring */}
+                {/* 2. Outer Orbiting Ring */}
                 <div 
-                    className="absolute inset-0 rounded-full border border-white/20 transition-all duration-75 ease-linear"
-                    style={{ transform: `scale(${1 + volume * 0.8})` }}
+                    className={`absolute w-[320px] h-[320px] border border-white/5 rounded-full transition-transform duration-[2000ms] ease-linear rotate-[360deg]`}
+                    style={{ animation: 'spin 15s linear infinite', transform: `scale(${1 + smoothVolume * 0.4})` }}
+                >
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-white/20 rounded-full"></div>
+                </div>
+
+                {/* 3. Wave Circles */}
+                <div 
+                    className="absolute inset-0 rounded-full border border-white/20 shadow-[0_0_80px_rgba(255,255,255,0.05)] transition-all duration-75 ease-linear"
+                    style={{ transform: `scale(${1 + smoothVolume * 0.8})`, opacity: mode === 'listening' ? 0.3 + smoothVolume : 0.1 }}
+                ></div>
+                <div 
+                    className="absolute inset-[-20px] rounded-full border border-white/10 transition-all duration-150 ease-linear"
+                    style={{ transform: `scale(${1 + smoothVolume * 0.4})`, opacity: 0.1 }}
                 ></div>
 
-                {/* 3. The Core Orb */}
+                {/* 4. Core Interaction Sphere */}
                 <div className="relative z-10">
-                    <div className={`w-32 h-32 rounded-full flex items-center justify-center shadow-[0_0_60px_rgba(255,255,255,0.1)] transition-all duration-500 ${
-                        mode === 'speaking' ? 'bg-gradient-to-tr from-green-400 to-emerald-600 scale-110' :
-                        mode === 'processing' ? 'bg-gradient-to-tr from-blue-400 to-indigo-600 animate-pulse' :
-                        isMuted ? 'bg-red-900 border border-red-500/50' : 'bg-gradient-to-tr from-gray-800 to-black border border-white/10'
+                    <div className={`w-36 h-36 rounded-full flex items-center justify-center shadow-[0_0_100px_rgba(255,255,255,0.1)] transition-all duration-700 ease-[cubic-bezier(0.2,0.8,0.2,1)] ${
+                        mode === 'speaking' ? 'bg-gradient-to-tr from-blue-500 to-indigo-600 scale-110' :
+                        mode === 'processing' ? 'bg-gradient-to-tr from-purple-500 to-pink-600 animate-pulse scale-95' :
+                        isMuted ? 'bg-red-950 border-2 border-red-500/50' : 'bg-white/5 backdrop-blur-3xl border border-white/10'
                     }`}>
                         {mode === 'listening' && !isMuted && (
                             <div 
-                                className="absolute inset-0 rounded-full bg-white/10"
-                                style={{ transform: `scale(${1 + volume})` }}
+                                className="absolute inset-0 rounded-full bg-white/5"
+                                style={{ transform: `scale(${1 + smoothVolume})` }}
                             ></div>
                         )}
+                        
                         {isMuted ? (
-                            <MicOff size={40} className="text-red-400" />
+                            <MicOff size={44} className="text-red-500 animate-pulse" />
                         ) : (
                             <Sparkles 
-                                size={40} 
-                                className={`transition-colors duration-300 ${mode === 'listening' ? 'text-white/50' : 'text-white'}`} 
+                                size={mode === 'speaking' ? 48 : 40} 
+                                className={`transition-all duration-500 ${mode === 'listening' ? 'text-white/20' : 'text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]'}`} 
                                 fill={mode !== 'listening' ? "currentColor" : "none"}
                             />
                         )}
@@ -467,36 +429,39 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                 </div>
             </div>
 
-            {/* Instructions */}
-            <div className="absolute bottom-40 text-center space-y-2 pointer-events-none transition-opacity duration-300">
-                <h2 className="text-2xl font-serif-display text-white">
-                    {error ? 'Fel vid anslutning' : isMuted ? 'Mikrofonen är avstängd' : mode === 'speaking' ? 'UF-läraren pratar...' : mode === 'processing' ? 'Tänker...' : 'Jag lyssnar...'}
+            {/* Instruction / Captions Area */}
+            <div className="absolute bottom-44 text-center space-y-3 pointer-events-none px-12 animate-fadeIn">
+                <h2 className={`text-3xl font-serif-display text-white transition-all duration-500 ${mode === 'speaking' ? 'scale-105' : 'scale-100'}`}>
+                    {error ? 'Tekniskt fel' : isMuted ? 'Mikrofon avstängd' : mode === 'speaking' ? 'Jag lyssnar på dina tankar...' : mode === 'processing' ? 'Analyserar...' : 'Berätta mer...'}
                 </h2>
-                <p className="text-white/40 text-sm font-light">
-                    {error ? 'Kontrollera mikrofonbehörigheter och försök igen.' : isMuted ? 'Tryck på mikrofonen för att prata' : mode === 'speaking' ? 'Du kan avbryta när som helst' : 'Prata tydligt i din mikrofon'}
+                <p className="text-white/30 text-xs font-bold uppercase tracking-[0.3em]">
+                    {error ? 'Försök att ladda om sidan' : isMuted ? 'Tryck på mikrofonen för att återuppta' : mode === 'speaking' ? 'Du kan avbryta när du vill' : 'Prata naturligt med mig'}
                 </p>
             </div>
 
-            {/* Control Bar */}
-            <div className="flex items-center gap-8 relative z-50">
+            {/* High Fidelity Control Bar */}
+            <div className="flex items-center gap-10 relative z-50 animate-[slideUp_1s_ease-out_0.2s_forwards] opacity-0">
                 <button 
                     onClick={toggleMute}
-                    className={`p-6 rounded-full transition-all duration-300 backdrop-blur-md cursor-pointer border ${
+                    className={`group p-8 rounded-full transition-all duration-500 backdrop-blur-2xl cursor-pointer border ${
                         isMuted 
-                        ? 'bg-red-500/20 text-red-400 border-red-500/50' 
-                        : 'bg-white/5 text-white border-white/10 hover:bg-white/10'
+                        ? 'bg-red-500/20 text-red-500 border-red-500/40 shadow-[0_0_30px_rgba(239,68,68,0.2)]' 
+                        : 'bg-white/5 text-white/50 border-white/10 hover:border-white/30 hover:text-white hover:bg-white/10'
                     }`}
                 >
-                    {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
+                    {isMuted ? <MicOff size={28} /> : <Mic size={28} className="group-hover:scale-110 transition-transform" />}
                 </button>
 
                 <button 
                     onClick={onClose}
-                    className="p-8 rounded-full bg-red-600 text-white hover:bg-red-500 transition-all hover:scale-105 shadow-[0_0_40px_rgba(220,38,38,0.4)] cursor-pointer border-4 border-black/50"
+                    className="group p-10 rounded-full bg-white text-black hover:bg-red-600 hover:text-white transition-all duration-500 hover:scale-110 shadow-[0_15px_40px_rgba(255,255,255,0.2)] cursor-pointer active:scale-95 flex items-center justify-center"
                 >
-                    <PhoneOff size={32} fill="currentColor" />
+                    <PhoneOff size={36} fill="currentColor" className="group-hover:-rotate-[135deg] transition-transform duration-500" />
                 </button>
             </div>
+
+            {/* Decoration Bottom Layer */}
+            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black to-transparent pointer-events-none opacity-50"></div>
         </div>
     );
 };
