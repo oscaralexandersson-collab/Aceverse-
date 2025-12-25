@@ -15,7 +15,7 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
     const [status, setStatus] = useState<string>('Initierar...');
     const [error, setError] = useState<string | null>(null);
     const [mode, setMode] = useState<'listening' | 'speaking' | 'processing'>('listening');
-    const [smoothVolume, setSmoothVolume] = useState(0); 
+    const [volume, setVolume] = useState(0); 
     const [isMuted, setIsMuted] = useState(false);
     
     // --- Audio Logic Refs ---
@@ -31,7 +31,6 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
     const isSessionActiveRef = useRef(false); 
     
     const isMutedRef = useRef(false);
-    const volumeRef = useRef(0);
 
     useEffect(() => {
         let cleanupFn = () => {};
@@ -46,25 +45,10 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
         };
     }, [isOpen]);
 
-    // Glättnings-loop för volymvisualisering
-    useEffect(() => {
-        if (!isOpen) return;
-        
-        let frameId: number;
-        const updateSmoothVolume = () => {
-            setSmoothVolume(prev => prev + (volumeRef.current - prev) * 0.2); // Lerp smoothing
-            frameId = requestAnimationFrame(updateSmoothVolume);
-        };
-        
-        frameId = requestAnimationFrame(updateSmoothVolume);
-        return () => cancelAnimationFrame(frameId);
-    }, [isOpen]);
-
     const toggleMute = () => {
         const newState = !isMuted;
         setIsMuted(newState);
         isMutedRef.current = newState;
-        if (newState) volumeRef.current = 0;
     };
 
     const startSession = async () => {
@@ -106,6 +90,7 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                     speechConfig: {
                         voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName } },
                     },
+                    // FIX: systemInstruction ska vara en sträng i Live API-configen
                     systemInstruction: systemInstruction,
                 },
                 callbacks: {
@@ -120,9 +105,11 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                         handleServerMessage(message);
                     },
                     onclose: () => {
+                        console.log("Session closed by server");
                         setStatus('Frånkopplad');
                     },
                     onerror: (err) => {
+                        console.error("Session Error:", err);
                         if (isSessionActiveRef.current) {
                             setError("Anslutningen bröts.");
                         }
@@ -131,6 +118,7 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
             });
 
         } catch (e: any) {
+            console.error("Session Start Error", e);
             initializedRef.current = false;
             isSessionActiveRef.current = false;
             
@@ -164,7 +152,7 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
         processor.onaudioprocess = (e) => {
             if (!isSessionActiveRef.current) return;
             if (isMutedRef.current) {
-                volumeRef.current = 0; 
+                setVolume(0); 
                 return;
             }
 
@@ -175,7 +163,7 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                 sum += inputData[i] * inputData[i];
             }
             const rms = Math.sqrt(sum / (inputData.length / 10));
-            volumeRef.current = Math.min(rms * 10, 1.2); 
+            setVolume(Math.min(rms * 10, 1)); 
 
             if (rms < 0.02) {
                 inputData.fill(0);
@@ -194,7 +182,9 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                                     data: base64Data
                                 }
                             });
-                        } catch (sendError) { }
+                        } catch (sendError) {
+                            console.warn("Send audio failed", sendError);
+                        }
                     }
                 }).catch(() => {});
             }
@@ -263,6 +253,7 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
 
             source.start();
         } catch(e) {
+            console.error("Audio playback error", e);
             isPlayingRef.current = false;
         }
     };
@@ -273,7 +264,6 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
         isPlayingRef.current = false;
         isMutedRef.current = false;
         setIsMuted(false);
-        volumeRef.current = 0;
         audioQueueRef.current = [];
 
         try {
@@ -294,7 +284,9 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                 try { currentSourceNodeRef.current.stop(); } catch (e) {}
                 currentSourceNodeRef.current = null;
             }
-        } catch (e) { }
+        } catch (e) {
+            console.error("Audio cleanup error", e);
+        }
 
         if (sessionPromiseRef.current) {
             sessionPromiseRef.current.then(session => {
@@ -347,81 +339,67 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/95 backdrop-blur-2xl animate-fadeIn pointer-events-auto transition-all duration-700">
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/95 backdrop-blur-xl animate-fadeIn pointer-events-auto">
             
-            {/* Header / Info Area */}
-            <div className="absolute top-12 left-0 right-0 flex flex-col items-center gap-6 px-8 text-center animate-[slideUp_0.8s_ease-out]">
-                <div className={`flex items-center gap-3 px-6 py-2.5 rounded-full border backdrop-blur-md transition-all duration-500 shadow-2xl ${
-                    error ? 'bg-red-900/30 border-red-500/50' : 'bg-white/5 border-white/10'
+            {/* Status Header */}
+            <div className="absolute top-12 left-0 right-0 flex justify-center">
+                <div className={`flex items-center gap-3 px-6 py-2 rounded-full border backdrop-blur-md transition-all ${
+                    error ? 'bg-red-900/30 border-red-500/50' : 'bg-white/10 border-white/10'
                 }`}>
-                    {error ? <AlertCircle size={16} className="text-red-400" /> : <Wifi size={16} className={mode === 'listening' ? 'text-white/30' : 'text-green-400 animate-pulse'} />}
-                    <span className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/90">{error || status}</span>
+                    {error ? <AlertCircle size={16} className="text-red-400" /> : <Wifi size={16} className={mode === 'listening' ? 'text-white/50' : 'text-green-400'} />}
+                    <span className="text-sm font-medium text-white/90">{error || status}</span>
                 </div>
-                
-                <div className="flex items-center gap-2 text-[10px] font-bold text-white/30 bg-white/5 px-4 py-1.5 rounded-full border border-white/5 uppercase tracking-widest">
+            </div>
+
+            {/* GDPR Notice */}
+            <div className="absolute top-28 left-0 right-0 flex justify-center">
+                <div className="flex items-center gap-2 text-xs text-white/50 bg-black/40 px-3 py-1 rounded-full border border-white/5">
                     <ShieldCheck size={12} />
-                    <span>Helt anonymt • Inget lagras</span>
+                    <span>GDPR-Säkrad: Ljudfiler raderas omedelbart efter transkribering.</span>
                 </div>
             </div>
 
             {/* Close Button */}
             <button 
                 onClick={onClose}
-                className="absolute top-8 right-8 text-white/20 hover:text-white p-4 rounded-full hover:bg-white/5 transition-all z-20 group"
+                className="absolute top-8 right-8 text-white/40 hover:text-white p-3 rounded-full hover:bg-white/10 transition-all z-20"
             >
-                <X size={32} strokeWidth={1} className="group-hover:rotate-90 transition-transform duration-300" />
+                <X size={28} />
             </button>
 
-            {/* Central Fluid Visualizer */}
-            <div className="relative mb-20 flex items-center justify-center">
+            {/* Main Visualizer */}
+            <div className="relative mb-24 flex items-center justify-center">
                 
-                {/* Visualizer Layers */}
-                {/* 1. Deep Glow */}
                 <div 
-                    className={`absolute w-[500px] h-[500px] rounded-full blur-[120px] transition-all duration-1000 ${
-                        mode === 'speaking' ? 'bg-blue-500/10 scale-125' : 
-                        mode === 'processing' ? 'bg-purple-500/10' : 'bg-white/5'
+                    className={`absolute w-[400px] h-[400px] rounded-full blur-[100px] transition-all duration-1000 ${
+                        mode === 'speaking' ? 'bg-green-500/20 scale-110' : 
+                        mode === 'processing' ? 'bg-blue-500/20 scale-100' : 'bg-purple-500/10 scale-90'
                     }`}
                 ></div>
 
-                {/* 2. Outer Orbiting Ring */}
                 <div 
-                    className={`absolute w-[320px] h-[320px] border border-white/5 rounded-full transition-transform duration-[2000ms] ease-linear rotate-[360deg]`}
-                    style={{ animation: 'spin 15s linear infinite', transform: `scale(${1 + smoothVolume * 0.4})` }}
-                >
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-white/20 rounded-full"></div>
-                </div>
-
-                {/* 3. Wave Circles */}
-                <div 
-                    className="absolute inset-0 rounded-full border border-white/20 shadow-[0_0_80px_rgba(255,255,255,0.05)] transition-all duration-75 ease-linear"
-                    style={{ transform: `scale(${1 + smoothVolume * 0.8})`, opacity: mode === 'listening' ? 0.3 + smoothVolume : 0.1 }}
-                ></div>
-                <div 
-                    className="absolute inset-[-20px] rounded-full border border-white/10 transition-all duration-150 ease-linear"
-                    style={{ transform: `scale(${1 + smoothVolume * 0.4})`, opacity: 0.1 }}
+                    className="absolute inset-0 rounded-full border border-white/20 transition-all duration-75 ease-linear"
+                    style={{ transform: `scale(${1 + volume * 0.8})` }}
                 ></div>
 
-                {/* 4. Core Interaction Sphere */}
                 <div className="relative z-10">
-                    <div className={`w-36 h-36 rounded-full flex items-center justify-center shadow-[0_0_100px_rgba(255,255,255,0.1)] transition-all duration-700 ease-[cubic-bezier(0.2,0.8,0.2,1)] ${
-                        mode === 'speaking' ? 'bg-gradient-to-tr from-blue-500 to-indigo-600 scale-110' :
-                        mode === 'processing' ? 'bg-gradient-to-tr from-purple-500 to-pink-600 animate-pulse scale-95' :
-                        isMuted ? 'bg-red-950 border-2 border-red-500/50' : 'bg-white/5 backdrop-blur-3xl border border-white/10'
+                    <div className={`w-32 h-32 rounded-full flex items-center justify-center shadow-[0_0_60px_rgba(255,255,255,0.1)] transition-all duration-500 ${
+                        mode === 'speaking' ? 'bg-gradient-to-tr from-green-400 to-emerald-600 scale-110' :
+                        mode === 'processing' ? 'bg-gradient-to-tr from-blue-400 to-indigo-600 animate-pulse' :
+                        isMuted ? 'bg-red-900 border border-red-500/50' : 'bg-gradient-to-tr from-gray-800 to-black border border-white/10'
                     }`}>
                         {mode === 'listening' && !isMuted && (
                             <div 
-                                className="absolute inset-0 rounded-full bg-white/5"
-                                style={{ transform: `scale(${1 + smoothVolume})` }}
+                                className="absolute inset-0 rounded-full bg-white/10"
+                                style={{ transform: `scale(${1 + volume})` }}
                             ></div>
                         )}
-                        
                         {isMuted ? (
-                            <MicOff size={44} className="text-red-500 animate-pulse" />
+                            <MicOff size={40} className="text-red-400" />
                         ) : (
                             <Sparkles 
-                                size={mode === 'speaking' ? 48 : 40} 
-                                className={`transition-all duration-500 ${mode === 'listening' ? 'text-white/20' : 'text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]'}`} 
+                                size={40} 
+                                className={`transition-colors duration-300 ${mode === 'listening' ? 'text-white/50' : 'text-white'}`} 
                                 fill={mode !== 'listening' ? "currentColor" : "none"}
                             />
                         )}
@@ -429,39 +407,36 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
                 </div>
             </div>
 
-            {/* Instruction / Captions Area */}
-            <div className="absolute bottom-44 text-center space-y-3 pointer-events-none px-12 animate-fadeIn">
-                <h2 className={`text-3xl font-serif-display text-white transition-all duration-500 ${mode === 'speaking' ? 'scale-105' : 'scale-100'}`}>
-                    {error ? 'Tekniskt fel' : isMuted ? 'Mikrofon avstängd' : mode === 'speaking' ? 'Jag lyssnar på dina tankar...' : mode === 'processing' ? 'Analyserar...' : 'Berätta mer...'}
+            {/* Instructions */}
+            <div className="absolute bottom-40 text-center space-y-2 pointer-events-none">
+                <h2 className="text-2xl font-serif-display text-white">
+                    {error ? 'Fel vid anslutning' : isMuted ? 'Mikrofonen är avstängd' : mode === 'speaking' ? 'UF-läraren pratar...' : mode === 'processing' ? 'Tänker...' : 'Jag lyssnar...'}
                 </h2>
-                <p className="text-white/30 text-xs font-bold uppercase tracking-[0.3em]">
-                    {error ? 'Försök att ladda om sidan' : isMuted ? 'Tryck på mikrofonen för att återuppta' : mode === 'speaking' ? 'Du kan avbryta när du vill' : 'Prata naturligt med mig'}
+                <p className="text-white/40 text-sm font-light">
+                    {error ? 'Kontrollera mikrofonbehörigheter och försök igen.' : isMuted ? 'Tryck på mikrofonen för att prata' : mode === 'speaking' ? 'Du kan avbryta när som helst' : 'Prata tydligt i din mikrofon'}
                 </p>
             </div>
 
-            {/* High Fidelity Control Bar */}
-            <div className="flex items-center gap-10 relative z-50 animate-[slideUp_1s_ease-out_0.2s_forwards] opacity-0">
+            {/* Control Bar */}
+            <div className="flex items-center gap-8 relative z-50">
                 <button 
                     onClick={toggleMute}
-                    className={`group p-8 rounded-full transition-all duration-500 backdrop-blur-2xl cursor-pointer border ${
+                    className={`p-6 rounded-full transition-all duration-300 backdrop-blur-md cursor-pointer border ${
                         isMuted 
-                        ? 'bg-red-500/20 text-red-500 border-red-500/40 shadow-[0_0_30px_rgba(239,68,68,0.2)]' 
-                        : 'bg-white/5 text-white/50 border-white/10 hover:border-white/30 hover:text-white hover:bg-white/10'
+                        ? 'bg-red-500/20 text-red-400 border-red-500/50' 
+                        : 'bg-white/5 text-white border-white/10 hover:bg-white/10'
                     }`}
                 >
-                    {isMuted ? <MicOff size={28} /> : <Mic size={28} className="group-hover:scale-110 transition-transform" />}
+                    {isMuted ? <MicOff size={24} /> : <Mic size={24} />}
                 </button>
 
                 <button 
                     onClick={onClose}
-                    className="group p-10 rounded-full bg-white text-black hover:bg-red-600 hover:text-white transition-all duration-500 hover:scale-110 shadow-[0_15px_40px_rgba(255,255,255,0.2)] cursor-pointer active:scale-95 flex items-center justify-center"
+                    className="p-8 rounded-full bg-red-600 text-white hover:bg-red-500 transition-all hover:scale-105 shadow-[0_0_40px_rgba(220,38,38,0.4)] cursor-pointer border-4 border-black/50"
                 >
-                    <PhoneOff size={36} fill="currentColor" className="group-hover:-rotate-[135deg] transition-transform duration-500" />
+                    <PhoneOff size={32} fill="currentColor" />
                 </button>
             </div>
-
-            {/* Decoration Bottom Layer */}
-            <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-black to-transparent pointer-events-none opacity-50"></div>
         </div>
     );
 };
