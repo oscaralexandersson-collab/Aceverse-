@@ -1,15 +1,14 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, Notification, Invoice, UserSettings, CompanyReportEntry } from '../../types';
+import { User, Notification, Invoice, UserSettings } from '../../types';
 import { db } from '../../services/db';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { 
     Globe, User as UserIcon, Bell, Shield, CreditCard, Check, 
     Download, Trash2, Mail, Smartphone, AlertTriangle, FileText,
     Star, ArrowRight, Loader2, Calendar, MapPin, Briefcase,
-    PauseCircle, Lock, X
+    PauseCircle, Lock
 } from 'lucide-react';
-import DeleteConfirmModal from './DeleteConfirmModal';
 
 interface SettingsProps {
     user: User;
@@ -75,7 +74,7 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
                 active={activeTab === 'report'} 
                 onClick={() => setActiveTab('report')} 
                 icon={<FileText size={16} />} 
-                label="Bolagsrapporter" 
+                label="Bolagsrapport" 
             />
             <NavButton 
                 active={activeTab === 'notifications'} 
@@ -217,126 +216,104 @@ const ProfileSection = ({ user, language, setLanguage }: { user: User, language:
 // --- REPORT SECTION ---
 
 const ReportSection = ({ user }: { user: User }) => {
-    const [reports, setReports] = useState<CompanyReportEntry[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [reportToDelete, setReportToDelete] = useState<CompanyReportEntry | null>(null);
+    const report = user.companyReport;
 
-    const loadReports = async () => {
-        setIsLoading(true);
-        try {
-            const data = await db.getUserData(user.id);
-            setReports(data.reports || []);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        loadReports();
-    }, [user.id]);
-
-    const handleClearProfileReport = async () => {
-        if (confirm("Vill du rensa den aktiva bolagsrapporten från din profil? (Själva rapporten finns kvar i din historik)")) {
-            await db.updateProfile(user.id, { companyReport: undefined });
+    const handleDelete = async () => {
+        if (confirm("Är du säker på att du vill ta bort rapporten?")) {
+            await db.updateProfile(user.id, { companyReport: undefined }); 
+            localStorage.removeItem(`aceverse_${user.id}_company_report`); 
             window.location.reload();
         }
     };
 
-    const confirmDeleteReport = async () => {
-        if (!reportToDelete) return;
-        const id = reportToDelete.id;
-        try {
-            await db.deleteReport(user.id, id);
-            setReports(prev => prev.filter(r => r.id !== id));
-            
-            // Om vi raderar den som är aktiv på profilen, rensa även den
-            if (user.companyReport && user.companyReport.meta.companyName === reportToDelete.reportData.meta.companyName) {
-                await db.updateProfile(user.id, { companyReport: undefined });
-            }
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setReportToDelete(null);
-        }
-    };
+    if (!report) {
+        return (
+            <div className="flex flex-col items-center justify-center text-center py-20 text-gray-400">
+                <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-full flex items-center justify-center mb-6">
+                    <FileText size={32} className="opacity-30" />
+                </div>
+                <h3 className="font-serif-display text-xl text-gray-900 dark:text-white mb-2">Ingen rapport sparad</h3>
+                <p className="max-w-xs mb-8">Gå till <strong>CRM > Intelligence</strong> för att generera en Comprehensive Research Report om ditt företag.</p>
+            </div>
+        );
+    }
 
     return (
         <div className="animate-fadeIn">
-            <DeleteConfirmModal 
-                isOpen={!!reportToDelete} 
-                onClose={() => setReportToDelete(null)} 
-                onConfirm={confirmDeleteReport} 
-                itemName={reportToDelete?.title || 'Rapport'} 
-            />
-
-            <div className="mb-10 pb-6 border-b border-gray-100 dark:border-gray-800">
-                <h2 className="font-serif-display text-2xl mb-1 text-gray-900 dark:text-white">Bolagsrapporter</h2>
-                <p className="text-gray-500 dark:text-gray-400 text-sm">Hantera dina genererade marknadsanalyser och profil-data.</p>
+            <div className="flex justify-between items-start mb-8 border-b border-gray-100 dark:border-gray-800 pb-6">
+                <div>
+                    <h2 className="font-serif-display text-2xl mb-1 text-gray-900 dark:text-white">Sparad Bolagsrapport</h2>
+                    <p className="text-gray-500 dark:text-gray-400 text-sm">Genererad: {report.meta?.generatedDate}</p>
+                </div>
+                <button 
+                    onClick={handleDelete}
+                    className="text-red-500 text-sm font-medium hover:text-red-700 flex items-center gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                >
+                    <Trash2 size={16} /> Ta bort
+                </button>
             </div>
 
-            {/* Active Profile Report */}
-            {user.companyReport && (
-                <div className="mb-12">
-                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Aktiv Rapport på Profil</h3>
-                    <div className="bg-black dark:bg-white text-white dark:text-black p-6 rounded-2xl flex justify-between items-center shadow-xl">
-                        <div className="flex items-center gap-4">
-                            <div className="bg-white/10 dark:bg-black/10 p-3 rounded-xl"><FileText size={24} /></div>
-                            <div>
-                                <h4 className="font-bold text-lg">{user.companyReport.meta.companyName}</h4>
-                                <p className="text-xs opacity-70">Denna rapport används för att ge AI:n kontext om ditt företag.</p>
-                            </div>
+            <div className="bg-gray-50 dark:bg-gray-800/50 p-8 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+                <div className="flex flex-col md:flex-row justify-between gap-8 mb-8">
+                    <div>
+                        <h1 className="font-serif-display text-3xl md:text-4xl text-black dark:text-white mb-2">{report.meta?.companyName || 'Okänt Bolag'}</h1>
+                        <a href={report.meta?.website} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline text-sm flex items-center gap-1">
+                            <Globe size={14} /> {report.meta?.website || 'Ingen webbplats'}
+                        </a>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div>
+                            <span className="block text-xs font-bold text-gray-400 uppercase">Grundat</span>
+                            <span className="font-medium text-gray-900 dark:text-white">{report.summary?.founded || 'N/A'}</span>
                         </div>
-                        <button 
-                            onClick={handleClearProfileReport}
-                            className="p-3 bg-white/10 dark:bg-black/10 hover:bg-red-500 hover:text-white rounded-xl transition-all"
-                            title="Rensa från profil"
-                        >
-                            <X size={20} />
-                        </button>
+                        <div>
+                            <span className="block text-xs font-bold text-gray-400 uppercase">Anställda</span>
+                            <span className="font-medium text-gray-900 dark:text-white">{report.summary?.employees || 'N/A'}</span>
+                        </div>
                     </div>
                 </div>
-            )}
 
-            {/* Report History */}
-            <div>
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Rapporthistorik</h3>
-                
-                {isLoading ? (
-                    <div className="py-12 flex justify-center"><Loader2 className="animate-spin text-gray-400" /></div>
-                ) : reports.length === 0 ? (
-                    <div className="bg-gray-50 dark:bg-gray-800/50 p-12 rounded-2xl text-center border-2 border-dashed border-gray-200 dark:border-gray-700">
-                        <FileText size={32} className="mx-auto mb-4 opacity-20" />
-                        <p className="text-gray-500 text-sm">Inga sparade rapporter hittades.</p>
-                        <p className="text-xs text-gray-400 mt-1">Generera din första rapport under CRM > Intelligence.</p>
-                    </div>
-                ) : (
-                    <div className="grid gap-4">
-                        {reports.map((report) => (
-                            <div key={report.id} className="group bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-4 rounded-xl flex justify-between items-center hover:shadow-md transition-all">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-10 h-10 bg-gray-50 dark:bg-gray-700 rounded-lg flex items-center justify-center text-gray-400 group-hover:text-black dark:group-hover:text-white transition-colors">
-                                        <FileText size={20} />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm">{report.title}</h4>
-                                        <p className="text-[10px] text-gray-500 uppercase font-medium">{new Date(report.created_at).toLocaleDateString()} • Market Research</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <button 
-                                        onClick={() => setReportToDelete(report)}
-                                        className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
-                                        title="Radera permanent"
-                                    >
-                                        <Trash2 size={18} />
-                                    </button>
-                                </div>
+                <div className="space-y-8">
+                    <section>
+                        <h4 className="font-bold text-sm uppercase tracking-wider text-gray-900 dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2">Sammanfattning</h4>
+                        <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-line">
+                            Denna rapport ger en djupgående analys av bolagets finansiella ställning, marknadsposition och tillväxtmöjligheter. Se den fullständiga rapporten under CRM-sektionen för detaljerade insikter.
+                        </p>
+                    </section>
+
+                    <section className="grid md:grid-cols-2 gap-8">
+                        <div>
+                            <h4 className="font-bold text-sm uppercase tracking-wider text-gray-900 dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2">Finansiell Översikt</h4>
+                            <ul className="space-y-2 text-sm text-gray-700 dark:text-gray-300">
+                                <li className="flex justify-between">
+                                    <span className="text-gray-500 dark:text-gray-400">Omsättning:</span>
+                                    <span className="font-medium">{report.summary?.revenue || 'N/A'}</span>
+                                </li>
+                                <li className="flex justify-between">
+                                    <span className="text-gray-500 dark:text-gray-400">EBITDA:</span>
+                                    <span className="font-medium">{report.summary?.ebitda || 'N/A'}</span>
+                                </li>
+                                <li className="flex justify-between">
+                                    <span className="text-gray-500 dark:text-gray-400">Soliditet:</span>
+                                    <span className="font-medium text-green-600">{report.summary?.solvency || 'N/A'}</span>
+                                </li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 className="font-bold text-sm uppercase tracking-wider text-gray-900 dark:text-white mb-3 border-b border-gray-200 dark:border-gray-700 pb-2">Källhänvisningar</h4>
+                            <div className="flex flex-wrap gap-2">
+                                {report.sources?.slice(0, 5)?.map((source, i) => (
+                                    <span key={i} className="text-[10px] bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 px-2 py-1 rounded-md text-gray-700 dark:text-gray-300 truncate max-w-[150px]" title={source.title}>
+                                        {source.title}
+                                    </span>
+                                ))}
+                                {(!report.sources || report.sources.length === 0) && (
+                                    <span className="text-xs text-gray-400 italic">Inga källor angivna.</span>
+                                )}
                             </div>
-                        ))}
-                    </div>
-                )}
+                        </div>
+                    </section>
+                </div>
             </div>
         </div>
     );
