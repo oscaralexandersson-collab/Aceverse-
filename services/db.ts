@@ -5,7 +5,7 @@ import {
   SearchResult, ContactRequest, Notification, UserSettings, 
   BrandDNA, MarketingCampaign, CompanyReport, CompanyReportEntry 
 } from '../types';
-import { PostgrestResponse, PostgrestSingleResponse } from '@supabase/supabase-js';
+import { PostgrestResponse, PostgrestSingleResponse, PostgrestBuilder } from '@supabase/supabase-js';
 
 const SESSION_KEY = 'aceverse_session_user';
 const LOCAL_USERS_KEY = 'aceverse_local_users_db';
@@ -37,37 +37,43 @@ class StorageMutex {
 
 class DatabaseService {
   private mutex = new StorageMutex();
-  private maxRetries = 3;
+  private maxRetries = 2;
   private backoffMs = 500;
+  private storageQuotaLimit = 4.5 * 1024 * 1024; // ~4.5MB threshold
 
   /**
-   * Wraps Supabase calls with retry logic, backoff, and timeouts.
+   * Enhanced Supabase wrapper with AbortController, retries, and strict types.
    */
   private async safeSupabaseCall<T>(
-    operation: () => Promise<PostgrestResponse<T> | PostgrestSingleResponse<T>>,
+    operation: (signal: AbortSignal) => Promise<PostgrestResponse<T> | PostgrestSingleResponse<T>>,
     retries = this.maxRetries
   ): Promise<{ data: T | T[] | null; error: any }> {
     let lastError: any;
 
     for (let i = 0; i <= retries; i++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+
       try {
-        const timeout = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error("Timeout")), 6000)
-        );
-        
-        const response = await Promise.race([operation(), timeout]) as any;
+        const response = await operation(controller.signal);
+        clearTimeout(timeoutId);
         
         if (response.error) {
           lastError = response.error;
-          // If it's a 4xx error (except 429), don't retry
-          if (response.error.status && response.error.status >= 400 && response.error.status < 500 && response.error.status !== 429) {
+          // Don't retry on user errors (4xx) except rate limits (429)
+          const status = (response.error as any).status;
+          if (status && status >= 400 && status < 500 && status !== 429) {
             break;
           }
         } else {
           return { data: response.data, error: null };
         }
-      } catch (e) {
+      } catch (e: any) {
+        clearTimeout(timeoutId);
         lastError = e;
+        if (e.name === 'AbortError') {
+          console.warn("Supabase request timed out and was aborted.");
+        }
       }
 
       if (i < retries) {
@@ -76,13 +82,38 @@ class DatabaseService {
       }
     }
 
-    console.error("Supabase operation failed after retries:", lastError);
     return { data: null, error: lastError };
   }
 
   /**
-   * Manages "deleted" record tracking to prevent re-syncing from cloud
+   * Storage Management & Quota Enforcement
    */
+  private async checkQuota() {
+    let totalSize = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('aceverse_')) {
+        totalSize += (localStorage.getItem(key) || '').length * 2; // Rough estimate in bytes (UTF-16)
+      }
+    }
+
+    if (totalSize > this.storageQuotaLimit) {
+      console.warn("LocalStorage quota near limit, performing emergency cleanup...");
+      this.emergencyCleanup();
+    }
+  }
+
+  private emergencyCleanup() {
+    // Remove oldest data first (based on table types we can afford to lose)
+    const tablesToPrune = ['chat_messages', 'notifications', 'company_reports'];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && tablesToPrune.some(t => key.includes(`_${t}`))) {
+        localStorage.removeItem(key);
+      }
+    }
+  }
+
   private getTombstones(userId: string): Map<string, number> {
     try {
       const stored = localStorage.getItem(TOMBSTONE_KEY(userId));
@@ -102,9 +133,6 @@ class DatabaseService {
     });
   }
 
-  /**
-   * Removes old deletion markers (older than 30 days) to keep storage clean
-   */
   private pruneTombstones(userId: string) {
     const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
     const now = Date.now();
@@ -129,7 +157,6 @@ class DatabaseService {
   async signup(email: string, password: string, firstName: string, lastName: string): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
     
-    // Handle Local Dev/Demo mode securely
     if (cleanEmail.endsWith('@local.dev') || cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se') {
       const localUser: User = {
         id: cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se' ? 'local-demo' : 'local-' + Date.now(),
@@ -143,8 +170,9 @@ class DatabaseService {
       };
       
       const isExisting = await this.mutex.run(async () => {
-        const users = JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '[]');
-        return users.some((u: any) => u.email === cleanEmail);
+        const usersRaw = localStorage.getItem(LOCAL_USERS_KEY);
+        const users = usersRaw ? JSON.parse(usersRaw) : [];
+        return Array.isArray(users) && users.some((u: any) => u.email === cleanEmail);
       });
 
       if (isExisting && !(cleanEmail === 'test@aceverse.se' || cleanEmail === 'demo@aceverse.se')) {
@@ -152,9 +180,8 @@ class DatabaseService {
       }
 
       await this.mutex.run(async () => {
-        const users = JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || '[]');
-        // We store metadata but NO plaintext passwords for local users. 
-        // Verification happens via a simple check in login() for demo accounts.
+        const usersRaw = localStorage.getItem(LOCAL_USERS_KEY);
+        const users = usersRaw ? JSON.parse(usersRaw) : [];
         users.push({ ...localUser, isTestFixture: true });
         localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
       });
@@ -189,15 +216,11 @@ class DatabaseService {
   async login(email: string, password: string, rememberMe: boolean = true): Promise<User> {
     const cleanEmail = email.trim().toLowerCase();
 
-    // Verification for Demo accounts
     if (cleanEmail === 'demo@aceverse.se' || cleanEmail === 'test@aceverse.se') {
       return this.createDemoUser();
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password
-    });
+    const { data, error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
 
     if (error) throw new AceverseDatabaseError(error.message, error);
     if (data.user) {
@@ -221,11 +244,14 @@ class DatabaseService {
 
   private setSession(user: User, persistent: boolean) {
     try {
-      localStorage.removeItem(SESSION_KEY);
-      sessionStorage.removeItem(SESSION_KEY);
       const data = JSON.stringify(user);
-      if (persistent) localStorage.setItem(SESSION_KEY, data);
-      else sessionStorage.setItem(SESSION_KEY, data);
+      if (persistent) {
+        localStorage.setItem(SESSION_KEY, data);
+        sessionStorage.removeItem(SESSION_KEY);
+      } else {
+        sessionStorage.setItem(SESSION_KEY, data);
+        localStorage.removeItem(SESSION_KEY);
+      }
     } catch (e) {
       console.warn("Failed to set session", e);
     }
@@ -281,20 +307,61 @@ class DatabaseService {
   }
 
   /**
-   * Profile Management
+   * Centralized CRUD Helper (DRY)
+   * Handles local storage updates and cloud synchronization with unified error reporting.
+   */
+  private async performCRUD<T extends { id: string }>(
+    table: string, 
+    userId: string, 
+    operation: 'insert' | 'update' | 'delete', 
+    itemOrUpdates: any, 
+    id?: string
+  ): Promise<void> {
+    const isLocal = userId.startsWith('local-');
+    const targetId = id || itemOrUpdates.id;
+
+    // 1. Update Local State (Optimistic)
+    if (operation === 'insert') await this.saveLocal(table, userId, { ...itemOrUpdates, pending: !isLocal });
+    else if (operation === 'update') await this.updateLocal(table, userId, targetId, itemOrUpdates);
+    else if (operation === 'delete') await this.removeFromLocal(table, userId, targetId);
+
+    // 2. Sync to Cloud if not in local demo mode
+    if (!isLocal) {
+      const { error } = await this.safeSupabaseCall(async (signal) => {
+        let query: any = supabase.from(table);
+        if (operation === 'insert') return query.insert({ ...itemOrUpdates, user_id: userId }).abortSignal(signal);
+        if (operation === 'update') return query.update(itemOrUpdates).eq('id', targetId).eq('user_id', userId).abortSignal(signal);
+        if (operation === 'delete') return query.delete().eq('id', targetId).eq('user_id', userId).abortSignal(signal);
+        return { data: null, error: { message: 'Invalid OP' } } as any;
+      });
+
+      if (error) {
+        // If it was an insert/update, we keep it as "pending" locally to retry later (logic for sync manager could be added)
+        throw new AceverseDatabaseError(`Kunde inte synkronisera ${table} till molnet.`, error);
+      } else if (operation === 'insert') {
+        // Mark as no longer pending
+        await this.updateLocal(table, userId, targetId, { pending: false });
+      }
+    }
+  }
+
+  /**
+   * Profile & Onboarding
    */
   async updateProfile(userId: string, updates: Partial<User>): Promise<void> {
     if (!userId.startsWith('local-')) {
-      const { error } = await supabase.auth.updateUser({ 
-        data: { 
-          first_name: updates.firstName, 
-          last_name: updates.lastName, 
-          company: updates.company, 
-          bio: updates.bio, 
-          plan: updates.plan, 
-          company_report: updates.companyReport 
-        } 
-      });
+      const { error } = await this.safeSupabaseCall(async (signal) => 
+        supabase.auth.updateUser({ 
+          data: { 
+            first_name: updates.firstName, 
+            last_name: updates.lastName, 
+            company: updates.company, 
+            bio: updates.bio, 
+            plan: updates.plan, 
+            company_report: updates.companyReport 
+          } 
+        }, { abortSignal: signal } as any)
+      );
       if (error) throw new AceverseDatabaseError(error.message, error);
     }
     
@@ -313,22 +380,24 @@ class DatabaseService {
 
   async completeOnboarding(userId: string, companyData: any): Promise<User> {
     if (!userId.startsWith('local-')) {
-      const { error } = await supabase.auth.updateUser({ 
-        data: { 
-          company: companyData.company, 
-          industry: companyData.industry, 
-          business_stage: companyData.stage, 
-          description: companyData.description, 
-          onboarding_completed: true 
-        } 
-      });
+      const { error } = await this.safeSupabaseCall(async (signal) => 
+        supabase.auth.updateUser({ 
+          data: { 
+            company: companyData.company, 
+            industry: companyData.industry, 
+            business_stage: companyData.stage, 
+            description: companyData.description, 
+            onboarding_completed: true 
+          } 
+        }, { abortSignal: signal } as any)
+      );
       if (error) throw new AceverseDatabaseError(error.message, error);
     }
 
     await this.mutex.run(async () => {
-      const local = localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY);
-      if (local) {
-        const user = JSON.parse(local);
+      const localRaw = localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY);
+      if (localRaw) {
+        const user = JSON.parse(localRaw);
         const updatedUser = { ...user, company: companyData.company, onboardingCompleted: true };
         this.setSession(updatedUser, true);
       }
@@ -338,7 +407,7 @@ class DatabaseService {
   }
 
   /**
-   * Data Loading & Merging Logic
+   * Bulk Data Retrieval
    */
   async getUserData(userId: string): Promise<UserData> {
     const isLocal = userId.startsWith('local-');
@@ -347,11 +416,11 @@ class DatabaseService {
 
     if (!isLocal) {
       const ops = [
-        this.safeSupabaseCall<Lead>(() => supabase.from('leads').select('*').eq('user_id', userId).order('created_at', { ascending: false })),
-        this.safeSupabaseCall<Idea>(() => supabase.from('ideas').select('*').eq('user_id', userId).order('created_at', { ascending: false })),
-        this.safeSupabaseCall<Pitch>(() => supabase.from('pitches').select('*').eq('user_id', userId).order('created_at', { ascending: false })),
-        this.safeSupabaseCall<ChatMessage>(() => supabase.from('chat_messages').select('*').eq('user_id', userId).order('created_at', { ascending: true })),
-        this.safeSupabaseCall<ChatSession>(() => supabase.from('chat_sessions').select('*').eq('user_id', userId).order('last_message_at', { ascending: false }))
+        this.safeSupabaseCall<Lead>((signal) => supabase.from('leads').select('*').eq('user_id', userId).order('created_at', { ascending: false }).abortSignal(signal)),
+        this.safeSupabaseCall<Idea>((signal) => supabase.from('ideas').select('*').eq('user_id', userId).order('created_at', { ascending: false }).abortSignal(signal)),
+        this.safeSupabaseCall<Pitch>((signal) => supabase.from('pitches').select('*').eq('user_id', userId).order('created_at', { ascending: false }).abortSignal(signal)),
+        this.safeSupabaseCall<ChatMessage>((signal) => supabase.from('chat_messages').select('*').eq('user_id', userId).order('created_at', { ascending: true }).abortSignal(signal)),
+        this.safeSupabaseCall<ChatSession>((signal) => supabase.from('chat_sessions').select('*').eq('user_id', userId).order('last_message_at', { ascending: false }).abortSignal(signal))
       ];
       const results = await Promise.allSettled(ops);
       remoteResults = results.map(res => res.status === 'fulfilled' ? res.value.data : null);
@@ -366,18 +435,16 @@ class DatabaseService {
       } catch(e) { return []; }
     };
     
-    const merge = (table: string, remote: any[] | null | undefined, local: any[]) => {
+    const merge = <T extends { id: string }>(table: string, remote: T[] | null | undefined, local: T[]) => {
       const localSafe = Array.isArray(local) ? local : [];
       const base = localSafe.filter(i => i && !tombstones.has(i.id));
-      
       if (isLocal || !Array.isArray(remote)) return base;
 
       const remoteIds = new Set(remote.map(i => i.id));
-      const pending = base.filter(i => i.pending === true && !remoteIds.has(i.id));
+      const pending = base.filter(i => (i as any).pending === true && !remoteIds.has(i.id));
       const sanitizedRemote = remote.filter(i => i && !tombstones.has(i.id));
       
       const finalData = [...pending, ...sanitizedRemote];
-      // Keep local cache synced
       localStorage.setItem(GET_LOCAL_KEY(table, userId), JSON.stringify(finalData));
       return finalData;
     };
@@ -419,268 +486,141 @@ class DatabaseService {
   }
 
   /**
-   * Lead Management
+   * Entity Methods (Refactored to use performCRUD)
    */
   async addLead(userId: string, leadData: Omit<Lead, 'id' | 'dateAdded'>): Promise<Lead> {
-    const lead: Lead = { 
-      id: this.generateId(), 
-      dateAdded: new Date().toISOString(), 
-      ...leadData 
-    };
-
-    await this.saveLocal('leads', userId, lead);
-
-    if (!userId.startsWith('local-')) {
-      const { error } = await this.safeSupabaseCall(() => supabase.from('leads').insert({
-        id: lead.id,
-        user_id: userId,
-        name: lead.name,
-        company: lead.company,
-        email: lead.email,
-        phone: lead.phone,
-        linkedin: lead.linkedin,
-        website: lead.website,
-        notes: lead.notes,
-        status: lead.status,
-        value: lead.value,
-        created_at: lead.dateAdded
-      }));
-      if (error) throw new AceverseDatabaseError("Misslyckades med att spara till molnet.", error);
-    }
+    const lead: Lead = { id: this.generateId(), dateAdded: new Date().toISOString(), ...leadData };
+    await this.performCRUD('leads', userId, 'insert', {
+      id: lead.id,
+      name: lead.name,
+      company: lead.company,
+      email: lead.email,
+      phone: lead.phone,
+      linkedin: lead.linkedin,
+      website: lead.website,
+      notes: lead.notes,
+      status: lead.status,
+      value: lead.value,
+      created_at: lead.dateAdded
+    });
     return lead;
   }
 
   async updateLead(userId: string, leadId: string, updates: Partial<Lead>): Promise<void> {
-    await this.updateLocal('leads', userId, leadId, updates);
-
-    if (!userId.startsWith('local-')) {
-      const p: any = {};
-      if (updates.status) p.status = updates.status;
-      if (updates.value !== undefined) p.value = updates.value;
-      if (updates.notes) p.notes = updates.notes;
-      const { error } = await this.safeSupabaseCall(() => supabase.from('leads').update(p).eq('id', leadId).eq('user_id', userId));
-      if (error) throw new AceverseDatabaseError("Uppdatering misslyckades.", error);
-    }
+    await this.performCRUD('leads', userId, 'update', updates, leadId);
   }
 
   async deleteLead(userId: string, leadId: string): Promise<void> {
     await this.addTombstone(userId, leadId);
-    await this.removeFromLocal('leads', userId, leadId);
-
-    if (!userId.startsWith('local-')) {
-      const { error } = await this.safeSupabaseCall(() => supabase.from('leads').delete().eq('id', leadId).eq('user_id', userId));
-      if (error) console.warn("Cloud delete failed, using tombstone for consistency.", error);
-    }
+    await this.performCRUD('leads', userId, 'delete', {}, leadId);
   }
 
-  /**
-   * Idea Lab Logic
-   */
   async addIdea(userId: string, ideaData: Omit<Idea, 'id' | 'dateCreated' | 'score'>): Promise<Idea> {
-    const idea: Idea & { pending: boolean } = { 
-      id: this.generateId(), 
-      dateCreated: new Date().toISOString(), 
-      score: 0, 
-      ...ideaData as any, 
-      pending: true 
-    };
-
-    await this.saveLocal('ideas', userId, idea);
-    
-    if (!userId.startsWith('local-')) {
-      const { error } = await this.safeSupabaseCall(() => supabase.from('ideas').insert({
-        id: idea.id,
-        user_id: userId,
-        title: idea.title,
-        description: idea.description,
-        current_phase: idea.currentPhase,
-        snapshot: idea.snapshot,
-        nodes: idea.nodes,
-        edges: idea.edges,
-        cards: idea.cards,
-        tasks: idea.tasks,
-        evidence: idea.evidence,
-        created_at: idea.dateCreated
-      }));
-      
-      if (!error) {
-        idea.pending = false;
-        await this.saveLocal('ideas', userId, idea);
-      }
-    }
+    const idea: Idea = { id: this.generateId(), dateCreated: new Date().toISOString(), score: 0, ...ideaData as any };
+    await this.performCRUD('ideas', userId, 'insert', {
+      id: idea.id,
+      title: idea.title,
+      description: idea.description,
+      current_phase: idea.currentPhase,
+      snapshot: idea.snapshot,
+      nodes: idea.nodes,
+      edges: idea.edges,
+      cards: idea.cards,
+      tasks: idea.tasks,
+      evidence: idea.evidence,
+      created_at: idea.dateCreated
+    });
     return idea;
   }
 
   async updateIdeaState(userId: string, ideaId: string, updates: Partial<Idea>): Promise<void> {
-    await this.updateLocal('ideas', userId, ideaId, updates);
-    
-    if (!userId.startsWith('local-')) {
-      const p: any = {};
-      if (updates.title) p.title = updates.title;
-      if (updates.currentPhase) p.current_phase = updates.currentPhase;
-      if (updates.snapshot) p.snapshot = updates.snapshot;
-      if (updates.nodes) p.nodes = updates.nodes;
-      if (updates.tasks) p.tasks = updates.tasks;
-      await this.safeSupabaseCall(() => supabase.from('ideas').update(p).eq('id', ideaId).eq('user_id', userId));
-    }
+    const mapped: any = {};
+    if (updates.title) mapped.title = updates.title;
+    if (updates.currentPhase) mapped.current_phase = updates.currentPhase;
+    if (updates.snapshot) mapped.snapshot = updates.snapshot;
+    if (updates.nodes) mapped.nodes = updates.nodes;
+    if (updates.tasks) mapped.tasks = updates.tasks;
+    await this.performCRUD('ideas', userId, 'update', mapped, ideaId);
   }
 
   async deleteIdea(userId: string, ideaId: string): Promise<void> {
     await this.addTombstone(userId, ideaId);
-    await this.removeFromLocal('ideas', userId, ideaId);
-    if (!userId.startsWith('local-')) {
-      await this.safeSupabaseCall(() => supabase.from('ideas').delete().eq('id', ideaId).eq('user_id', userId));
-    }
+    await this.performCRUD('ideas', userId, 'delete', {}, ideaId);
   }
 
-  /**
-   * Pitch Studio Logic
-   */
   async addPitch(userId: string, pitchData: Omit<Pitch, 'id' | 'dateCreated'>): Promise<Pitch> {
-    const pitch: Pitch & { pending: boolean } = { 
-      id: this.generateId(), 
-      dateCreated: new Date().toISOString(), 
-      ...pitchData as any, 
-      pending: true 
-    };
-    await this.saveLocal('pitches', userId, pitch);
-    
-    if (!userId.startsWith('local-')) {
-      const { error } = await this.safeSupabaseCall(() => supabase.from('pitches').insert({ 
-        id: pitch.id, 
-        user_id: userId, 
-        type: pitch.type, 
-        name: pitch.name, 
-        content: pitch.content, 
-        chat_session_id: pitch.chatSessionId, 
-        context_score: pitch.contextScore, 
-        created_at: pitch.dateCreated 
-      }));
-      if (!error) {
-        pitch.pending = false;
-        await this.saveLocal('pitches', userId, pitch);
-      }
-    }
+    const pitch: Pitch = { id: this.generateId(), dateCreated: new Date().toISOString(), ...pitchData as any };
+    await this.performCRUD('pitches', userId, 'insert', {
+      id: pitch.id,
+      type: pitch.type,
+      name: pitch.name,
+      content: pitch.content,
+      chat_session_id: pitch.chatSessionId,
+      context_score: pitch.contextScore,
+      created_at: pitch.dateCreated
+    });
     return pitch;
   }
 
   async deletePitch(userId: string, pitchId: string): Promise<void> {
     await this.addTombstone(userId, pitchId);
-    await this.removeFromLocal('pitches', userId, pitchId);
-    if (!userId.startsWith('local-')) {
-      await this.safeSupabaseCall(() => supabase.from('pitches').delete().eq('id', pitchId).eq('user_id', userId));
-    }
+    await this.performCRUD('pitches', userId, 'delete', {}, pitchId);
   }
 
-  /**
-   * Chat Logic
-   */
   async addMessage(userId: string, message: Omit<ChatMessage, 'id' | 'timestamp'>): Promise<ChatMessage> {
-    const msg: ChatMessage & { pending: boolean } = { 
-      id: this.generateId(), 
-      timestamp: Date.now(), 
-      ...message as any, 
-      pending: true 
-    };
-    await this.saveLocal('chat_messages', userId, msg);
-    
-    if (!userId.startsWith('local-')) {
-      const { error } = await this.safeSupabaseCall(() => supabase.from('chat_messages').insert({ 
-        id: msg.id, 
-        user_id: userId, 
-        session_id: msg.sessionId, 
-        role: msg.role, 
-        text: msg.text, 
-        created_at: new Date(msg.timestamp).toISOString() 
-      }));
-      if (!error) {
-        msg.pending = false;
-        await this.saveLocal('chat_messages', userId, msg);
-      }
-    }
+    const msg: ChatMessage = { id: this.generateId(), timestamp: Date.now(), ...message as any };
+    await this.performCRUD('chat_messages', userId, 'insert', {
+      id: msg.id,
+      session_id: msg.sessionId,
+      role: msg.role,
+      text: msg.text,
+      created_at: new Date(msg.timestamp).toISOString()
+    });
     return msg;
   }
 
   async createChatSession(userId: string, name: string): Promise<ChatSession> {
-    const session: ChatSession & { pending: boolean } = { 
-      id: this.generateId(), 
-      name, 
-      lastMessageAt: Date.now(), 
-      preview: 'Starta konversationen...', 
-      pending: true 
-    } as any;
-
-    await this.saveLocal('chat_sessions', userId, session);
-    
-    if (!userId.startsWith('local-')) {
-      const { error } = await this.safeSupabaseCall(() => supabase.from('chat_sessions').insert({ 
-        id: session.id, 
-        user_id: userId, 
-        name: session.name, 
-        last_message_at: new Date(session.lastMessageAt).toISOString(), 
-        preview: session.preview 
-      }));
-      if (!error) {
-        session.pending = false;
-        await this.saveLocal('chat_sessions', userId, session);
-      }
-    }
+    const session: ChatSession = { id: this.generateId(), name, lastMessageAt: Date.now(), preview: 'Starta konversationen...' } as any;
+    await this.performCRUD('chat_sessions', userId, 'insert', {
+      id: session.id,
+      name: session.name,
+      last_message_at: new Date(session.lastMessageAt).toISOString(),
+      preview: session.preview
+    });
     return session;
   }
 
   async deleteChatSession(userId: string, sessionId: string): Promise<void> {
     await this.addTombstone(userId, sessionId);
-    await this.removeFromLocal('chat_sessions', userId, sessionId);
-    
     await this.mutex.run(async () => {
       const msgKey = GET_LOCAL_KEY('chat_messages', userId);
-      const filteredMessages = JSON.parse(localStorage.getItem(msgKey) || '[]').filter((m: any) => m && m.sessionId !== sessionId);
-      localStorage.setItem(msgKey, JSON.stringify(filteredMessages));
+      const filtered = (JSON.parse(localStorage.getItem(msgKey) || '[]') as any[]).filter(m => m && m.sessionId !== sessionId);
+      localStorage.setItem(msgKey, JSON.stringify(filtered));
     });
-
-    if (!userId.startsWith('local-')) {
-      await Promise.all([
-        this.safeSupabaseCall(() => supabase.from('chat_messages').delete().eq('session_id', sessionId).eq('user_id', userId)),
-        this.safeSupabaseCall(() => supabase.from('chat_sessions').delete().eq('id', sessionId).eq('user_id', userId))
-      ]);
-    }
+    await this.performCRUD('chat_sessions', userId, 'delete', {}, sessionId);
   }
 
   async renameChatSession(userId: string, sessionId: string, name: string): Promise<void> {
-    await this.updateChatSession(userId, sessionId, { name });
+    await this.performCRUD('chat_sessions', userId, 'update', { name }, sessionId);
   }
 
   async ensureSystemSession(userId: string): Promise<ChatSession> {
     const data = await this.getUserData(userId);
     let session = (data.sessions || []).find(s => s.name === 'UF-läraren');
-    if (!session) {
-      return await this.createChatSession(userId, 'UF-läraren');
-    }
+    if (!session) return await this.createChatSession(userId, 'UF-läraren');
     return session;
   }
 
   async updateChatSession(userId: string, sessionId: string, updates: any) {
-    await this.updateLocal('chat_sessions', userId, sessionId, updates);
-
-    if (!userId.startsWith('local-')) {
-      const p: any = {};
-      if (updates.name) p.name = updates.name;
-      if (updates.lastMessageAt) p.last_message_at = new Date(updates.lastMessageAt).toISOString();
-      if (updates.preview) p.preview = updates.preview;
-      await this.safeSupabaseCall(() => supabase.from('chat_sessions').update(p).eq('id', sessionId).eq('user_id', userId));
-    }
+    const mapped: any = {};
+    if (updates.name) mapped.name = updates.name;
+    if (updates.lastMessageAt) mapped.last_message_at = new Date(updates.lastMessageAt).toISOString();
+    if (updates.preview) mapped.preview = updates.preview;
+    await this.performCRUD('chat_sessions', userId, 'update', mapped, sessionId);
   }
 
-  /**
-   * Reports & Brand Assets
-   */
   async addReportToHistory(userId: string, report: CompanyReport): Promise<CompanyReportEntry> {
-    const entry: CompanyReportEntry = {
-      id: this.generateId(),
-      title: report.meta.companyName,
-      reportData: report,
-      created_at: new Date().toISOString()
-    };
+    const entry: CompanyReportEntry = { id: this.generateId(), title: report.meta.companyName, reportData: report, created_at: new Date().toISOString() };
     await this.saveLocal('company_reports', userId, entry);
     return entry;
   }
@@ -704,13 +644,9 @@ class DatabaseService {
     });
   }
 
-  /**
-   * GDPR Tools
-   */
   async exportUserData(userId: string): Promise<Blob> {
     const data = await this.getUserData(userId);
-    const json = JSON.stringify(data, null, 2);
-    return new Blob([json], { type: 'application/json' });
+    return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   }
 
   async deleteAccount(userId: string): Promise<void> {
@@ -734,19 +670,16 @@ class DatabaseService {
   }
 
   /**
-   * Internal Atomic Helpers
+   * Internal Atomic Helpers with Quota Check
    */
   private async saveLocal(table: string, userId: string, item: any) {
+    await this.checkQuota();
     return this.mutex.run(async () => {
       const key = GET_LOCAL_KEY(table, userId);
       const current = JSON.parse(localStorage.getItem(key) || '[]');
       if (item.id) {
-        const existingIndex = current.findIndex((i: any) => i && i.id === item.id);
-        if (existingIndex >= 0) { 
-          current[existingIndex] = item; 
-          localStorage.setItem(key, JSON.stringify(current)); 
-          return; 
-        }
+        const idx = current.findIndex((i: any) => i && i.id === item.id);
+        if (idx >= 0) { current[idx] = item; localStorage.setItem(key, JSON.stringify(current)); return; }
       }
       localStorage.setItem(key, JSON.stringify([item, ...current]));
     });
@@ -757,18 +690,14 @@ class DatabaseService {
       const key = GET_LOCAL_KEY(table, userId);
       const current = JSON.parse(localStorage.getItem(key) || '[]');
       const idx = current.findIndex((i: any) => i && i.id === id);
-      if (idx >= 0) {
-        current[idx] = { ...current[idx], ...updates };
-        localStorage.setItem(key, JSON.stringify(current));
-      }
+      if (idx >= 0) { current[idx] = { ...current[idx], ...updates }; localStorage.setItem(key, JSON.stringify(current)); }
     });
   }
 
   private async removeFromLocal(table: string, userId: string, id: string) {
     return this.mutex.run(async () => {
       const key = GET_LOCAL_KEY(table, userId);
-      const current = JSON.parse(localStorage.getItem(key) || '[]');
-      const filtered = current.filter((i: any) => i && i.id !== id);
+      const filtered = (JSON.parse(localStorage.getItem(key) || '[]') as any[]).filter(i => i && i.id !== id);
       localStorage.setItem(key, JSON.stringify(filtered));
     });
   }
@@ -777,18 +706,29 @@ class DatabaseService {
     return typeof crypto !== 'undefined' ? crypto.randomUUID() : Math.random().toString(36).substring(2);
   }
 
+  /**
+   * Robust mapping and validation of Supabase User Metadata
+   */
   private mapUser(supabaseUser: any): User {
+    if (!supabaseUser || !supabaseUser.id) {
+      throw new AceverseDatabaseError("Invalid user data received from auth server.");
+    }
     const metadata = supabaseUser.user_metadata || {};
+    
+    // Validate created_at
+    const createdAt = supabaseUser.created_at;
+    const isValidDate = createdAt && !isNaN(Date.parse(createdAt));
+    
     return { 
       id: supabaseUser.id, 
-      email: supabaseUser.email, 
-      firstName: metadata.first_name || '', 
+      email: supabaseUser.email || '', 
+      firstName: metadata.first_name || 'Användare', 
       lastName: metadata.last_name || '', 
       company: metadata.company || '', 
       bio: metadata.bio || '', 
-      createdAt: supabaseUser.created_at, 
+      createdAt: isValidDate ? createdAt : new Date().toISOString(), 
       onboardingCompleted: metadata.onboarding_completed ?? false, 
-      plan: metadata.plan || 'free' 
+      plan: (['free', 'pro', 'enterprise'].includes(metadata.plan) ? metadata.plan : 'free') as any
     };
   }
 }
