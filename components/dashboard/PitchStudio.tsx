@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     Plus, Presentation, Download, ArrowRight, ArrowLeft, Sparkles, 
@@ -73,15 +72,15 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
         if (!pitchToDelete) return;
         
         const id = pitchToDelete.id;
-        // Optimistic UI Update - Ta bort direkt från skärmen
+        // Optimistic UI Update
         setSavedPitches(prev => prev.filter(p => p.id !== id));
         setPitchToDelete(null);
 
         try {
             await db.deletePitch(user.id, id);
+            await loadHistory(); // Sync check
         } catch (err) {
             console.error(err);
-            // Revert if failed (optional, but good for stability)
             loadHistory();
         }
     };
@@ -154,13 +153,13 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
             setCurrentDeck(deckData);
             setStep('preview');
 
-            await db.addPitch(user.id, {
+            const newPitch = await db.addPitch(user.id, {
                 type: 'deck',
                 name: deckData.deck?.title || 'Okänd Pitch',
                 content: JSON.stringify(deckData),
                 contextScore: 100
             });
-            loadHistory();
+            setSavedPitches(prev => [newPitch, ...prev]);
 
         } catch (e) { alert("Fel vid generering av presentationen."); } finally { setIsLoading(false); }
     };

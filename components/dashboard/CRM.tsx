@@ -156,6 +156,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         }
         try {
             await db.deleteLead(user.id, id);
+            await loadData(); // Full refresh to ensure sync
         } catch (e) {
             loadData();
         }
@@ -169,6 +170,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         setReportToDelete(null);
         try {
             await db.deleteReport(user.id, id);
+            await loadData();
         } catch (e) {
             loadData();
         }

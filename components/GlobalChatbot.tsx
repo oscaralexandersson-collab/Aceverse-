@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageCircle, X, Send, Sparkles, Minimize2, Maximize2, Mic, ChevronDown, ShieldCheck, Zap, Loader2 } from 'lucide-react';
+import { MessageCircle, X, Send, Sparkles, Minimize2, Maximize2, Mic, ChevronDown, ShieldCheck, Zap, Loader2, ArrowUp } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { User, ChatMessage } from '../types';
 import { db } from '../services/db';
@@ -202,10 +201,25 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
                                 )}
                                 <div ref={bottomRef} />
                             </div>
-                            <div className="p-5 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
-                                <form onSubmit={handleSend} className="relative flex items-center">
-                                    <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Skriv din fråga..." className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent rounded-2xl pl-5 pr-14 py-4 text-sm focus:border-black dark:focus:border-white outline-none transition-all dark:text-white" />
-                                    <button type="submit" disabled={!input.trim() || isTyping} className="absolute right-2.5 p-2.5 bg-black dark:bg-white text-white dark:text-black rounded-xl hover:opacity-80 transition-opacity"><Send size={18} /></button>
+                            <div className="p-4 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
+                                <form onSubmit={handleSend} className="relative group">
+                                    <div className="relative flex items-end gap-2 p-1.5 bg-gray-50 dark:bg-gray-800 border-2 border-transparent focus-within:border-black/10 dark:focus-within:border-white/10 focus-within:bg-white dark:focus-within:bg-gray-900 rounded-[1.8rem] transition-all duration-300 shadow-inner">
+                                        <textarea 
+                                            value={input} 
+                                            onChange={(e) => setInput(e.target.value)} 
+                                            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} 
+                                            placeholder="Ställ din fråga..." 
+                                            className="flex-1 bg-transparent border-none focus:ring-0 resize-none max-h-32 min-h-[44px] py-3 px-4 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 font-medium leading-relaxed" 
+                                            rows={1} 
+                                        />
+                                        <button 
+                                            type="submit" 
+                                            disabled={!input.trim() || isTyping} 
+                                            className="h-11 w-11 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center hover:scale-105 transition-all shadow-lg disabled:opacity-20 disabled:scale-100 active:scale-95 shrink-0 mb-0.5 mr-0.5"
+                                        >
+                                            {isTyping ? <Loader2 className="animate-spin" size={18} /> : <ArrowUp size={20} strokeWidth={2.5} />}
+                                        </button>
+                                    </div>
                                 </form>
                             </div>
                         </>
