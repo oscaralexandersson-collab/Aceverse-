@@ -29,6 +29,17 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
         return () => { clearTimeout(timer); clearTimeout(hideTimer); };
     }, [isOpen]);
 
+    // --- SYNCHRONIZATION LOGIC ---
+    useEffect(() => {
+        const handleSync = (e: any) => {
+            if (e.detail?.sessionId === sessionId) {
+                connectToSession();
+            }
+        };
+        window.addEventListener('aceverse-chat-sync', handleSync);
+        return () => window.removeEventListener('aceverse-chat-sync', handleSync);
+    }, [sessionId]);
+
     const voiceSystemInstruction = `
         ${UF_KNOWLEDGE_BASE}
         
@@ -102,9 +113,13 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
         setIsTyping(true);
 
         try {
+            await db.addMessage(user.id, { role: 'user', text: currentInput, sessionId: currentSessId });
+            
+            // Dispatch sync event
+            window.dispatchEvent(new CustomEvent('aceverse-chat-sync', { detail: { sessionId: currentSessId } }));
+
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
-            // Använd Gemini 3 Pro för "Quality Pass"-nivå på analys
             const response = await ai.models.generateContent({
                 model: 'gemini-3-pro-preview',
                 config: { 
@@ -122,13 +137,15 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
             await new Promise(r => setTimeout(r, 600));
 
             let fullText = response.text || "Jag har problem att svara just nu.";
-            
-            // Kvalitetsrensning klient-sida
             fullText = fullText.replace(/#\w+/g, (match) => match.substring(1));
 
             const finalAiMsg = { id: 'ai-' + Date.now(), role: 'ai', text: fullText, timestamp: Date.now(), sessionId: currentSessId! };
             setMessages(prev => [...prev, finalAiMsg]);
             await db.addMessage(user.id, { role: 'ai', text: fullText, sessionId: currentSessId });
+            
+            // Dispatch sync event for AI response
+            window.dispatchEvent(new CustomEvent('aceverse-chat-sync', { detail: { sessionId: currentSessId } }));
+            
         } catch (error) { 
             console.error(error); 
         } finally { 

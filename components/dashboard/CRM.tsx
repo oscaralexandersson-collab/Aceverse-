@@ -1,13 +1,12 @@
-
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
-    Users, Plus, Search, Filter, MoreHorizontal, Mail, Phone, 
+    Users, Plus, Search, Filter, Mail, Phone, 
     Globe, Linkedin, ArrowRight, BarChart3, PieChart, 
     FileText, Download, Loader2, Sparkles, Send, Copy,
-    CheckCircle2, Megaphone, Briefcase, TrendingUp, Target,
-    DollarSign, Calendar, RefreshCw, Edit2, Trash2, AlertCircle,
-    Save, ExternalLink, Check, ClipboardList, X, Clock, Wand2,
-    LayoutGrid, List, ChevronRight, MessageCircle, Star, Info
+    CheckCircle2, Target, DollarSign, Clock, Wand2,
+    LayoutGrid, List, ChevronRight, Zap, GripVertical, 
+    ChevronUp, ChevronDown, Layers, HelpCircle, Info,
+    Lightbulb, Check, ArrowUpRight, Trash2, Save, X
 } from 'lucide-react';
 import { User, Lead, CompanyReport, CompanyReportEntry } from '../../types';
 import { db } from '../../services/db';
@@ -19,7 +18,10 @@ interface CRMProps {
     user: User;
 }
 
-const STATUS_STAGES = ['New', 'Contacted', 'Meeting', 'Closed'] as const;
+const STATUS_STAGES = ['Nya', 'Kontaktade', 'Möte bokat', 'Klart'] as const;
+
+type SortField = 'name' | 'company' | 'value' | 'leadScore' | 'status' | 'dateAdded';
+type SortDirection = 'asc' | 'desc';
 
 const CRM: React.FC<CRMProps> = ({ user }) => {
     const { t } = useLanguage();
@@ -29,25 +31,31 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const [reports, setReports] = useState<CompanyReportEntry[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
-    // Selected lead for detail view
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
 
-    // Contacts State
     const [searchQuery, setSearchQuery] = useState('');
+    const [statusFilter, setStatusFilter] = useState<string>('Alla');
+    const [priorityFilter, setPriorityFilter] = useState<string>('Alla');
+    const [sortField, setSortField] = useState<SortField>('dateAdded');
+    const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [newLead, setNewLead] = useState<Partial<Lead>>({ status: 'New', value: 0, priority: 'Medium' });
+    const [newLead, setNewLead] = useState<Partial<Lead>>({ status: 'Nya', value: 0, priority: 'Medium' });
     const [isSavingLead, setIsSavingLead] = useState(false);
     const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
 
-    // AI Mail State
+    const [draggedLeadId, setDraggedLeadId] = useState<string | null>(null);
+    const [dragOverStage, setDragOverStage] = useState<string | null>(null);
+
     const [selectedMailLeadId, setSelectedMailLeadId] = useState<string>('');
     const [mailPrompt, setMailPrompt] = useState('');
+    const [selectedTonality, setSelectedTonality] = useState('Professionell');
     const [generatedMail, setGeneratedMail] = useState<{ subject: string, body: string } | null>(null);
     const [isGeneratingMail, setIsGeneratingMail] = useState(false);
     const [copyStatus, setCopyStatus] = useState(false);
+    const [suggestedPhrase, setSuggestedPhrase] = useState('');
+    const [isGeneratingSuggestion, setIsGeneratingSuggestion] = useState(false);
 
-    // Intelligence State
     const [reportUrl, setReportUrl] = useState('');
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
@@ -72,7 +80,31 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         }
     };
 
-    // --- CONTACTS ACTIONS ---
+    const handleDragStart = (e: React.DragEvent, leadId: string) => {
+        setDraggedLeadId(leadId);
+        e.dataTransfer.setData('leadId', leadId);
+        e.dataTransfer.effectAllowed = 'move';
+    };
+
+    const handleDragEnd = () => {
+        setDraggedLeadId(null);
+        setDragOverStage(null);
+    };
+
+    const handleDragOver = (e: React.DragEvent, stage: string) => {
+        e.preventDefault();
+        if (dragOverStage !== stage) setDragOverStage(stage);
+    };
+
+    const handleDrop = async (e: React.DragEvent, stage: string) => {
+        e.preventDefault();
+        const leadId = e.dataTransfer.getData('leadId') || draggedLeadId;
+        if (!leadId) return;
+
+        setDragOverStage(null);
+        handleUpdateStatus(leadId, stage as any);
+        if ('vibrate' in navigator) navigator.vibrate(10);
+    };
 
     const handleAddLead = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -87,14 +119,14 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 linkedin: newLead.linkedin || '',
                 website: newLead.website || '',
                 notes: newLead.notes || '',
-                status: (newLead.status as any) || 'New',
+                status: (newLead.status as any) || 'Nya',
                 value: Number(newLead.value) || 0,
                 priority: newLead.priority || 'Medium',
-                leadScore: Math.floor(Math.random() * 40) + 30 // Initial AI score
+                leadScore: Math.floor(Math.random() * 40) + 30 
             });
             setLeads(prev => [added, ...prev]);
             setIsAddModalOpen(false);
-            setNewLead({ status: 'New', value: 0, priority: 'Medium' });
+            setNewLead({ status: 'Nya', value: 0, priority: 'Medium' });
         } catch (e) {
             alert("Kunde inte spara kontakt.");
         } finally {
@@ -106,12 +138,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         setLeads(prev => prev.map(l => l.id === leadId ? { ...l, status: newStatus } : l));
         if (selectedLead?.id === leadId) setSelectedLead({ ...selectedLead, status: newStatus });
         await db.updateLead(user.id, leadId, { status: newStatus });
-    };
-
-    const handleUpdatePriority = async (leadId: string, newPriority: Lead['priority']) => {
-        setLeads(prev => prev.map(l => l.id === leadId ? { ...l, priority: newPriority } : l));
-        if (selectedLead?.id === leadId) setSelectedLead({ ...selectedLead, priority: newPriority });
-        await db.updateLead(user.id, leadId, { priority: newPriority });
     };
 
     const handleUpdateValue = async (leadId: string, newValue: number) => {
@@ -135,46 +161,127 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         }
     };
 
-    // --- AI MAIL ACTIONS ---
+    const confirmDeleteReport = async () => {
+        if (!reportToDelete) return;
+        const id = reportToDelete.id;
+        setReports(prev => prev.filter(r => r.id !== id));
+        if (activeReport?.id === id) setActiveReport(null);
+        setReportToDelete(null);
+        try {
+            await db.deleteReport(user.id, id);
+        } catch (e) {
+            loadData();
+        }
+    };
+
+    const toggleSort = (field: SortField) => {
+        if (sortField === field) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortField(field);
+            setSortDirection('asc');
+        }
+    };
+
+    const filteredLeads = useMemo(() => {
+        let result = leads.filter(l => 
+            (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+            (l.company || '').toLowerCase().includes(searchQuery.toLowerCase())
+        );
+
+        if (statusFilter !== 'Alla') {
+            result = result.filter(l => l.status === statusFilter);
+        }
+        
+        if (priorityFilter !== 'Alla') {
+            result = result.filter(l => l.priority === priorityFilter);
+        }
+
+        return result.sort((a, b) => {
+            let valA: any = a[sortField as keyof Lead];
+            let valB: any = b[sortField as keyof Lead];
+            
+            if (sortField === 'value' || sortField === 'leadScore') {
+                valA = Number(valA) || 0;
+                valB = Number(valB) || 0;
+            } else if (sortField === 'dateAdded') {
+                valA = new Date(valA || 0).getTime();
+                valB = new Date(valB || 0).getTime();
+            } else {
+                valA = String(valA || '').toLowerCase();
+                valB = String(valB || '').toLowerCase();
+            }
+
+            if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }, [leads, searchQuery, statusFilter, priorityFilter, sortField, sortDirection]);
+
+    const pipelineTotal = leads.reduce((sum, l) => sum + (Number(l.value) || 0), 0);
+
+    const openDetails = (lead: Lead) => {
+        setSelectedLead(lead);
+        setIsDetailOpen(true);
+    };
+
+    const generateFollowUpSuggestion = async () => {
+        const lead = leads.find(l => l.id === selectedMailLeadId);
+        if (!lead) return;
+        
+        setIsGeneratingSuggestion(true);
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: `Föreslå en kort (max 1 mening) personlig anledning att följa upp med ${lead.name} från ${lead.company}. Kontext: ${lead.notes || 'Inget specifikt.'}`,
+            });
+            setSuggestedPhrase(response.text?.trim() || '');
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsGeneratingSuggestion(false);
+        }
+    };
+
+    const useSuggestedPhrase = () => {
+        setMailPrompt(prev => prev ? `${prev}\n\n${suggestedPhrase}` : suggestedPhrase);
+        setSuggestedPhrase('');
+    };
 
     const generateAIMail = async () => {
         const lead = leads.find(l => l.id === selectedMailLeadId);
-        if (!lead) return;
+        if (!lead || !mailPrompt) return;
+
         setIsGeneratingMail(true);
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const prompt = `
-                ACT AS A SENIOR OUTREACH SPECIALIST.
-                MISSION: Write a highly personal and professional sales email.
-                RECIPIENT: ${lead.name}
-                COMPANY: ${lead.company}
-                CONTEXT: ${mailPrompt}
-                LANGUAGE: Svenska.
-                
-                FORMAT RULES:
-                - Subject Line must be catchy and short.
-                - Body must be concise (max 150 words).
-                - Use a professional yet modern tone.
-                
-                OUTPUT: Return ONLY a JSON object:
-                { "subject": "string", "body": "string" }
-            `;
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
-                contents: prompt,
-                config: { responseMimeType: 'application/json' }
+                contents: `Skriv ett säljmail till ${lead.name} på ${lead.company}. 
+                Tonalitet: ${selectedTonality}. 
+                Användare (avsändare): ${user.firstName} ${user.lastName} från ${user.company || 'Aceverse'}.
+                Prompt: ${mailPrompt}.
+                Återge svaret som JSON med fälten "subject" och "body". Ingen annan text.`,
+                config: {
+                    responseMimeType: 'application/json'
+                }
             });
-            setGeneratedMail(JSON.parse(response.text || '{}'));
+
+            const result = JSON.parse(response.text || '{}');
+            setGeneratedMail(result);
         } catch (e) {
+            console.error(e);
             alert("Kunde inte generera mail.");
         } finally {
             setIsGeneratingMail(false);
         }
     };
 
-    const copyMail = () => {
+    const copyMail = async () => {
         if (!generatedMail) return;
-        navigator.clipboard.writeText(`Ämne: ${generatedMail.subject}\n\n${generatedMail.body}`);
+        const text = `Ämne: ${generatedMail.subject}\n\n${generatedMail.body}`;
+        await navigator.clipboard.writeText(text);
         setCopyStatus(true);
         setTimeout(() => setCopyStatus(false), 2000);
     };
@@ -182,53 +289,62 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const sendMail = () => {
         if (!generatedMail) return;
         const lead = leads.find(l => l.id === selectedMailLeadId);
-        const email = lead?.email || "";
-        const subject = encodeURIComponent(generatedMail.subject);
-        const body = encodeURIComponent(generatedMail.body);
-        window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+        window.location.href = `mailto:${lead?.email || ""}?subject=${encodeURIComponent(generatedMail.subject)}&body=${encodeURIComponent(generatedMail.body)}`;
     };
 
-    // --- INTELLIGENCE ACTIONS ---
-
-    const generateReport = async (customUrl?: string) => {
-        const urlToUse = customUrl || reportUrl;
-        if (!urlToUse) return;
+    const generateReport = async () => {
+        if (!reportUrl) return;
         setIsGeneratingReport(true);
-        setLoadingMessage('Steg 1/2: Research & Evidence Pack Collection...');
+        setLoadingMessage('Genomsöker nätet efter data...');
+        
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const researchPrompt = `RESEARCH MISSION: Generate an "Evidence Pack" for ${urlToUse}. Find: legal name, financials, business model. OUTPUT: structured JSON.`;
-            const researchResponse = await ai.models.generateContent({
-                model: 'gemini-3-pro-preview',
-                contents: researchPrompt,
-                config: { tools: [{googleSearch: {}}] }
+            
+            const searchRes = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: `Hitta detaljerad information om bolaget på ${reportUrl}: omsättning (senaste året), EBITDA, soliditet, antal anställda, grundat år, verksamhetsbeskrivning och marknadsposition.`,
+                config: { 
+                    tools: [{ googleSearch: {} }] 
+                }
             });
-            const evidencePack = researchResponse.text;
-            setLoadingMessage('Steg 2/2: Rendering Professional Markdown Report...');
-            const writerPrompt = `ACT AS A SENIOR BUSINESS ANALYST. DATA: ${evidencePack}. MISSION: Render a Comprehensive Research Report in Markdown in Svenska.`;
-            const writerResponse = await ai.models.generateContent({
+
+            const groundingChunks = searchRes.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+            const searchSources = groundingChunks
+                .filter((chunk: any) => chunk.web)
+                .map((chunk: any, index: number) => ({
+                    id: index + 1,
+                    url: chunk.web.uri,
+                    title: chunk.web.title,
+                    reliability: 100
+                }));
+
+            setLoadingMessage('Analyserar finansiell data...');
+
+            const reportRes = await ai.models.generateContent({
                 model: 'gemini-3-pro-preview',
-                contents: writerPrompt
+                contents: `Skapa en professionell, djupgående bolagsrapport baserat på denna information:
+                ${searchRes.text}
+                
+                Rapporten ska vara på svenska och formaterad i Markdown.
+                Returnera resultatet som JSON med följande fält:
+                {
+                    "meta": { "companyName": "Bolagets Namn", "website": "${reportUrl}", "generatedDate": "${new Date().toLocaleDateString()}", "language": "sv" },
+                    "fullMarkdown": "Markdown innehåll...",
+                    "summary": { "revenue": "Omsättning", "ebitda": "EBITDA", "solvency": "Soliditet", "employees": "Antal anställda", "founded": "Grundat år" }
+                }`,
+                config: { responseMimeType: 'application/json' }
             });
-            const fullMarkdown = writerResponse.text || '';
-            const finalReport: CompanyReport = {
-                meta: {
-                    companyName: urlToUse.replace(/https?:\/\/(www\.)?/, '').split('.')[0].toUpperCase(),
-                    website: urlToUse,
-                    generatedDate: new Date().toLocaleDateString(),
-                    language: 'sv'
-                },
-                fullMarkdown,
-                summary: { revenue: '-', ebitda: '-', solvency: '-', employees: '-', founded: '-' },
-                sources: [] 
-            };
-            const entry = await db.addReportToHistory(user.id, finalReport);
+
+            const reportData: CompanyReport = JSON.parse(reportRes.text || '{}');
+            reportData.sources = searchSources;
+
+            const entry = await db.addReportToHistory(user.id, reportData);
             setReports(prev => [entry, ...prev]);
             setActiveReport(entry);
-            setActiveTab('intelligence');
+            setReportUrl('');
         } catch (e) {
             console.error(e);
-            alert("Kunde inte generera rapporten.");
+            alert("Rapportgenerering misslyckades.");
         } finally {
             setIsGeneratingReport(false);
             setLoadingMessage('');
@@ -240,496 +356,490 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         if (!element || !activeReport) return;
         setIsDownloading(true);
         try {
-            const opt = {
-                margin: [10, 10, 10, 10],
-                filename: `Aceverse_Report_${activeReport.reportData.meta.companyName}.pdf`,
-                image: { type: 'jpeg', quality: 0.98 },
-                html2canvas: { scale: 2 },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
+            const opt = { margin: [10, 10, 10, 10], filename: `Aceverse_Report_${activeReport.reportData.meta.companyName}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' } };
             // @ts-ignore
             await window.html2pdf().from(element).set(opt).save();
-        } catch (error) {
-            console.error("PDF generation failed:", error);
-        } finally {
-            setIsDownloading(false);
-        }
-    };
-
-    const confirmDeleteReport = async () => {
-        if (!reportToDelete) return;
-        const idToDelete = reportToDelete.id;
-        setReports(prev => prev.filter(r => r.id !== idToDelete));
-        if (activeReport?.id === idToDelete) setActiveReport(null);
-        setReportToDelete(null);
-        try {
-            await db.deleteReport(user.id, idToDelete);
-        } catch (err) {
-            console.error(err);
-            loadData();
-        }
-    };
-
-    // --- MARKDOWN PARSER ---
-    const parseInlineStyles = (text: string) => {
-        let parts = (text || '').split(/(\*\*.*?\*\*)/g);
-        return parts.map((part, i) => {
-            if (part.startsWith('**') && part.endsWith('**')) {
-                return <strong key={i} className="font-bold text-gray-900">{part.slice(2, -2)}</strong>;
-            }
-            return part;
-        });
+        } catch (error) { console.error(error); } finally { setIsDownloading(false); }
     };
 
     const renderMarkdown = (md: string) => {
         if (!md) return null;
         const lines = md.split('\n');
         const renderedElements: React.ReactNode[] = [];
-        let currentTable: string[][] = [];
         lines.forEach((line, i) => {
             const trimmed = line.trim();
-            if (trimmed.startsWith('|')) {
-                const cells = line.split('|').filter(c => c.trim().length > 0 || line.indexOf('|') !== line.lastIndexOf('|'));
-                if (!trimmed.match(/[a-zA-Z0-9]/)) return; 
-                currentTable.push(cells.map(c => c.trim()));
-                const nextLine = lines[i + 1]?.trim();
-                if (!nextLine || !nextLine.startsWith('|')) {
-                    renderedElements.push(
-                        <div key={`table-${i}`} className="overflow-x-auto my-8">
-                            <table className="min-w-full border-collapse border border-gray-200 text-sm shadow-sm rounded-lg overflow-hidden text-black">
-                                <thead className="bg-gray-50 border-b border-gray-200">
-                                    <tr>{currentTable[0].map((cell, ci) => <th key={ci} className="px-4 py-3 text-left font-bold text-gray-900 uppercase tracking-wider text-[10px]">{cell}</th>)}</tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">{currentTable.slice(1).map((row, ri) => <tr key={ri} className="hover:bg-gray-50/50 transition-colors">{row.map((cell, ci) => <td key={ci} className="px-4 py-3 text-gray-700 font-medium">{parseInlineStyles(cell)}</td>)}</tr>)}</tbody>
-                            </table>
-                        </div>
-                    );
-                    currentTable = [];
-                }
-                return;
-            }
-            if (trimmed.startsWith('# ')) renderedElements.push(<h1 key={i} className="text-4xl font-serif-display font-bold mb-8 border-b-4 border-black pb-6 pt-12 text-black leading-tight uppercase tracking-tighter">{parseInlineStyles(trimmed.replace('# ', ''))}</h1>);
-            else if (trimmed.startsWith('## ')) renderedElements.push(<h2 key={i} className="text-2xl font-serif-display font-bold mt-12 mb-6 text-gray-900 border-b-2 border-gray-100 pb-3">{parseInlineStyles(trimmed.replace('## ', ''))}</h2>);
-            else if (trimmed.startsWith('### ')) renderedElements.push(<h3 key={i} className="text-lg font-bold mt-10 mb-4 text-gray-800 uppercase tracking-widest">{parseInlineStyles(trimmed.replace('### ', ''))}</h3>);
-            else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) renderedElements.push(<li key={i} className="ml-6 text-sm text-gray-700 list-none mb-3 flex items-start gap-3"><span className="w-1.5 h-1.5 rounded-full bg-black mt-2 shrink-0"></span><span>{parseInlineStyles(trimmed.substring(2))}</span></li>);
-            else if (trimmed !== '') renderedElements.push(<p key={i} className="text-sm leading-relaxed text-gray-700 mb-5 text-justify">{parseInlineStyles(trimmed)}</p>);
+            if (trimmed.startsWith('# ')) renderedElements.push(<h1 key={i} className="text-4xl font-serif-display font-bold mb-8 border-b-8 border-black pb-6 pt-12 text-black uppercase tracking-tighter">{trimmed.replace('# ', '')}</h1>);
+            else if (trimmed.startsWith('## ')) renderedElements.push(<h2 key={i} className="text-2xl font-serif-display font-bold mt-12 mb-6 text-gray-900 border-b-2 border-gray-100 pb-3">{trimmed.replace('## ', '')}</h2>);
+            else if (trimmed.startsWith('### ')) renderedElements.push(<h3 key={i} className="text-lg font-bold mt-10 mb-4 text-gray-800 uppercase tracking-widest">{trimmed.replace('### ', '')}</h3>);
+            else if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) renderedElements.push(<li key={i} className="ml-6 text-sm text-gray-700 list-none mb-3 flex items-start gap-3"><span className="w-1.5 h-1.5 rounded-full bg-black mt-2 shrink-0"></span><span>{trimmed.substring(2)}</span></li>);
+            else if (trimmed !== '') renderedElements.push(<p key={i} className="text-sm leading-relaxed text-gray-700 mb-5 text-justify">{trimmed}</p>);
             else renderedElements.push(<div key={i} className="h-2" />);
         });
         return renderedElements;
     };
 
-    const safeLeads = Array.isArray(leads) ? leads : [];
-    const filteredLeads = safeLeads.filter(l => 
-        (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
-        (l.company || '').toLowerCase().includes(searchQuery.toLowerCase())
-    );
-
-    const pipelineTotal = safeLeads.reduce((sum, l) => sum + (Number(l.value) || 0), 0);
-    const weightedPipeline = safeLeads.reduce((sum, l) => {
-        const prob = l.status === 'New' ? 0.1 : l.status === 'Contacted' ? 0.3 : l.status === 'Meeting' ? 0.6 : 1.0;
-        return sum + (Number(l.value) || 0) * prob;
-    }, 0);
-    const newLeadsCount = safeLeads.filter(l => l.status === 'New').length;
-
-    const openDetails = (lead: Lead) => {
-        setSelectedLead(lead);
-        setIsDetailOpen(true);
-    };
-
     return (
-        <div className="h-full flex flex-col animate-fadeIn relative">
+        <div className="h-full flex flex-col animate-fadeIn relative selection:bg-black selection:text-white dark:selection:bg-white dark:selection:text-black">
             <DeleteConfirmModal isOpen={!!reportToDelete} onClose={() => setReportToDelete(null)} onConfirm={confirmDeleteReport} itemName={reportToDelete?.title || ''} />
             <DeleteConfirmModal isOpen={!!leadToDelete} onClose={() => setLeadToDelete(null)} onConfirm={confirmDeleteLead} itemName={leadToDelete?.name || ''} />
 
-            {/* TABBAR & HEADER */}
-            <div className="flex justify-between items-end mb-6 no-print px-1">
-                <div>
-                    <h1 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-1">{t('dashboard.crmContent.title')}</h1>
-                    <p className="text-gray-500 dark:text-gray-400 text-sm">{t('dashboard.crmContent.subtitle')}</p>
+            {/* HEADER - Executive Style */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-12 no-print gap-8 px-2">
+                <div className="space-y-1">
+                    <h1 className="font-serif-display text-5xl text-gray-950 dark:text-white tracking-tighter uppercase italic leading-none">Kundflöde</h1>
+                    <div className="flex items-center gap-3">
+                        <span className="text-gray-400 dark:text-gray-500 text-[10px] font-black uppercase tracking-[0.3em]">Hantering & Strategi</span>
+                        <div className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-700"></div>
+                        <span className="text-gray-900 dark:text-white text-[10px] font-black uppercase tracking-[0.3em]">{leads.length} Kontakter</span>
+                    </div>
                 </div>
-                <div className="flex bg-gray-100 dark:bg-gray-800 p-1 rounded-lg no-print">
-                    <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<BarChart3 size={16} />} label={t('dashboard.crmContent.tabs.overview')} />
-                    <TabButton active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} icon={<Users size={16} />} label={t('dashboard.crmContent.tabs.contacts')} />
-                    <TabButton active={activeTab === 'mail'} onClick={() => setActiveTab('mail')} icon={<Mail size={16} />} label={t('dashboard.crmContent.tabs.mail')} />
-                    <TabButton active={activeTab === 'intelligence'} onClick={() => setActiveTab('intelligence')} icon={<FileText size={16} />} label="Intelligence" />
+                <div className="flex bg-gray-100/40 dark:bg-gray-800/40 p-1.5 rounded-full no-print backdrop-blur-md border border-gray-200/50 dark:border-gray-800 shadow-sm">
+                    <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<BarChart3 size={14} />} label="Överblick" />
+                    <TabButton active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} icon={<Users size={14} />} label="Mina Kunder" />
+                    <TabButton active={activeTab === 'mail'} onClick={() => setActiveTab('mail')} icon={<Mail size={14} />} label="Skrivhjälp" />
+                    <TabButton active={activeTab === 'intelligence'} onClick={() => setActiveTab('intelligence')} icon={<Sparkles size={14} />} label="Bolagskoll" />
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto min-h-0">
-                {/* 1. OVERVIEW TAB */}
+            <div className="flex-1 overflow-y-auto min-h-0 custom-scrollbar px-2">
+                {/* 1. OVERVIEW TAB - Executive Dashboard */}
                 {activeTab === 'overview' && (
-                    <div className="space-y-8 animate-fadeIn">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                                <div className="flex justify-between items-center mb-4">
-                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('dashboard.crmContent.pipeline')}</span>
-                                    <DollarSign size={18} className="text-green-500" />
-                                </div>
-                                <div className="text-3xl font-bold text-gray-900 dark:text-white">{pipelineTotal.toLocaleString()} kr</div>
-                                <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">Viktat värde: <strong>{Math.round(weightedPipeline).toLocaleString()} kr</strong></p>
-                            </div>
-                            <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                                <div className="flex justify-between items-center mb-4">
-                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('dashboard.crmContent.openDeals')}</span>
-                                    <Target size={18} className="text-blue-500" />
-                                </div>
-                                <div className="text-3xl font-bold text-gray-900 dark:text-white">{safeLeads.length} st</div>
-                                <p className="text-xs text-gray-500 mt-2">{newLeadsCount} nya denna vecka</p>
-                            </div>
-                            <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-sm">
-                                <div className="flex justify-between items-center mb-4">
-                                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Genomsnittligt lead-score</span>
-                                    <Sparkles size={18} className="text-purple-500" />
-                                </div>
-                                <div className="text-3xl font-bold text-gray-900 dark:text-white">
-                                    {safeLeads.length > 0 ? Math.round(safeLeads.reduce((a,b) => a + (b.leadScore || 0), 0) / safeLeads.length) : 0}
-                                </div>
-                                <p className="text-xs text-gray-500 mt-2">AI-beräknad potential</p>
-                            </div>
+                    <div className="space-y-12 animate-fadeIn pb-12">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                            <MetricCard title="Värde i flödet" value={`${pipelineTotal.toLocaleString()} kr`} icon={<DollarSign size={20} />} trend="Alla affärer" />
+                            <MetricCard title="Öppna förfrågningar" value={`${leads.length} st`} icon={<Target size={20} />} trend={`${leads.filter(l => l.status === 'Nya').length} helt nya`} />
+                            <MetricCard title="AI Potential" value={leads.length > 0 ? `${Math.round(leads.reduce((a,b) => a + (b.leadScore || 0), 0) / leads.length)}%` : "0%"} icon={<Zap size={20} />} trend="Genomsnitt" />
                         </div>
 
-                        <div className="grid md:grid-cols-2 gap-6 pb-12">
-                            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm">
-                                <h3 className="font-bold text-lg mb-6 flex items-center gap-2"><BarChart3 size={18}/> Statusfördelning</h3>
-                                <div className="space-y-4">
+                        <div className="grid md:grid-cols-2 gap-10">
+                            <div className="bg-white dark:bg-gray-900 rounded-[3rem] border border-gray-100 dark:border-gray-800 p-12 shadow-sm transition-all hover:shadow-xl group">
+                                <div className="flex justify-between items-center mb-12">
+                                    <h3 className="font-bold text-[11px] text-gray-400 uppercase tracking-[0.3em] flex items-center gap-3">Process-överblick</h3>
+                                    <PieChart size={16} className="text-gray-300 group-hover:text-black dark:group-hover:text-white transition-colors" />
+                                </div>
+                                <div className="space-y-8">
                                     {STATUS_STAGES.map(s => {
-                                        const count = safeLeads.filter(l => l.status === s).length;
-                                        const pct = safeLeads.length > 0 ? (count / safeLeads.length) * 100 : 0;
+                                        const count = leads.filter(l => l.status === s).length;
+                                        const pct = leads.length > 0 ? (count / leads.length) * 100 : 0;
                                         return (
-                                            <div key={s}>
-                                                <div className="flex justify-between text-sm mb-1.5 font-medium">
-                                                    <span className="text-gray-600 dark:text-gray-400">{s}</span>
-                                                    <span className="text-gray-900 dark:text-white">{count} ({Math.round(pct)}%)</span>
+                                            <div key={s} className="group/row">
+                                                <div className="flex justify-between text-[11px] mb-3 font-black uppercase tracking-widest transition-colors group-hover/row:text-black dark:group-hover/row:text-white">
+                                                    <span className="text-gray-400">{s}</span>
+                                                    <span className="text-black dark:text-white">{count} st</span>
                                                 </div>
-                                                <div className="h-2 bg-gray-50 dark:bg-gray-800 rounded-full overflow-hidden">
-                                                    <div className={`h-full rounded-full ${s === 'Closed' ? 'bg-green-500' : 'bg-black dark:bg-white'}`} style={{ width: `${pct}%` }}></div>
+                                                <div className="h-1.5 bg-gray-50 dark:bg-gray-800 rounded-full overflow-hidden shadow-inner">
+                                                    <div className="h-full bg-black dark:bg-white rounded-full transition-all duration-1000 ease-out" style={{ width: `${pct}%` }}></div>
                                                 </div>
                                             </div>
                                         )
                                     })}
                                 </div>
                             </div>
-                            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 p-6 shadow-sm">
-                                <h3 className="font-bold text-lg mb-6 flex items-center gap-2"><Clock size={18}/> {t('dashboard.crmContent.activity')}</h3>
-                                <div className="space-y-4">
-                                    {safeLeads.length > 0 ? safeLeads.slice(0, 5).map((l, i) => (
-                                        <div key={i} className="flex items-start gap-3 pb-4 border-b border-gray-50 dark:border-gray-800 last:border-0 last:pb-0">
-                                            <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-xs font-bold text-gray-500">
-                                                {(l.name || 'U').substring(0,1)}
+                            <div className="bg-white dark:bg-gray-900 rounded-[3rem] border border-gray-100 dark:border-gray-800 p-12 shadow-sm transition-all hover:shadow-xl group">
+                                <div className="flex justify-between items-center mb-12">
+                                    <h3 className="font-bold text-[11px] text-gray-400 uppercase tracking-[0.3em] flex items-center gap-3">Nyligen tillagda</h3>
+                                    <Clock size={16} className="text-gray-300 group-hover:text-black dark:group-hover:text-white transition-colors" />
+                                </div>
+                                <div className="space-y-10">
+                                    {leads.length > 0 ? leads.slice(0, 4).map((l, i) => (
+                                        <div key={i} className="flex items-center gap-6 group cursor-pointer" onClick={() => openDetails(l)}>
+                                            <div className="w-14 h-14 rounded-full bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-[11px] font-black text-gray-400 border border-gray-100 dark:border-gray-700 group-hover:bg-black group-hover:text-white transition-all shadow-sm">
+                                                {l.name.substring(0,1)}
                                             </div>
-                                            <div>
-                                                <p className="text-sm font-medium text-gray-900 dark:text-white">Lade till lead: <strong>{l.name}</strong></p>
-                                                <p className="text-xs text-gray-500">Företag: {l.company} • {new Date(l.dateAdded).toLocaleDateString()}</p>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-bold text-gray-950 dark:text-white truncate uppercase italic leading-none">{l.name}</p>
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mt-1">{l.company}</p>
                                             </div>
-                                            <div className="ml-auto">
-                                                <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${l.priority === 'High' ? 'bg-red-50 text-red-600' : l.priority === 'Medium' ? 'bg-blue-50 text-blue-600' : 'bg-gray-50 text-gray-400'}`}>
-                                                    {l.priority}
-                                                </div>
-                                            </div>
+                                            <div className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] italic">{l.priority}</div>
                                         </div>
-                                    )) : <div className="text-center py-10 text-gray-400 text-sm">{t('dashboard.crmContent.noActivity')}</div>}
+                                    )) : <div className="text-center py-20 text-gray-300 text-sm italic font-medium uppercase tracking-[0.4em] opacity-40">Ingen aktivitet än.</div>}
                                 </div>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {/* 2. CONTACTS TAB (Board or Table) */}
+                {/* 2. CONTACTS TAB - Tactical Pipeline */}
                 {activeTab === 'contacts' && (
-                    <div className="h-full flex flex-col space-y-4 animate-fadeIn">
-                        <div className="flex flex-col md:flex-row gap-4 justify-between items-center no-print">
-                            <div className="flex bg-white dark:bg-gray-900 p-1 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
-                                <button 
-                                    onClick={() => setViewMode('kanban')} 
-                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'kanban' ? 'bg-black dark:bg-white text-white dark:text-black shadow-md' : 'text-gray-400 hover:text-gray-600'}`}
-                                >
-                                    <LayoutGrid size={14}/> Kanban
+                    <div className="h-full flex flex-col space-y-8 animate-fadeIn pb-12">
+                        {/* Interactive Toolbar */}
+                        <div className="flex flex-col xl:flex-row gap-6 justify-between items-center no-print">
+                            <div className="flex items-center gap-3 bg-white dark:bg-gray-900 p-1.5 rounded-full border border-gray-200 dark:border-gray-800 shadow-sm">
+                                <button onClick={() => setViewMode('kanban')} className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all ${viewMode === 'kanban' ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg' : 'text-gray-400 hover:text-black dark:hover:text-white'}`}>
+                                    <LayoutGrid size={14}/> Tavla
                                 </button>
-                                <button 
-                                    onClick={() => setViewMode('table')} 
-                                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'table' ? 'bg-black dark:bg-white text-white dark:text-black shadow-md' : 'text-gray-400 hover:text-gray-600'}`}
-                                >
-                                    <List size={14}/> Tabell
+                                <button onClick={() => setViewMode('table')} className={`flex items-center gap-2 px-6 py-2.5 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all ${viewMode === 'table' ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg' : 'text-gray-400 hover:text-black dark:hover:text-white'}`}>
+                                    <List size={14}/> Lista
                                 </button>
                             </div>
                             
-                            <div className="relative flex-1 md:max-w-md">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                            <div className="relative flex-1 w-full md:max-w-xl group">
+                                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-300 group-focus-within:text-black dark:group-focus-within:text-white transition-colors" size={16} />
                                 <input 
-                                    value={searchQuery}
-                                    onChange={e => setSearchQuery(e.target.value)}
-                                    placeholder={t('dashboard.crmContent.search')} 
-                                    className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white shadow-sm"
+                                    value={searchQuery} 
+                                    onChange={e => setSearchQuery(e.target.value)} 
+                                    placeholder="Sök kontakt eller bolag..." 
+                                    className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-full pl-14 pr-8 py-4 text-sm focus:border-black dark:focus:border-white focus:bg-white dark:focus:bg-gray-900 outline-none transition-all text-gray-900 dark:text-white shadow-sm font-bold italic" 
                                 />
                             </div>
 
-                            <div className="flex gap-2">
-                                <button className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white dark:bg-gray-900 text-gray-600 dark:text-gray-300 text-sm font-bold rounded-xl hover:bg-gray-50 border border-gray-200 dark:border-gray-800 shadow-sm">
-                                    <Download size={16} /> Export
-                                </button>
-                                <button 
-                                    onClick={() => setIsAddModalOpen(true)}
-                                    className="flex items-center justify-center gap-2 px-5 py-2.5 bg-black dark:bg-white text-white dark:text-black text-sm font-bold rounded-xl hover:opacity-80 transition-opacity shadow-lg shadow-black/10"
-                                >
-                                    <Plus size={16} /> Nytt Lead
-                                </button>
-                            </div>
+                            <button onClick={() => setIsAddModalOpen(true)} className="w-full md:w-auto flex items-center justify-center gap-3 px-12 py-4 bg-black dark:bg-white text-white dark:text-black text-xs font-black uppercase tracking-[0.3em] rounded-full hover:opacity-80 transition-all shadow-2xl active:scale-95">
+                                <Plus size={18} /> Lägg till
+                            </button>
                         </div>
 
                         {viewMode === 'kanban' ? (
-                            <div className="flex-1 overflow-x-auto pb-6">
-                                <div className="flex gap-6 h-full min-w-max pr-6">
-                                    {STATUS_STAGES.map(stage => (
-                                        <div key={stage} className="w-80 flex flex-col h-full bg-gray-100/50 dark:bg-gray-900/40 rounded-2xl p-4 border border-gray-200/50 dark:border-gray-800/50">
-                                            <div className="flex justify-between items-center mb-4 px-1">
-                                                <div className="flex items-center gap-2">
-                                                    <h3 className="font-bold text-sm text-gray-900 dark:text-white uppercase tracking-wider">{stage}</h3>
-                                                    <span className="bg-white dark:bg-gray-800 text-gray-400 text-[10px] px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-700">
-                                                        {filteredLeads.filter(l => l.status === stage).length}
-                                                    </span>
-                                                </div>
-                                                <button className="text-gray-400 hover:text-black"><MoreHorizontal size={16}/></button>
-                                            </div>
-                                            
-                                            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                                                {filteredLeads.filter(l => l.status === stage).map(lead => (
-                                                    <div 
-                                                        key={lead.id} 
-                                                        onClick={() => openDetails(lead)}
-                                                        className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer group"
-                                                    >
-                                                        <div className="flex justify-between items-start mb-3">
-                                                            <div className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${lead.priority === 'High' ? 'bg-red-50 text-red-600' : lead.priority === 'Medium' ? 'bg-blue-50 text-blue-600' : 'bg-gray-50 text-gray-400'}`}>
-                                                                {lead.priority}
-                                                            </div>
-                                                            <div className="flex items-center gap-1 text-[10px] font-bold text-purple-600 bg-purple-50 px-2 py-0.5 rounded-full">
-                                                                <Sparkles size={10}/> {lead.leadScore}
-                                                            </div>
-                                                        </div>
-                                                        <h4 className="font-bold text-gray-900 dark:text-white text-sm group-hover:text-black dark:group-hover:text-white mb-1">{lead.name}</h4>
-                                                        <p className="text-xs text-gray-500 mb-4">{lead.company}</p>
-                                                        
-                                                        <div className="flex justify-between items-center pt-3 border-t border-gray-50 dark:border-gray-800">
-                                                            <div className="flex -space-x-2">
-                                                                {lead.email && <div className="w-6 h-6 rounded-full bg-gray-50 border border-white flex items-center justify-center text-gray-400"><Mail size={10}/></div>}
-                                                                {lead.linkedin && <div className="w-6 h-6 rounded-full bg-gray-50 border border-white flex items-center justify-center text-gray-400"><Linkedin size={10}/></div>}
-                                                            </div>
-                                                            <div className="text-sm font-bold text-gray-900 dark:text-white">{lead.value.toLocaleString()} kr</div>
-                                                        </div>
+                            <div className="flex-1 overflow-x-auto pb-8 scrollbar-hide">
+                                <div className="flex gap-8 h-full min-w-max pr-12">
+                                    {STATUS_STAGES.map(stage => {
+                                        const isOver = dragOverStage === stage;
+                                        const stageLeads = filteredLeads.filter(l => l.status === stage);
+                                        
+                                        return (
+                                            <div 
+                                                key={stage} 
+                                                onDragOver={(e) => handleDragOver(e, stage)}
+                                                onDrop={(e) => handleDrop(e, stage)}
+                                                onDragLeave={() => setDragOverStage(null)}
+                                                className={`w-85 flex flex-col h-full rounded-[3rem] p-8 border transition-all duration-400 ${isOver ? 'bg-gray-100 dark:bg-gray-800 border-black dark:border-white scale-[1.01] shadow-2xl' : 'bg-gray-50/40 dark:bg-black/20 border-transparent'}`}
+                                            >
+                                                <div className="flex justify-between items-center mb-10 px-1">
+                                                    <div className="flex items-center gap-4">
+                                                        <h3 className="font-black text-[10px] text-gray-950 dark:text-white uppercase tracking-[0.3em]">{stage}</h3>
+                                                        <span className="text-[10px] font-black text-gray-400 bg-white dark:bg-gray-800 px-3 py-1 rounded-full border border-gray-100 dark:border-gray-700 shadow-sm">{stageLeads.length}</span>
                                                     </div>
-                                                ))}
-                                                {filteredLeads.filter(l => l.status === stage).length === 0 && (
-                                                    <div className="border-2 border-dashed border-gray-200 dark:border-gray-800 rounded-2xl h-24 flex items-center justify-center text-gray-400 text-xs italic">Inga leads här</div>
-                                                )}
+                                                    <HelpCircle size={16} className="text-gray-300 cursor-help hover:text-black dark:hover:text-white transition-colors" title={`Dra kort hit när de är: ${stage}`} />
+                                                </div>
+                                                
+                                                <div className="flex-1 overflow-y-auto space-y-6 pr-2 custom-scrollbar">
+                                                    {stageLeads.map(lead => (
+                                                        <div 
+                                                            key={lead.id} 
+                                                            draggable
+                                                            onDragStart={(e) => handleDragStart(e, lead.id)}
+                                                            onDragEnd={handleDragEnd}
+                                                            onClick={() => openDetails(lead)} 
+                                                            className={`bg-white dark:bg-gray-900 p-8 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-2xl transition-all cursor-grab active:cursor-grabbing group relative overflow-hidden ${draggedLeadId === lead.id ? 'opacity-0 h-0 p-0 m-0 overflow-hidden' : 'hover:-translate-y-2'}`}
+                                                        >
+                                                            <div className="flex justify-between items-start mb-8">
+                                                                <div className="w-14 h-14 rounded-full bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-[11px] font-black text-gray-400 border border-gray-100 dark:border-gray-700 transition-all group-hover:bg-black group-hover:text-white shadow-sm">
+                                                                    {lead.name.substring(0,1)}
+                                                                </div>
+                                                                <div className="flex flex-col items-end gap-2.5">
+                                                                    <div className="flex items-center gap-1.5 text-[9px] font-black text-black dark:text-white bg-gray-100 dark:bg-gray-800 px-3 py-1.5 rounded-full uppercase tracking-widest italic shadow-inner">
+                                                                        <Zap size={10} fill="currentColor"/> {lead.leadScore}%
+                                                                    </div>
+                                                                    {lead.priority === 'High' && (
+                                                                        <span className="text-[8px] font-black px-2.5 py-1 rounded-full uppercase bg-black text-white dark:bg-white dark:text-black tracking-[0.1em] shadow-sm">Prio</span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            
+                                                            <h4 className="font-bold text-gray-950 dark:text-white text-base mb-1 truncate tracking-tight uppercase italic leading-none">{lead.name}</h4>
+                                                            <p className="text-[10px] text-gray-400 dark:text-gray-500 mb-10 truncate uppercase tracking-[0.3em] font-black">{lead.company}</p>
+                                                            
+                                                            <div className="flex justify-between items-center pt-8 border-t border-gray-50 dark:border-gray-800">
+                                                                <div className="flex gap-4 opacity-20 group-hover:opacity-100 transition-all">
+                                                                    {lead.email && <Mail size={16} />}
+                                                                    {lead.linkedin && <Linkedin size={16} />}
+                                                                </div>
+                                                                <div className="text-[14px] font-black text-gray-950 dark:text-white tracking-tighter italic">{lead.value.toLocaleString()} kr</div>
+                                                            </div>
+
+                                                            <div className="absolute top-1/2 left-2 -translate-y-1/2 opacity-0 group-hover:opacity-20 transition-opacity">
+                                                                <GripVertical size={20} />
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    
+                                                    {stageLeads.length === 0 && !isOver && (
+                                                        <div className="py-16 text-center border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-[3rem] flex flex-col items-center justify-center opacity-30 grayscale hover:opacity-50 transition-opacity cursor-pointer">
+                                                            <Layers size={28} className="mb-3" />
+                                                            <span className="text-[10px] font-black uppercase tracking-[0.3em]">Tom sektion</span>
+                                                        </div>
+                                                    )}
+
+                                                    <button onClick={() => { setNewLead({ ...newLead, status: stage as any }); setIsAddModalOpen(true); }} className="w-full py-7 rounded-[3rem] border-2 border-dashed border-gray-200 dark:border-gray-800 flex items-center justify-center text-gray-300 hover:text-black dark:hover:text-white hover:border-black transition-all group bg-white/10 hover:bg-white dark:hover:bg-gray-900 shadow-sm">
+                                                        <Plus size={24} className="group-hover:scale-110 transition-transform" />
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
                         ) : (
-                            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden animate-fadeIn">
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-left text-sm">
-                                        <thead className="bg-gray-50/50 dark:bg-gray-800/50 text-gray-400 font-bold uppercase text-[10px] tracking-widest border-b border-gray-100 dark:border-gray-800">
-                                            <tr>
-                                                <th className="px-6 py-4">Namn</th>
-                                                <th className="px-6 py-4">Företag</th>
-                                                <th className="px-6 py-4">Status</th>
-                                                <th className="px-6 py-4">Prioritet</th>
-                                                <th className="px-6 py-4">Score</th>
-                                                <th className="px-6 py-4">Värde</th>
-                                                <th className="px-6 py-4 text-right">Åtgärder</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                                            {filteredLeads.map(l => (
-                                                <tr key={l.id} onClick={() => openDetails(l)} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors group cursor-pointer">
-                                                    <td className="px-6 py-4">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center text-[10px] font-bold text-gray-500 border border-gray-200 dark:border-gray-700">
-                                                                {(l.name || 'U').substring(0,1)}
-                                                            </div>
-                                                            <div>
-                                                                <div className="font-bold text-gray-900 dark:text-white">{l.name}</div>
-                                                                <div className="text-[10px] text-gray-400">{l.email}</div>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4 font-medium text-gray-600 dark:text-gray-400">{l.company}</td>
-                                                    <td className="px-6 py-4">
-                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                                                            l.status === 'New' ? 'bg-blue-50 text-blue-600' :
-                                                            l.status === 'Contacted' ? 'bg-orange-50 text-orange-600' :
-                                                            l.status === 'Meeting' ? 'bg-purple-50 text-purple-600' :
-                                                            'bg-green-50 text-green-600'
-                                                        }`}>
-                                                            {l.status}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-6 py-4">
-                                                        <span className={`text-[10px] font-bold ${l.priority === 'High' ? 'text-red-600' : l.priority === 'Medium' ? 'text-blue-600' : 'text-gray-400'}`}>
-                                                            {l.priority}
-                                                        </span>
-                                                    </td>
-                                                    <td className="px-6 py-4">
-                                                        <div className="flex items-center gap-1 font-mono font-bold text-purple-600">
-                                                            <Sparkles size={12}/> {l.leadScore}
-                                                        </div>
-                                                    </td>
-                                                    <td className="px-6 py-4 font-bold text-gray-900 dark:text-white">
-                                                        {l.value.toLocaleString()} kr
-                                                    </td>
-                                                    <td className="px-6 py-4 text-right">
-                                                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                            <button onClick={(e) => { e.stopPropagation(); setLeadToDelete(l); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"><Trash2 size={14}/></button>
-                                                        </div>
-                                                    </td>
+                            <div className="flex flex-col space-y-6 animate-fadeIn">
+                                <div className="flex flex-col md:flex-row items-center justify-between px-4 gap-6">
+                                    <div className="flex items-center gap-8">
+                                        <div className="flex items-center gap-3">
+                                            <Filter size={14} className="text-gray-400" />
+                                            <div className="flex gap-2 p-1.5 bg-gray-100/50 dark:bg-gray-800/50 rounded-full border border-gray-200/50 dark:border-gray-700 shadow-inner">
+                                                {['Alla', ...STATUS_STAGES].map(s => (
+                                                    <button
+                                                        key={s}
+                                                        onClick={() => setStatusFilter(s)}
+                                                        className={`px-6 py-2 text-[9px] font-black uppercase tracking-[0.2em] rounded-full transition-all ${statusFilter === s ? 'bg-black text-white dark:bg-white dark:text-black shadow-xl' : 'text-gray-400 hover:text-black dark:hover:text-white'}`}
+                                                    >
+                                                        {s}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="text-[10px] text-gray-400 font-black uppercase tracking-[0.3em] italic opacity-60">
+                                        Totalt: {filteredLeads.length} personer
+                                    </div>
+                                </div>
+
+                                <div className="bg-white dark:bg-gray-900 rounded-[3.5rem] border border-gray-100 dark:border-gray-800 shadow-sm overflow-hidden transition-all hover:shadow-2xl">
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-sm border-collapse">
+                                            <thead className="bg-gray-50/50 dark:bg-gray-800/30 text-gray-400 font-black uppercase text-[10px] tracking-[0.4em] border-b border-gray-100 dark:border-gray-800">
+                                                <tr>
+                                                    <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('name')}>Namn</th>
+                                                    <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('company')}>Företag</th>
+                                                    <th className="px-12 py-9">Status</th>
+                                                    <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('leadScore')}>AI Match</th>
+                                                    <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('value')}>Värde</th>
+                                                    <th className="px-12 py-9 text-right"></th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                                                {filteredLeads.map(l => (
+                                                    <tr key={l.id} onClick={() => openDetails(l)} className="hover:bg-gray-50/50 dark:hover:bg-gray-800/30 transition-all group cursor-pointer">
+                                                        <td className="px-12 py-9">
+                                                            <div className="flex items-center gap-8">
+                                                                <div className="w-14 h-14 rounded-full bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-[12px] font-black text-gray-400 border border-gray-100 dark:border-gray-700 transition-all group-hover:bg-black group-hover:text-white group-hover:scale-110 group-hover:rotate-6 shadow-sm">
+                                                                    {l.name.substring(0,1)}
+                                                                </div>
+                                                                <div className="font-black text-gray-950 dark:text-white text-base tracking-tighter italic uppercase">{l.name}</div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-12 py-9 text-[12px] font-black uppercase tracking-[0.4em] text-gray-400 group-hover:text-black dark:group-hover:text-white transition-colors">{l.company}</td>
+                                                        <td className="px-12 py-9">
+                                                            <span className="px-5 py-2.5 rounded-full text-[10px] font-black uppercase tracking-[0.3em] bg-black text-white dark:bg-white dark:text-black shadow-lg inline-block">
+                                                                {l.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-12 py-9">
+                                                            <div className="flex items-center gap-5">
+                                                                <div className="flex-1 max-w-[150px] h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden shadow-inner">
+                                                                    <div className="h-full bg-black dark:bg-white rounded-full transition-all duration-1000 ease-out" style={{ width: `${l.leadScore}%` }}></div>
+                                                                </div>
+                                                                <span className="text-[12px] font-black text-gray-400 font-mono tracking-tighter">{l.leadScore}%</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-12 py-9 font-black text-gray-950 dark:text-white text-lg italic tracking-tighter">{l.value.toLocaleString()} kr</td>
+                                                        <td className="px-12 py-9 text-right">
+                                                            <div className="flex justify-end gap-5 opacity-0 group-hover:opacity-100 transition-all">
+                                                                <button onClick={(e) => { e.stopPropagation(); setLeadToDelete(l); }} className="p-4 text-gray-300 hover:text-red-500 transition-colors bg-white dark:bg-gray-800 rounded-full border border-gray-100 dark:border-gray-700 shadow-sm"><Trash2 size={18}/></button>
+                                                                <button className="p-4 text-gray-300 hover:text-black dark:hover:text-white transition-colors bg-white dark:bg-gray-800 rounded-full border border-gray-100 dark:border-gray-700 shadow-sm"><ChevronRight size={20}/></button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
                                 </div>
                             </div>
                         )}
                     </div>
                 )}
 
-                {/* 3. AI MAIL TAB */}
+                {/* 3. AI MAIL TAB - Tactile Writing Studio */}
                 {activeTab === 'mail' && (
-                    <div className="max-w-4xl mx-auto space-y-8 animate-fadeIn">
-                        <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-3xl p-8 shadow-sm">
-                            <h2 className="text-2xl font-serif-display mb-6 flex items-center gap-3">
-                                <Wand2 className="text-purple-500" /> Outreach Assistant
-                            </h2>
-                            <div className="space-y-6">
-                                <div className="grid md:grid-cols-2 gap-6">
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Mottagare</label>
-                                        <select 
-                                            value={selectedMailLeadId}
-                                            onChange={e => setSelectedMailLeadId(e.target.value)}
-                                            className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white"
-                                        >
-                                            <option value="">-- Välj en kontakt --</option>
-                                            {safeLeads.map(l => <option key={l.id} value={l.id}>{l.name} ({l.company})</option>)}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Tonalitet</label>
-                                        <div className="flex gap-2">
-                                            {['Professionell', 'Personlig', 'Kort & Koncist'].map(tonalitet => (
-                                                <button key={tonalitet} className="px-3 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg text-xs font-medium hover:bg-gray-100 border border-transparent hover:border-gray-200 transition-all">
-                                                    {tonalitet}
-                                                </button>
-                                            ))}
+                    <div className="max-w-6xl mx-auto space-y-12 animate-fadeIn pb-12 px-4">
+                        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-[4rem] p-16 md:p-24 shadow-sm relative overflow-hidden transition-all hover:shadow-2xl group">
+                            <div className="absolute top-0 right-0 p-12 opacity-5 group-hover:opacity-10 transition-opacity"><Wand2 size={200} /></div>
+                            <div className="flex justify-between items-center mb-20 relative z-10">
+                                <div>
+                                    <h2 className="text-5xl font-serif-display text-gray-950 dark:text-white uppercase tracking-tighter italic leading-none">Skrivhjälpen</h2>
+                                    <p className="text-base text-gray-400 mt-4 font-bold uppercase tracking-[0.2em] italic">AI-driven säljcopy på sekunder</p>
+                                </div>
+                                <div className="w-20 h-20 bg-black dark:bg-white rounded-[2rem] flex items-center justify-center text-white dark:text-black shadow-2xl rotate-3 group-hover:rotate-0 transition-transform duration-500"><Wand2 size={36} /></div>
+                            </div>
+
+                            <div className="grid lg:grid-cols-2 gap-24 relative z-10">
+                                <div className="space-y-12">
+                                    <div className="grid md:grid-cols-2 gap-12">
+                                        <div className="space-y-4">
+                                            <label className="block text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] italic">Mottagare</label>
+                                            <select value={selectedMailLeadId} onChange={e => setSelectedMailLeadId(e.target.value)} className="w-full bg-gray-50/50 dark:bg-gray-800/50 p-6 rounded-[2rem] border-2 border-transparent focus:border-black dark:focus:border-white text-sm font-black italic outline-none transition-all appearance-none cursor-pointer shadow-inner dark:text-white">
+                                                <option value="">-- Välj person --</option>
+                                                {leads.map(l => <option key={l.id} value={l.id}>{l.name} ({l.company})</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-4">
+                                            <label className="block text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] italic">Tonalitet</label>
+                                            <div className="flex bg-gray-100/50 dark:bg-gray-800/50 p-1.5 rounded-full border border-gray-200/50 dark:border-gray-700 shadow-inner">
+                                                {['Professionell', 'Personlig'].map(t => (
+                                                    <button key={t} onClick={() => setSelectedTonality(t)} className={`flex-1 py-4 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all ${selectedTonality === t ? 'bg-black text-white dark:bg-white dark:text-black shadow-xl scale-105' : 'text-gray-400 hover:text-black dark:hover:text-white'}`}>{t}</button>
+                                                ))}
+                                            </div>
                                         </div>
                                     </div>
+
+                                    <div className="space-y-8">
+                                        <div className="flex justify-between items-center">
+                                            <label className="block text-[11px] font-black text-gray-400 uppercase tracking-[0.4em] italic">Vad handlar mailet om?</label>
+                                            <button onClick={generateFollowUpSuggestion} disabled={!selectedMailLeadId || isGeneratingSuggestion} className="text-[10px] font-black uppercase tracking-[0.2em] text-black dark:text-white hover:opacity-70 transition-all flex items-center gap-4 px-6 py-3 border-2 border-black/5 dark:border-white/5 rounded-full disabled:opacity-30 bg-white dark:bg-gray-800 shadow-sm active:scale-95">
+                                                {isGeneratingSuggestion ? <Loader2 size={12} className="animate-spin" /> : <Lightbulb size={12} />} Ge förslag
+                                            </button>
+                                        </div>
+
+                                        {suggestedPhrase && (
+                                            <div className="p-10 bg-gray-50/50 dark:bg-gray-800/50 border-l-8 border-black dark:border-white rounded-3xl flex justify-between items-center animate-[slideUp_0.5s_ease-out] shadow-inner">
+                                                <p className="text-sm text-gray-700 dark:text-gray-300 font-black italic leading-relaxed pr-12">"{suggestedPhrase}"</p>
+                                                <button onClick={useSuggestedPhrase} className="bg-black dark:bg-white text-white dark:text-black px-8 py-3 rounded-full text-[11px] font-black uppercase tracking-[0.3em] hover:opacity-80 transition-all shadow-2xl shrink-0">Använd</button>
+                                            </div>
+                                        )}
+
+                                        <textarea 
+                                            value={mailPrompt} 
+                                            onChange={e => setMailPrompt(e.target.value)} 
+                                            placeholder="t.ex. 'Tacka för senast' eller 'Fråga om ett möte'..." 
+                                            className="w-full h-72 bg-gray-50 dark:bg-gray-800 p-12 rounded-[3.5rem] border-2 border-transparent focus:border-black dark:focus:border-white focus:bg-white dark:focus:bg-gray-900 resize-none outline-none transition-all text-base font-black italic leading-[2] shadow-inner dark:text-white" 
+                                        />
+                                    </div>
+
+                                    <button onClick={generateAIMail} disabled={!selectedMailLeadId || !mailPrompt || isGeneratingMail} className="w-full py-8 bg-black dark:bg-white text-white dark:text-black rounded-full font-black text-[12px] uppercase tracking-[0.5em] hover:opacity-90 hover:-translate-y-2 transition-all disabled:opacity-30 shadow-[0_20px_50px_rgba(0,0,0,0.2)] flex items-center justify-center gap-6 active:scale-[0.98]">
+                                        {isGeneratingMail ? <Loader2 className="animate-spin" size={24} /> : <Sparkles size={24} />} {isGeneratingMail ? "SKRIVER..." : "SKAPA UTKAST"}
+                                    </button>
                                 </div>
 
-                                <div>
-                                    <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Kontext för meddelandet</label>
-                                    <textarea 
-                                        value={mailPrompt}
-                                        onChange={e => setMailPrompt(e.target.value)}
-                                        placeholder="t.ex. Följ upp på vårt möte förra veckan gällande prissättningen..."
-                                        className="w-full h-32 bg-gray-50 dark:bg-gray-800 p-4 rounded-2xl border-none resize-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white"
-                                    />
+                                <div className="relative">
+                                    {generatedMail ? (
+                                        <div className="bg-gray-50/30 dark:bg-black/20 border border-gray-100 dark:border-gray-800 rounded-[4rem] p-16 h-full flex flex-col animate-[fadeIn_0.8s_ease-out] shadow-inner">
+                                            <div className="flex justify-between items-center mb-12">
+                                                <h3 className="font-black text-gray-300 uppercase tracking-[0.5em] text-[10px]">Färdigt utkast</h3>
+                                                <div className="flex gap-4">
+                                                    <button onClick={copyMail} className="flex items-center gap-3 px-8 py-4 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-[11px] font-black uppercase tracking-[0.3em] rounded-2xl border border-gray-100 hover:bg-gray-50 transition-all active:scale-95 shadow-sm">
+                                                        {copyStatus ? <Check size={16} className="text-green-500" /> : <Copy size={16} />} {copyStatus ? "KOPPIERAT" : "KOPIERA"}
+                                                    </button>
+                                                    <button onClick={sendMail} className="flex items-center gap-3 px-10 py-4 bg-black dark:bg-white text-white dark:text-black text-[11px] font-black uppercase tracking-[0.3em] rounded-2xl hover:opacity-80 transition-all shadow-2xl active:scale-95">
+                                                        <Send size={16} /> SKICKA
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-10 flex-1 flex flex-col">
+                                                <div className="p-8 bg-white dark:bg-gray-900 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+                                                    <span className="text-[10px] font-black text-gray-300 uppercase tracking-[0.5em] block mb-3">Ämnesrad</span>
+                                                    <div className="text-lg font-black text-gray-950 dark:text-white italic tracking-tight uppercase leading-tight">{generatedMail.subject}</div>
+                                                </div>
+                                                <div className="p-16 bg-white dark:bg-gray-900 rounded-[3rem] border border-gray-100 dark:border-gray-800 flex-1 whitespace-pre-wrap text-base leading-[2.4] text-gray-800 dark:text-gray-200 font-black italic shadow-sm custom-scrollbar overflow-y-auto">
+                                                    {generatedMail.body}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="h-full border-4 border-dashed border-gray-100 dark:border-gray-800 rounded-[5rem] flex flex-col items-center justify-center text-center p-24 space-y-10 opacity-30 grayscale group hover:opacity-50 transition-opacity">
+                                            <div className="w-24 h-24 bg-gray-50 dark:bg-gray-800 rounded-full flex items-center justify-center shadow-inner"><Mail size={56} className="text-gray-300" /></div>
+                                            <div className="space-y-3">
+                                                <p className="font-black text-gray-400 uppercase text-[12px] tracking-[0.5em]">Inget utkast ännu</p>
+                                                <p className="text-[12px] text-gray-400 font-bold uppercase tracking-[0.2em] max-w-xs mx-auto text-center">Välj en mottagare och ange kontext till vänster för att börja.</p>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
-
-                                <button 
-                                    onClick={generateAIMail}
-                                    disabled={!selectedMailLeadId || !mailPrompt || isGeneratingMail}
-                                    className="w-full py-4 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-bold flex items-center justify-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50 shadow-lg"
-                                >
-                                    {isGeneratingMail ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
-                                    {isGeneratingMail ? "Analyserar..." : "Generera utkast"}
-                                </button>
                             </div>
                         </div>
-
-                        {generatedMail && (
-                            <div className="bg-white dark:bg-gray-900 border-2 border-black dark:border-white rounded-3xl p-8 shadow-2xl animate-slideUp">
-                                <div className="flex justify-between items-center mb-6">
-                                    <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2"><FileText size={18}/> Förhandsgranskning</h3>
-                                    <div className="flex gap-2">
-                                        <button onClick={copyMail} className="flex items-center gap-2 px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-xs font-bold rounded-xl hover:bg-gray-200 transition-all">
-                                            {copyStatus ? <Check size={14} className="text-green-500" /> : <Copy size={14} />} {copyStatus ? "Kopierat!" : "Kopiera"}
-                                        </button>
-                                        <button onClick={sendMail} className="flex items-center gap-2 px-4 py-2 bg-black dark:bg-white text-white dark:text-black text-xs font-bold rounded-xl hover:opacity-80 transition-all shadow-lg">
-                                            <Send size={14} /> Skicka
-                                        </button>
-                                    </div>
-                                </div>
-                                <div className="space-y-4">
-                                    <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">
-                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Ämne</span>
-                                        <div className="text-sm font-bold text-gray-900 dark:text-white">{generatedMail.subject}</div>
-                                    </div>
-                                    <div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 min-h-[200px] whitespace-pre-wrap text-sm leading-relaxed text-gray-700 dark:text-gray-300">
-                                        {generatedMail.body}
-                                    </div>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 )}
 
-                {/* 4. INTELLIGENCE TAB */}
+                {/* 4. INTELLIGENCE TAB - Premium Dossiers */}
                 {activeTab === 'intelligence' && (
-                    <div className="h-full">
+                    <div className="h-full pb-12 px-2">
                         {!activeReport ? (
-                            <div className="space-y-6">
-                                <div className="bg-white dark:bg-gray-900 p-10 rounded-2xl border border-gray-200 dark:border-gray-800 text-center shadow-sm">
-                                    <div className="w-16 h-16 bg-gray-50 dark:bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-6 text-black dark:text-white">
-                                        <Sparkles size={32} />
+                            <div className="space-y-16 animate-fadeIn">
+                                <div className="bg-black text-white p-24 md:p-40 rounded-[5rem] text-center shadow-3xl relative overflow-hidden border border-white/5 group">
+                                    <div className="absolute inset-0 opacity-10 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] group-hover:opacity-20 transition-opacity"></div>
+                                    <div className="relative z-10 max-w-3xl mx-auto">
+                                        <div className="w-24 h-24 bg-white/10 rounded-[3rem] flex items-center justify-center mx-auto mb-12 backdrop-blur-xl border border-white/20 shadow-2xl rotate-12 group-hover:rotate-0 transition-all duration-700"><Sparkles size={44} className="text-white" /></div>
+                                        <h2 className="font-serif-display text-7xl md:text-8xl mb-10 tracking-tighter italic uppercase leading-none">Bolagskoll</h2>
+                                        <p className="text-gray-400 text-lg mb-20 leading-relaxed font-black uppercase tracking-[0.4em] text-[12px] max-w-xl mx-auto italic opacity-80">Fullständig bolagsanalys på sekunder. Powered by Real-Time Grounding.</p>
+                                        
+                                        <div className="flex flex-col md:flex-row gap-6 bg-white/10 backdrop-blur-3xl p-6 rounded-[5rem] border border-white/10 shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
+                                            <input 
+                                                value={reportUrl} 
+                                                onChange={e => setReportUrl(e.target.value)} 
+                                                placeholder="Skriv in hemsida (t.ex. klarna.se)" 
+                                                className="flex-1 bg-transparent px-10 py-6 text-2xl text-white outline-none placeholder:text-white/20 font-black italic tracking-tight" 
+                                            />
+                                            <button onClick={() => generateReport()} disabled={!reportUrl || isGeneratingReport} className="bg-white text-black px-20 py-6 rounded-full text-xs font-black uppercase tracking-[0.5em] hover:bg-gray-100 hover:scale-105 transition-all disabled:opacity-30 flex items-center justify-center gap-5 shadow-2xl active:scale-95">
+                                                {isGeneratingReport ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} />}
+                                                {isGeneratingReport ? 'HÄMTAR DATA...' : 'ANALYSERA'}
+                                            </button>
+                                        </div>
+                                        {isGeneratingReport && <div className="mt-16 text-[10px] font-black text-white/30 animate-pulse uppercase tracking-[0.8em]">{loadingMessage}</div>}
                                     </div>
-                                    <h3 className="font-serif-display text-2xl mb-4 text-gray-900 dark:text-white">Market Intelligence Engine</h3>
-                                    <div className="flex max-w-lg mx-auto gap-2 bg-gray-50 dark:bg-gray-800 p-2 rounded-full border border-gray-200 dark:border-gray-800">
-                                        <input value={reportUrl} onChange={e => setReportUrl(e.target.value)} placeholder="Klistra in hemsida (t.ex. klarna.com)" className="flex-1 bg-transparent px-4 py-2 text-sm text-gray-900 dark:text-white outline-none" />
-                                        <button onClick={() => generateReport()} disabled={!reportUrl || isGeneratingReport} className="bg-black dark:bg-white text-white dark:text-black px-6 py-2 rounded-full text-sm font-bold hover:opacity-90 disabled:opacity-50 flex items-center gap-2">
-                                            {isGeneratingReport ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
-                                            {isGeneratingReport ? 'Arbetar...' : 'Analysera'}
-                                        </button>
-                                    </div>
-                                    {isGeneratingReport && <div className="mt-4 text-xs font-bold text-blue-600 dark:text-blue-400 animate-pulse uppercase tracking-widest">{loadingMessage}</div>}
                                 </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pb-12">
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-12">
                                     {reports.map(report => (
-                                        <div key={report.id} onClick={() => setActiveReport(report)} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 transition-all hover:shadow-lg cursor-pointer group border-b-4 border-b-black relative overflow-hidden">
-                                            <h4 className="font-bold text-gray-900 dark:text-white truncate text-lg mb-1 pr-8">{report.title}</h4>
-                                            <p className="text-xs text-gray-500">Market Intelligence Snapshot</p>
-                                            <button onClick={(e) => { e.stopPropagation(); setReportToDelete(report); }} className="absolute top-4 right-4 p-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={16} /></button>
+                                        <div key={report.id} onClick={() => setActiveReport(report)} className="bg-white dark:bg-gray-900 rounded-[4rem] border border-gray-100 dark:border-gray-800 p-14 transition-all hover:shadow-[0_30px_80px_rgba(0,0,0,0.1)] hover:-translate-y-4 cursor-pointer group relative overflow-hidden">
+                                            <div className="absolute top-0 right-0 p-10 opacity-5 group-hover:opacity-10 transition-opacity"><FileText size={150} /></div>
+                                            <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-[2.5rem] flex items-center justify-center mb-12 text-gray-300 group-hover:bg-black group-hover:text-white dark:group-hover:text-white group-hover:scale-110 transition-all border border-gray-100 shadow-sm"><FileText size={32}/></div>
+                                            <h4 className="font-bold text-gray-950 dark:text-white truncate text-4xl mb-4 tracking-tighter italic uppercase leading-none">{report.title}</h4>
+                                            <p className="text-[11px] font-black text-gray-400 uppercase tracking-[0.5em] mb-12 italic">Färdig Analys</p>
+                                            <div className="flex justify-between items-center pt-12 border-t border-gray-50 dark:border-gray-800">
+                                                <span className="text-[11px] font-black text-gray-300 uppercase tracking-widest">{new Date(report.created_at).toLocaleDateString()}</span>
+                                                <div className="flex gap-3">
+                                                    <button onClick={(e) => { e.stopPropagation(); setReportToDelete(report); }} className="p-3 text-gray-200 hover:text-red-500 transition-colors bg-white dark:bg-gray-800 rounded-full border border-gray-100 shadow-sm"><Trash2 size={18} /></button>
+                                                    <div className="p-3 text-gray-200 group-hover:text-black dark:group-hover:text-white transition-colors bg-white dark:bg-gray-800 rounded-full border border-gray-100 shadow-sm"><ArrowUpRight size={22} /></div>
+                                                </div>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
                             </div>
                         ) : (
-                            <div className="flex flex-col h-full bg-gray-100 dark:bg-black/40 rounded-2xl overflow-hidden animate-slideUp">
-                                <div className="no-print bg-white/80 dark:bg-gray-900/80 backdrop-blur-md p-4 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center sticky top-0 z-50 shadow-sm">
-                                    <div className="flex items-center gap-4">
-                                        <button onClick={() => setActiveReport(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors text-gray-500 dark:text-gray-400"><ArrowRight className="rotate-180" size={20} /></button>
-                                        <div className="h-6 w-px bg-gray-200 dark:bg-gray-700"></div>
-                                        <h2 className="font-bold text-gray-900 dark:text-white truncate max-w-[200px]">{activeReport.reportData.meta.companyName}</h2>
+                            <div className="flex flex-col h-full bg-white dark:bg-gray-900 rounded-[5rem] overflow-hidden border border-gray-100 shadow-[0_50px_150px_rgba(0,0,0,0.2)] animate-[slideUp_0.8s_ease-out]">
+                                <div className="no-print bg-white/80 dark:bg-gray-900/80 backdrop-blur-2xl p-10 border-b border-gray-100 flex justify-between items-center sticky top-0 z-50">
+                                    <div className="flex items-center gap-8">
+                                        <button onClick={() => setActiveReport(null)} className="p-5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all text-gray-400 group active:scale-90"><ChevronRight className="rotate-180 group-hover:-translate-x-2 transition-transform" size={24} /></button>
+                                        <div className="h-12 w-px bg-gray-100 dark:bg-gray-800" />
+                                        <div>
+                                            <h2 className="font-bold text-gray-950 dark:text-white text-3xl tracking-tighter uppercase italic leading-none">{activeReport.reportData.meta.companyName}</h2>
+                                            <p className="text-[11px] font-black text-gray-400 uppercase tracking-[0.5em] mt-2">Executive Snapshot Analysis</p>
+                                        </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <button onClick={handleDownloadPDF} disabled={isDownloading} className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black text-xs font-bold rounded-lg hover:opacity-80 transition-all flex items-center gap-2 shadow-lg disabled:opacity-50">
-                                            {isDownloading ? <Loader2 className="animate-spin" size={14} /> : <Download size={14}/>} {isDownloading ? 'Laddar...' : 'Ladda ned PDF'}
+                                    <div className="flex gap-6">
+                                        <button onClick={handleDownloadPDF} disabled={isDownloading} className="px-12 py-4 bg-black dark:bg-white text-white dark:text-black text-[12px] font-black uppercase tracking-[0.4em] rounded-full hover:opacity-80 transition-all flex items-center gap-5 shadow-[0_20px_50px_rgba(0,0,0,0.2)] active:scale-95 disabled:opacity-50">
+                                            {isDownloading ? <Loader2 className="animate-spin" size={18} /> : <Download size={18}/>} EXPORTERA PDF
                                         </button>
-                                        <button onClick={() => setReportToDelete(activeReport)} className="p-2 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-lg hover:bg-red-100 transition-colors"><Trash2 size={20}/></button>
+                                        <button onClick={() => setReportToDelete(activeReport)} className="p-5 bg-gray-50 dark:bg-gray-800 text-gray-300 rounded-full hover:text-black dark:hover:text-white transition-all shadow-inner border border-black/5 active:scale-90"><Trash2 size={24}/></button>
                                     </div>
                                 </div>
-                                <div className="flex-1 overflow-y-auto p-4 md:p-12">
-                                    <div id="printable-report" className="bg-white p-12 md:p-24 shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-gray-200 mx-auto max-w-5xl min-h-full text-black font-sans selection:bg-yellow-100 mb-20">
-                                        <div className="border-b-8 border-black pb-8 mb-16 flex justify-between items-end">
-                                            <div>
-                                                <div className="flex items-center gap-2 mb-4"><div className="w-8 h-8 bg-black rounded flex items-center justify-center text-white font-bold text-xs italic">A</div><span className="font-bold tracking-tighter text-xl text-black">ACEVERSE INTELLIGENCE</span></div>
-                                                <h1 className="text-5xl font-serif-display font-bold uppercase tracking-tighter max-w-2xl leading-none text-black">Research Report</h1>
-                                                <p className="text-gray-500 text-sm mt-4 font-medium uppercase tracking-widest">Target: {activeReport.reportData.meta.companyName} | {activeReport.reportData.meta.website}</p>
+                                <div className="flex-1 overflow-y-auto p-6 md:p-24 bg-gray-50/30 dark:bg-black/20 custom-scrollbar">
+                                    <div id="printable-report" className="bg-white p-24 md:p-48 shadow-[0_80px_160px_rgba(0,0,0,0.05)] border border-gray-100 mx-auto max-w-5xl min-h-full text-black font-sans selection:bg-gray-200 mb-20 rounded-md">
+                                        <div className="border-b-[20px] border-black pb-24 mb-32 flex justify-between items-end">
+                                            <div className="space-y-16">
+                                                <div className="flex items-center gap-6">
+                                                    <div className="w-20 h-20 bg-black rounded-[2rem] flex items-center justify-center text-white font-serif font-black text-5xl italic">A</div>
+                                                    <span className="font-black tracking-[0.6em] text-[12px] uppercase text-black">Aceverse Intelligence</span>
+                                                </div>
+                                                <div>
+                                                    <h1 className="text-9xl font-serif-display font-black uppercase tracking-tighter max-w-4xl leading-[0.7] text-black">RESEARCH<br/>REPORT</h1>
+                                                    <p className="text-gray-400 text-[14px] mt-12 font-black uppercase tracking-[0.6em] italic">OBJECT: {activeReport.reportData.meta.companyName} // REAL-TIME ACCESS</p>
+                                                </div>
                                             </div>
-                                            <div className="text-right flex flex-col items-end"><div className="font-bold border-t border-black pt-1 text-black">{activeReport.reportData.meta.generatedDate}</div><div className="text-[10px] font-bold text-gray-400 mt-2 uppercase tracking-widest">Internal Use Only</div></div>
+                                            <div className="text-right flex flex-col items-end">
+                                                <div className="font-black border-t-8 border-black pt-8 text-black text-xl uppercase tracking-[0.5em]">{activeReport.reportData.meta.generatedDate}</div>
+                                                <div className="text-[12px] font-black text-gray-300 mt-5 uppercase tracking-[0.5em] italic">Confidential Property</div>
+                                            </div>
                                         </div>
-                                        <div className="max-w-none report-content text-black">{renderMarkdown(activeReport.reportData.fullMarkdown)}</div>
-                                        <div className="mt-24 pt-10 border-t-2 border-gray-100"><div className="flex items-center gap-2 text-gray-400 mb-4"><Sparkles size={16} /><span className="text-xs font-bold uppercase tracking-widest">AI Synthesis Engine</span></div><p className="text-[11px] text-gray-400 leading-relaxed italic">This document was automatically generated based on public data. Accuracy is high but verification is recommended for critical decisions.</p></div>
+                                        <div className="max-w-none report-content text-black leading-[2.2] text-2xl font-medium italic space-y-16">
+                                            {renderMarkdown(activeReport.reportData.fullMarkdown)}
+                                        </div>
+                                        <div className="mt-64 pt-24 border-t-[8px] border-black">
+                                            <div className="flex items-center gap-6 text-gray-300 mb-10">
+                                                <Sparkles size={36} />
+                                                <span className="text-[12px] font-black uppercase tracking-[0.7em]">Neural Synthesis • Aceverse Engine</span>
+                                            </div>
+                                            <p className="text-[12px] text-gray-400 leading-relaxed font-black uppercase tracking-[0.5em] max-w-3xl italic opacity-60">Denna rapport är sammanställd av AI via neural länkning. Verifiera alltid kritiska affärsdata oberoende innan beslut.</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -739,184 +849,124 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             </div>
 
             {/* DETAIL SLIDE-OVER */}
-            <div className={`fixed inset-y-0 right-0 z-[100] w-full md:w-[500px] bg-white dark:bg-gray-900 shadow-2xl transform transition-transform duration-500 ease-in-out border-l border-gray-200 dark:border-gray-800 ${isDetailOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+            <div className={`fixed inset-y-0 right-0 z-[100] w-full md:w-[700px] bg-white dark:bg-gray-900 shadow-[0_0_200px_rgba(0,0,0,0.5)] transform transition-all duration-700 cubic-bezier(0.16, 1, 0.3, 1) border-l border-gray-100 dark:border-gray-800 ${isDetailOpen ? 'translate-x-0' : 'translate-x-full'}`}>
                 {selectedLead && (
                     <div className="flex flex-col h-full overflow-hidden">
-                        <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
-                            <h2 className="font-serif-display text-2xl text-gray-900 dark:text-white">Lead-detaljer</h2>
-                            <button onClick={() => setIsDetailOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"><X size={24}/></button>
+                        <div className="p-12 border-b border-gray-50 dark:border-gray-800 flex justify-between items-center bg-white dark:bg-gray-900/95 backdrop-blur-3xl">
+                            <span className="text-[12px] font-black uppercase tracking-[0.6em] text-gray-300 italic">Kundprofil // {selectedLead.name.split(' ')[0]}</span>
+                            <button onClick={() => setIsDetailOpen(false)} className="p-5 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-full transition-all border border-transparent hover:border-gray-100 active:scale-90 shadow-sm bg-white dark:bg-gray-900"><X size={36} strokeWidth={1} /></button>
                         </div>
                         
-                        <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-8">
-                            {/* Profile Header */}
-                            <div className="flex items-center gap-6 pb-8 border-b border-gray-50 dark:border-gray-800">
-                                <div className="w-20 h-20 rounded-2xl bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-3xl font-serif text-gray-300">
+                        <div className="flex-1 overflow-y-auto p-12 md:p-24 space-y-24 custom-scrollbar">
+                            <div className="flex flex-col items-center text-center pb-20 border-b border-gray-50 dark:border-gray-800">
+                                <div className="w-48 h-48 rounded-full bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-7xl font-serif text-gray-200 border-8 border-gray-50 dark:border-gray-700 shadow-inner italic mb-12 hover:scale-105 transition-transform duration-500">
                                     {selectedLead.name.substring(0,1)}
                                 </div>
-                                <div>
-                                    <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">{selectedLead.name}</h3>
-                                    <p className="text-gray-500 font-medium">{selectedLead.company}</p>
-                                    <div className="flex gap-2 mt-3">
-                                        <div className="flex items-center gap-1 text-[10px] font-bold text-purple-600 bg-purple-50 dark:bg-purple-900/20 px-3 py-1 rounded-full border border-purple-100 dark:border-purple-800">
-                                            <Sparkles size={12}/> {selectedLead.leadScore} / 100
-                                        </div>
-                                        <div className={`text-[10px] font-bold px-3 py-1 rounded-full border ${selectedLead.priority === 'High' ? 'bg-red-50 text-red-600 border-red-100' : 'bg-blue-50 text-blue-600 border-blue-100'}`}>
-                                            {selectedLead.priority} Priority
-                                        </div>
+                                <h3 className="text-6xl font-serif-display font-black text-gray-950 dark:text-white mb-4 tracking-tighter uppercase italic leading-none">{selectedLead.name}</h3>
+                                <p className="text-gray-400 font-black text-[14px] uppercase tracking-[0.6em] mb-12 italic">{selectedLead.company}</p>
+                                <div className="flex flex-wrap justify-center gap-6">
+                                    <div className="flex items-center gap-4 text-[11px] font-black text-black dark:text-white bg-gray-50 dark:bg-gray-800 px-8 py-4 rounded-full border border-black/5 shadow-inner uppercase tracking-[0.3em] italic transition-colors hover:bg-gray-100 dark:hover:bg-gray-700">
+                                        <Zap size={16} fill="currentColor"/> Matchar: {selectedLead.leadScore}%
+                                    </div>
+                                    <div className={`text-[11px] font-black px-8 py-4 rounded-full border-2 uppercase tracking-[0.3em] shadow-sm italic transition-all ${selectedLead.priority === 'High' ? 'bg-black text-white border-black dark:bg-white dark:text-black dark:border-white scale-105' : 'bg-white text-gray-400 border-gray-100 dark:bg-gray-900 dark:border-gray-800'}`}>
+                                        {selectedLead.priority === 'High' ? 'Viktig affär' : 'Normal'}
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Status & Value Controls */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl">
-                                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Lead Status</label>
-                                    <select 
-                                        value={selectedLead.status} 
-                                        onChange={(e) => handleUpdateStatus(selectedLead.id, e.target.value as any)}
-                                        className="w-full bg-transparent font-bold text-gray-900 dark:text-white outline-none cursor-pointer"
-                                    >
-                                        {STATUS_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                                    </select>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                                <div className="p-12 bg-gray-50/50 dark:bg-gray-800/30 rounded-[4rem] border border-gray-100 dark:border-gray-800 shadow-inner group">
+                                    <label className="block text-[11px] font-black text-gray-300 uppercase tracking-[0.5em] mb-8 italic">Process-steg</label>
+                                    <div className="relative">
+                                        <select value={selectedLead.status} onChange={(e) => handleUpdateStatus(selectedLead.id, e.target.value as any)} className="w-full bg-transparent font-black text-gray-950 dark:text-white text-3xl outline-none cursor-pointer tracking-tighter uppercase italic appearance-none">
+                                            {STATUS_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                                        </select>
+                                        <ChevronDown size={24} className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-gray-200" />
+                                    </div>
                                 </div>
-                                <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl">
-                                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2">Beräknat Värde</label>
-                                    <div className="flex items-center gap-1 font-bold text-gray-900 dark:text-white">
-                                        <input 
-                                            type="number" 
-                                            value={selectedLead.value} 
-                                            onChange={(e) => handleUpdateValue(selectedLead.id, Number(e.target.value))}
-                                            className="bg-transparent w-full outline-none"
-                                        />
-                                        <span className="text-xs">KR</span>
+                                <div className="p-12 bg-gray-50/50 dark:bg-gray-800/30 rounded-[4rem] border border-gray-100 dark:border-gray-800 shadow-inner group">
+                                    <label className="block text-[11px] font-black text-gray-300 uppercase tracking-[0.5em] mb-8 italic">Affärsvärde</label>
+                                    <div className="flex items-end gap-4 font-black text-gray-950 dark:text-white text-3xl tracking-tighter uppercase italic">
+                                        <input type="number" value={selectedLead.value} onChange={(e) => handleUpdateValue(selectedLead.id, Number(e.target.value))} className="bg-transparent w-full outline-none focus:text-black dark:focus:text-white transition-colors" />
+                                        <span className="text-[12px] opacity-30 uppercase font-black tracking-[0.5em] mb-2">Kr</span>
                                     </div>
                                 </div>
                             </div>
 
-                            {/* Intelligence Quick Action */}
-                            <div className="p-6 bg-black text-white rounded-3xl relative overflow-hidden group">
-                                <div className="relative z-10">
-                                    <h4 className="font-bold flex items-center gap-2 mb-2"><Search size={18}/> Lead Intelligence</h4>
-                                    <p className="text-xs text-gray-400 mb-4 leading-relaxed">Generera en automatisk forskningsrapport om {selectedLead.company} för att hitta säljvinklar.</p>
-                                    <button 
-                                        onClick={() => generateReport(selectedLead.website || selectedLead.company)}
-                                        disabled={isGeneratingReport}
-                                        className="w-full py-3 bg-white text-black rounded-xl font-bold text-sm hover:bg-gray-100 transition-all flex items-center justify-center gap-2"
-                                    >
-                                        {isGeneratingReport ? <Loader2 size={16} className="animate-spin"/> : <Sparkles size={16}/>}
-                                        {isGeneratingReport ? "Forskar..." : "Kör AI Research"}
-                                    </button>
-                                </div>
-                                <div className="absolute right-0 bottom-0 w-32 h-32 bg-white/5 rounded-full translate-x-1/2 translate-y-1/2 group-hover:scale-110 transition-transform"></div>
-                            </div>
-
-                            {/* Contact Details */}
-                            <div className="space-y-4">
-                                <h4 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Kontaktinformation</h4>
-                                <div className="space-y-3">
-                                    <ContactItem icon={<Mail size={18}/>} label="E-post" value={selectedLead.email} />
-                                    <ContactItem icon={<Phone size={18}/>} label="Telefon" value={selectedLead.phone || "Saknas"} />
-                                    <ContactItem icon={<Linkedin size={18}/>} label="LinkedIn" value={selectedLead.linkedin || "Saknas"} link={selectedLead.linkedin} />
-                                    <ContactItem icon={<Globe size={18}/>} label="Webbplats" value={selectedLead.website || "Saknas"} link={selectedLead.website} />
+                            <div className="space-y-16">
+                                <h4 className="text-[12px] font-black text-gray-300 uppercase tracking-[0.7em] italic">Kontaktinfo</h4>
+                                <div className="space-y-12">
+                                    <ContactRow icon={<Mail size={28}/>} label="E-post" value={selectedLead.email} />
+                                    <ContactRow icon={<Phone size={28}/>} label="Telefon" value={selectedLead.phone || "Ej angivet"} />
+                                    <ContactRow icon={<Linkedin size={28}/>} label="LinkedIn" value={selectedLead.linkedin || "Ingen länk"} link={selectedLead.linkedin} />
+                                    <ContactRow icon={<Globe size={28}/>} label="Webbplats" value={selectedLead.website || "Ej angivet"} link={selectedLead.website} />
                                 </div>
                             </div>
 
-                            {/* Notes */}
-                            <div className="space-y-4">
-                                <h4 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Anteckningar</h4>
-                                <textarea 
-                                    className="w-full h-32 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl border-none outline-none focus:ring-1 focus:ring-black transition-all text-sm leading-relaxed"
-                                    placeholder="Lägg till anteckningar om möten, krav eller feedback..."
-                                    defaultValue={selectedLead.notes}
-                                    onBlur={(e) => db.updateLead(user.id, selectedLead.id, { notes: e.target.value })}
-                                />
-                            </div>
-
-                            {/* History Simulation */}
-                            <div className="space-y-4 pb-12">
-                                <h4 className="text-sm font-bold text-gray-400 uppercase tracking-widest">Aktivitetshistorik</h4>
-                                <div className="space-y-4">
-                                    <HistoryItem type="Creation" date={new Date(selectedLead.dateAdded).toLocaleDateString()} content="Lead skapat i systemet." />
-                                    {selectedLead.status !== 'New' && <HistoryItem type="Stage Change" date="Idag" content={`Status ändrad till ${selectedLead.status}.`} />}
-                                </div>
+                            <div className="space-y-10 pb-40">
+                                <h4 className="text-[12px] font-black text-gray-300 uppercase tracking-[0.7em] italic">Anteckningar</h4>
+                                <textarea className="w-full h-80 p-16 bg-gray-50/50 dark:bg-gray-800/30 rounded-[4.5rem] border border-gray-100 dark:border-gray-800 outline-none focus:border-black dark:focus:border-white focus:bg-white dark:focus:bg-gray-900 transition-all text-base font-black italic leading-[2.2] text-gray-700 dark:text-gray-300 shadow-inner custom-scrollbar" placeholder="Skriv fritt om personen eller mötet..." defaultValue={selectedLead.notes} onBlur={(e) => db.updateLead(user.id, selectedLead.id, { notes: e.target.value })} />
                             </div>
                         </div>
 
-                        {/* Detail Footer */}
-                        <div className="p-6 border-t border-gray-100 dark:border-gray-800 flex gap-4">
-                            <button 
-                                onClick={() => { setSelectedMailLeadId(selectedLead.id); setActiveTab('mail'); setIsDetailOpen(false); }} 
-                                className="flex-1 py-4 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-gray-200 transition-all"
-                            >
-                                <Mail size={18}/> Skriv Mail
+                        <div className="p-12 border-t border-gray-100 dark:border-gray-800 flex gap-8 bg-white dark:bg-gray-900/95 backdrop-blur-3xl shadow-[0_-20px_50px_rgba(0,0,0,0.02)]">
+                            <button onClick={() => { setSelectedMailLeadId(selectedLead.id); setActiveTab('mail'); setIsDetailOpen(false); }} className="flex-1 py-7 bg-black dark:bg-white text-white dark:text-black rounded-full font-black text-[12px] uppercase tracking-[0.5em] flex items-center justify-center gap-6 hover:opacity-90 hover:-translate-y-2 transition-all shadow-[0_20px_40px_rgba(0,0,0,0.3)] active:scale-95">
+                                <Mail size={24}/> SKRIV SÄLJMAIL
                             </button>
-                            <button 
-                                onClick={() => { setLeadToDelete(selectedLead); }}
-                                className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 rounded-2xl hover:bg-red-100 transition-all"
-                            >
-                                <Trash2 size={20}/>
+                            <button onClick={() => { setLeadToDelete(selectedLead); }} className="p-7 bg-gray-50 dark:bg-gray-800 text-gray-300 rounded-full hover:text-red-500 transition-all shadow-inner border border-black/5 active:scale-90">
+                                <Trash2 size={28}/>
                             </button>
                         </div>
                     </div>
                 )}
             </div>
 
-            {/* Backdrop for detail panel */}
+            {/* Backdrop */}
             {isDetailOpen && (
-                <div className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-xs" onClick={() => setIsDetailOpen(false)}></div>
+                <div className="fixed inset-0 z-[90] bg-black/80 backdrop-blur-md animate-fadeIn" onClick={() => setIsDetailOpen(false)}></div>
             )}
 
             {/* ADD CONTACT MODAL */}
             {isAddModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsAddModalOpen(false)}></div>
-                    <div className="relative bg-white dark:bg-gray-900 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-slideUp">
-                        <div className="p-8">
-                            <div className="flex justify-between items-center mb-8">
-                                <h2 className="font-serif-display text-3xl text-gray-900 dark:text-white">Lägg till Lead</h2>
-                                <button onClick={() => setIsAddModalOpen(false)} className="text-gray-400 hover:text-black dark:hover:text-white transition-colors"><X size={24}/></button>
+                    <div className="absolute inset-0 bg-black/90 backdrop-blur-xl animate-fadeIn" onClick={() => setIsAddModalOpen(false)}></div>
+                    <div className="relative bg-white dark:bg-gray-900 w-full max-w-4xl rounded-[5rem] shadow-[0_100px_200px_rgba(0,0,0,0.5)] overflow-hidden animate-[slideUp_0.5s_ease-out] border border-white/10">
+                        <div className="p-16 md:p-24 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none"><Plus size={300} /></div>
+                            <div className="flex justify-between items-center mb-16 relative z-10">
+                                <h2 className="font-serif-display text-6xl text-gray-950 dark:text-white tracking-tighter uppercase italic leading-none">Lägg till kund</h2>
+                                <button onClick={() => setIsAddModalOpen(false)} className="p-5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all text-gray-300 hover:text-black dark:hover:text-white active:scale-90"><X size={44} strokeWidth={1} /></button>
                             </div>
-                            <form onSubmit={handleAddLead} className="space-y-6">
-                                <div className="grid md:grid-cols-2 gap-6">
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Fullständigt namn *</label>
-                                        <input required value={newLead.name || ''} onChange={e => setNewLead({...newLead, name: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white" />
+                            <form onSubmit={handleAddLead} className="space-y-16 relative z-10">
+                                <div className="grid md:grid-cols-2 gap-16">
+                                    <div className="space-y-4">
+                                        <label className="block text-[12px] font-black text-gray-400 uppercase tracking-[0.5em] italic">Fullständigt Namn *</label>
+                                        <input required value={newLead.name || ''} onChange={e => setNewLead({...newLead, name: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-7 rounded-[2rem] border-2 border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black italic shadow-inner" />
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Företag *</label>
-                                        <input required value={newLead.company || ''} onChange={e => setNewLead({...newLead, company: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white" />
+                                    <div className="space-y-4">
+                                        <label className="block text-[12px] font-black text-gray-400 uppercase tracking-[0.5em] italic">Företagsnamn *</label>
+                                        <input required value={newLead.company || ''} onChange={e => setNewLead({...newLead, company: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-7 rounded-[2rem] border-2 border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black italic shadow-inner" />
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Status</label>
-                                        <select value={newLead.status || 'New'} onChange={e => setNewLead({...newLead, status: e.target.value as any})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white">
-                                            {STATUS_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                                        </select>
+                                    <div className="space-y-4">
+                                        <label className="block text-[12px] font-black text-gray-400 uppercase tracking-[0.5em] italic">Process-steg</label>
+                                        <div className="relative group">
+                                            <select value={newLead.status || 'Nya'} onChange={e => setNewLead({...newLead, status: e.target.value as any})} className="w-full bg-gray-50 dark:bg-gray-800 p-7 rounded-[2rem] border-2 border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black uppercase tracking-[0.5em] shadow-inner appearance-none cursor-pointer">
+                                                {STATUS_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                            <ChevronDown size={20} className="absolute right-7 top-1/2 -translate-y-1/2 pointer-events-none text-gray-300" />
+                                        </div>
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Värde (kr)</label>
-                                        <input 
-                                            type="number" 
-                                            value={newLead.value || 0} 
-                                            onChange={e => setNewLead({...newLead, value: Number(e.target.value)})} 
-                                            className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white" 
-                                            placeholder="t.ex. 5000"
-                                        />
+                                    <div className="space-y-4">
+                                        <label className="block text-[12px] font-black text-gray-400 uppercase tracking-[0.5em] italic">Affärsvärde (kr)</label>
+                                        <input type="number" value={newLead.value || 0} onChange={e => setNewLead({...newLead, value: Number(e.target.value)})} className="w-full bg-gray-50 dark:bg-gray-800 p-7 rounded-[2rem] border-2 border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black tracking-tighter shadow-inner" />
                                     </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">Prioritet</label>
-                                        <select value={newLead.priority || 'Medium'} onChange={e => setNewLead({...newLead, priority: e.target.value as any})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white">
-                                            <option value="High">Hög</option>
-                                            <option value="Medium">Medium</option>
-                                            <option value="Low">Låg</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs font-bold text-gray-400 uppercase mb-2">E-post</label>
-                                        <input value={newLead.email || ''} onChange={e => setNewLead({...newLead, email: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition-all text-gray-900 dark:text-white" placeholder="namn@företag.se" />
+                                    <div className="space-y-4 col-span-2">
+                                        <label className="block text-[12px] font-black text-gray-400 uppercase tracking-[0.5em] italic">Kontakt e-post</label>
+                                        <input value={newLead.email || ''} onChange={e => setNewLead({...newLead, email: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-7 rounded-[2rem] border-2 border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black italic shadow-inner" placeholder="hej@företag.se" />
                                     </div>
                                 </div>
-                                <button disabled={isSavingLead} className="w-full py-4 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-bold text-lg hover:opacity-90 transition-all flex items-center justify-center gap-2 shadow-xl">
-                                    {isSavingLead ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>} {isSavingLead ? "Sparar..." : "Lägg till Lead"}
+                                <button disabled={isSavingLead} className="w-full py-9 bg-black dark:bg-white text-white dark:text-black rounded-full font-black text-xs uppercase tracking-[0.6em] hover:opacity-90 hover:shadow-[0_20px_60px_rgba(0,0,0,0.3)] transition-all flex items-center justify-center gap-8 shadow-3xl active:scale-[0.98] mt-10">
+                                    {isSavingLead ? <Loader2 className="animate-spin" size={28}/> : <Save size={28}/>} SPARRA I KUNDFLÖDET
                                 </button>
                             </form>
                         </div>
@@ -928,36 +978,38 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 };
 
 const TabButton = ({ active, onClick, icon, label }: any) => (
-    <button onClick={onClick} className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all ${active ? 'bg-white dark:bg-gray-700 text-black dark:text-white shadow-sm' : 'text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white'}`}>
+    <button onClick={onClick} className={`flex items-center gap-3 px-10 py-3.5 rounded-full text-[10px] font-black uppercase tracking-[0.3em] transition-all duration-500 italic ${active ? 'bg-black text-white dark:bg-white dark:text-black shadow-2xl scale-110' : 'text-gray-400 hover:text-black dark:hover:text-white'}`}>
         {icon}
         {label}
     </button>
 );
 
-const ContactItem = ({ icon, label, value, link }: { icon: any, label: string, value: string, link?: string }) => (
-    <div className="flex items-center gap-4 group">
-        <div className="w-10 h-10 rounded-full bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-gray-400 group-hover:text-black dark:group-hover:text-white transition-colors">{icon}</div>
-        <div className="flex-1 min-w-0">
-            <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">{label}</span>
-            {link ? (
-                <a href={link.startsWith('http') ? link : `https://${link}`} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-600 hover:underline truncate block">
-                    {value}
-                </a>
-            ) : (
-                <span className="text-sm font-medium text-gray-900 dark:text-white truncate block">{value}</span>
-            )}
+const MetricCard = ({ title, value, icon, trend }: any) => (
+    <div className="bg-white dark:bg-gray-900 p-12 rounded-[4.5rem] border border-gray-100 dark:border-gray-800 shadow-sm relative overflow-hidden group transition-all hover:shadow-2xl hover:-translate-y-2">
+        <div className="flex justify-between items-start mb-12">
+            <div className="w-18 h-18 bg-gray-50 dark:bg-gray-800 rounded-full flex items-center justify-center text-gray-200 border border-gray-100 dark:border-gray-700 transition-all group-hover:bg-black group-hover:text-white dark:group-hover:text-white group-hover:scale-110 group-hover:rotate-6 shadow-sm p-4">
+                {icon}
+            </div>
+            <div className="text-[10px] font-black px-5 py-2 rounded-full uppercase tracking-[0.3em] bg-gray-50 text-gray-400 dark:bg-gray-800 border border-transparent group-hover:border-black/5 group-hover:text-black dark:group-hover:text-white italic transition-all shadow-inner">{trend}</div>
         </div>
+        <span className="text-[12px] font-black text-gray-300 uppercase tracking-[0.6em] mb-4 block italic">{title}</span>
+        <div className="text-7xl font-serif-display font-black text-gray-950 dark:text-white tracking-tighter italic leading-none">{value}</div>
     </div>
 );
 
-const HistoryItem = ({ type, date, content }: { type: string, date: string, content: string }) => (
-    <div className="relative pl-6 pb-6 border-l-2 border-gray-100 dark:border-gray-800 last:pb-0">
-        <div className="absolute left-[-5px] top-0 w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600"></div>
-        <div className="flex justify-between items-start mb-1">
-            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{type}</span>
-            <span className="text-[10px] text-gray-400">{date}</span>
+const ContactRow = ({ icon, label, value, link }: any) => (
+    <div className="flex items-center gap-14 group">
+        <div className="w-18 h-18 rounded-full bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-gray-200 group-hover:bg-black group-hover:text-white dark:group-hover:text-white transition-all border border-black/5 dark:border-white/5 group-hover:scale-110 group-hover:rotate-12 shadow-sm p-4">{icon}</div>
+        <div className="flex-1 min-w-0">
+            <span className="block text-[11px] font-black text-gray-300 uppercase tracking-[0.6em] mb-2 italic">{label}</span>
+            {link ? (
+                <a href={link.startsWith('http') ? link : `https://${link}`} target="_blank" rel="noreferrer" className="text-2xl font-black text-gray-950 dark:text-white hover:underline truncate block tracking-tighter italic uppercase leading-none">
+                    {value}
+                </a>
+            ) : (
+                <span className="text-2xl font-black text-gray-950 dark:text-white truncate block tracking-tighter italic uppercase leading-none">{value}</span>
+            )}
         </div>
-        <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{content}</p>
     </div>
 );
 

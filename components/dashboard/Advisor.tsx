@@ -17,7 +17,8 @@ import {
     ShieldCheck,
     Loader2,
     CheckCircle2,
-    Zap
+    Zap,
+    Volume2
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { User, ChatMessage, ChatSession } from '../../types';
@@ -66,13 +67,25 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isVoiceModeOpen, setIsVoiceModeOpen] = useState(false);
     const [sessionToDelete, setSessionToDelete] = useState<ChatSession | null>(null);
-    const [advisorMode, setAdvisorMode] = useState<'uf' | 'standard'>('uf');
+    const [selectedVoice, setSelectedVoice] = useState<string>('Kore');
 
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { loadSessions(); }, [user.id]);
     useEffect(() => { if (currentSessionId) loadMessages(currentSessionId); else setMessages([]); }, [currentSessionId]);
     useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading, qualityPassActive]);
+
+    // --- SYNCHRONIZATION LOGIC ---
+    useEffect(() => {
+        const handleSync = (e: any) => {
+            if (e.detail?.sessionId === currentSessionId) {
+                loadMessages(currentSessionId);
+            }
+            loadSessions();
+        };
+        window.addEventListener('aceverse-chat-sync', handleSync);
+        return () => window.removeEventListener('aceverse-chat-sync', handleSync);
+    }, [currentSessionId]);
 
     const loadSessions = async () => {
         const data = await db.getUserData(user.id);
@@ -111,15 +124,17 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
         try {
             await db.addMessage(user.id, { role: 'user', text: userText, sessionId: currentSessionId });
             
+            // Dispatch sync event so the GlobalChatbot knows to reload
+            window.dispatchEvent(new CustomEvent('aceverse-chat-sync', { detail: { sessionId: currentSessionId } }));
+
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
-            // Vi använder Gemini 3 Pro för att möjliggöra djup 'Quality Pass' genom thinkingConfig
             const response = await ai.models.generateContent({
                 model: 'gemini-3-pro-preview',
                 config: { 
-                    systemInstruction: advisorMode === 'uf' ? UF_KNOWLEDGE_BASE : "Du är en professionell och ren AI-assistent.",
-                    temperature: 0.2, // Lägre temperatur för striktare formatering
-                    thinkingConfig: { thinkingBudget: 16000 } // Använd resonemang för att kontrollera kvaliteten
+                    systemInstruction: UF_KNOWLEDGE_BASE,
+                    temperature: 0.2,
+                    thinkingConfig: { thinkingBudget: 16000 }
                 },
                 contents: messages.concat(tempUserMsg).slice(-11).map(m => ({
                     role: m.role === 'user' ? 'user' : 'model',
@@ -127,18 +142,19 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                 }))
             });
 
-            // Simulera ett ögonblick av Quality Pass för UX-känsla
             setQualityPassActive(true);
             await new Promise(r => setTimeout(r, 600));
 
             let finalResponse = response.text || "Jag kunde inte generera ett svar för tillfället.";
-            
-            // Extra rensning på klientsidan för att garantera hashtag-frihet
             finalResponse = finalResponse.replace(/#\w+/g, (match) => match.substring(1));
 
             const aiMsgId = 'ai-' + Date.now();
             setMessages(prev => [...prev, { id: aiMsgId, role: 'ai', text: finalResponse, timestamp: Date.now(), sessionId: currentSessionId }]);
             await db.addMessage(user.id, { role: 'ai', text: finalResponse, sessionId: currentSessionId });
+            
+            // Dispatch sync event again for AI response
+            window.dispatchEvent(new CustomEvent('aceverse-chat-sync', { detail: { sessionId: currentSessionId } }));
+            
             loadSessions();
         } catch (error) { 
             console.error(error);
@@ -219,18 +235,26 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                             {isSidebarOpen ? <PanelLeftClose size={20} strokeWidth={1.5} /> : <PanelLeftOpen size={20} strokeWidth={1.5} />}
                         </button>
                         <div className="h-6 w-px bg-gray-100 dark:bg-gray-800" />
-                        <div className="flex bg-gray-50 dark:bg-gray-800 p-1 rounded-xl">
-                            <button onClick={() => setAdvisorMode('uf')} className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${advisorMode === 'uf' ? 'bg-white dark:bg-gray-700 text-black dark:text-white shadow-md' : 'text-gray-400 hover:text-gray-600'}`}>
-                                <ShieldCheck size={14} className={advisorMode === 'uf' ? 'text-green-500' : ''} /> UF-läraren
-                            </button>
-                            <button onClick={() => setAdvisorMode('standard')} className={`px-4 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all flex items-center gap-2 ${advisorMode === 'standard' ? 'bg-white dark:bg-gray-700 text-black dark:text-white shadow-md' : 'text-gray-400 hover:text-gray-600'}`}>
-                                <Bot size={14} /> Standard AI
-                            </button>
+                        <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 dark:bg-gray-800 rounded-xl text-[10px] font-bold uppercase tracking-widest text-black dark:text-white border border-gray-100 dark:border-gray-700">
+                             <ShieldCheck size={14} className="text-green-500" /> UF-läraren
                         </div>
                     </div>
-                    <button onClick={() => setIsVoiceModeOpen(true)} className="p-2.5 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full hover:bg-black dark:hover:bg-white hover:text-white dark:hover:text-black transition-all active:scale-95">
-                        <Phone size={20} />
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <div className="hidden md:flex items-center bg-gray-50 dark:bg-gray-800 p-1 rounded-xl border border-gray-100 dark:border-gray-700">
+                            <select 
+                                value={selectedVoice} 
+                                onChange={(e) => setSelectedVoice(e.target.value)}
+                                className="bg-transparent border-none text-[10px] font-bold uppercase tracking-widest outline-none px-2 py-1 text-gray-600 dark:text-gray-400 cursor-pointer"
+                            >
+                                <option value="Kore">Röst: Kore (Pro)</option>
+                                <option value="Puck">Röst: Puck (Vänlig)</option>
+                                <option value="Fenrir">Röst: Fenrir (Djupt)</option>
+                            </select>
+                        </div>
+                        <button onClick={() => setIsVoiceModeOpen(true)} className="p-2.5 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 rounded-full hover:bg-black dark:hover:bg-white hover:text-white dark:hover:text-black transition-all active:scale-95">
+                            <Phone size={20} />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-12 bg-gray-50/30 dark:bg-transparent">
@@ -318,7 +342,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                 </div>
             </div>
 
-            <VoiceMode isOpen={isVoiceModeOpen} onClose={() => setIsVoiceModeOpen(false)} systemInstruction={advisorMode === 'uf' ? UF_KNOWLEDGE_BASE : "Du är en röstassistent."} voiceName="Kore" />
+            <VoiceMode isOpen={isVoiceModeOpen} onClose={() => setIsVoiceModeOpen(false)} systemInstruction={UF_KNOWLEDGE_BASE} voiceName={selectedVoice} />
         </div>
     );
 };
