@@ -232,7 +232,23 @@ export interface UserData {
 }
 
 // Helper types
-export interface Lead { id: string; name: string; company: string; email: string; phone?: string; linkedin?: string; website?: string; notes?: string; status: 'New' | 'Contacted' | 'Meeting' | 'Closed'; value: number; lastContact?: string; dateAdded: string; }
+export interface Lead { 
+  id: string; 
+  name: string; 
+  company: string; 
+  email: string; 
+  phone?: string; 
+  linkedin?: string; 
+  website?: string; 
+  notes?: string; 
+  status: 'New' | 'Contacted' | 'Meeting' | 'Closed'; 
+  value: number; 
+  lastContact?: string; 
+  dateAdded: string;
+  priority?: 'High' | 'Medium' | 'Low';
+  leadScore?: number;
+  history?: { type: string; date: string; content: string }[];
+}
 export interface ChatSession { id: string; name: string; group?: string; lastMessageAt: number; preview?: string; }
 export interface Coach { id: string; name: string; role: string; avatarSeed: string; personality: string; instructions: string; skills: string[]; isCustom?: boolean; }
 export interface Notification { id: string; title: string; message: string; type: 'info' | 'success' | 'warning' | 'error'; date: string; read: boolean; }

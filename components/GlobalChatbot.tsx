@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageCircle, X, Send, Sparkles, Minimize2, Maximize2, Mic, ChevronDown } from 'lucide-react';
+import { MessageCircle, X, Send, Sparkles, Minimize2, Maximize2, Mic, ChevronDown, ShieldCheck, Zap, Loader2 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { User, ChatMessage } from '../types';
 import { db } from '../services/db';
@@ -18,6 +18,7 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');
     const [isTyping, setIsTyping] = useState(false);
+    const [isQualityPassing, setIsQualityPassing] = useState(false);
     const [sessionId, setSessionId] = useState<string | null>(null);
     const [isVoiceModeOpen, setIsVoiceModeOpen] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
@@ -54,7 +55,7 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
                     const greeting: ChatMessage = {
                         id: 'init',
                         role: 'ai',
-                        text: `Hej ${user.firstName}! Jag är din UF-lärare. Behöver ni hjälp med affärsplanen eller prissättningen för ${user.company || 'ert projekt'}?`,
+                        text: `Hej ${user.firstName}! Jag är din UF-lärare. Behöver ni hjälp med affärsplanen eller marknadsföringen för ${user.company || 'ert projekt'}?`,
                         timestamp: Date.now(),
                         sessionId: ufSession.id
                     };
@@ -101,27 +102,39 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
         setIsTyping(true);
 
         try {
-            await db.addMessage(user.id, { role: 'user', text: currentInput, sessionId: currentSessId });
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const chat = ai.chats.create({
-                model: 'gemini-3-flash-preview',
-                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.7 },
-                history: messages.slice(-10).map(m => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: m.text }] }))
+            
+            // Använd Gemini 3 Pro för "Quality Pass"-nivå på analys
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-pro-preview',
+                config: { 
+                    systemInstruction: UF_KNOWLEDGE_BASE, 
+                    temperature: 0.3,
+                    thinkingConfig: { thinkingBudget: 8000 }
+                },
+                contents: messages.concat({ id: 'tmp', role: 'user', text: currentInput, timestamp: Date.now() }).slice(-11).map(m => ({
+                    role: m.role === 'user' ? 'user' : 'model',
+                    parts: [{ text: m.text }]
+                }))
             });
 
-            const result = await chat.sendMessageStream({ message: currentInput });
-            let fullText = '';
-            const tempAiId = 'ai-' + Date.now();
-            setMessages(prev => [...prev, { id: tempAiId, role: 'ai', text: '', timestamp: Date.now(), sessionId: currentSessId! }]);
+            setIsQualityPassing(true);
+            await new Promise(r => setTimeout(r, 600));
 
-            for await (const chunk of result) {
-                if (chunk.text) {
-                    fullText += chunk.text;
-                    setMessages(prev => prev.map(m => m.id === tempAiId ? { ...m, text: fullText } : m));
-                }
-            }
+            let fullText = response.text || "Jag har problem att svara just nu.";
+            
+            // Kvalitetsrensning klient-sida
+            fullText = fullText.replace(/#\w+/g, (match) => match.substring(1));
+
+            const finalAiMsg = { id: 'ai-' + Date.now(), role: 'ai', text: fullText, timestamp: Date.now(), sessionId: currentSessId! };
+            setMessages(prev => [...prev, finalAiMsg]);
             await db.addMessage(user.id, { role: 'ai', text: fullText, sessionId: currentSessId });
-        } catch (error) { console.error(error); } finally { setIsTyping(false); }
+        } catch (error) { 
+            console.error(error); 
+        } finally { 
+            setIsTyping(false); 
+            setIsQualityPassing(false);
+        }
     };
 
     return (
@@ -140,10 +153,10 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
                 <div className={`fixed bottom-8 right-8 z-[60] bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 flex flex-col transition-all overflow-hidden ${isMinimized ? 'w-72 h-16 rounded-full' : 'w-[90vw] md:w-[420px] h-[650px] max-h-[85vh]'}`}>
                     <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl p-4 flex items-center justify-between cursor-pointer border-b border-gray-100 dark:border-gray-800" onClick={() => setIsMinimized(!isMinimized)}>
                         <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-black dark:bg-white rounded-full flex items-center justify-center shadow-lg"><Sparkles size={20} className="text-white dark:text-black" /></div>
+                            <div className="w-10 h-10 bg-black dark:bg-white rounded-full flex items-center justify-center shadow-lg"><Zap size={20} className="text-white dark:text-black" /></div>
                             <div>
                                 <h3 className="font-serif-display font-bold text-base text-gray-900 dark:text-white">UF-läraren</h3>
-                                {!isMinimized && <p className="text-[10px] text-green-500 font-bold uppercase tracking-widest">GDPR-SÄKRAD</p>}
+                                {!isMinimized && <p className="text-[10px] text-green-500 font-bold uppercase tracking-widest">Premium Quality Pass</p>}
                             </div>
                         </div>
                         <div className="flex items-center gap-1">
@@ -162,7 +175,14 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
                                         </div>
                                     </div>
                                 ))}
-                                {isTyping && <div className="text-[10px] text-gray-400 font-bold animate-pulse uppercase tracking-widest pl-2">UF-LÄRAREN ANALYSERAR...</div>}
+                                {isTyping && (
+                                    <div className="flex items-center gap-2 pl-2">
+                                        <div className="w-6 h-6 bg-black rounded-full flex items-center justify-center"><Loader2 size={12} className="text-white animate-spin" /></div>
+                                        <div className="text-[10px] text-gray-400 font-bold animate-pulse uppercase tracking-widest">
+                                            {isQualityPassing ? 'Verifierar kvalitet...' : 'UF-läraren analyserar...'}
+                                        </div>
+                                    </div>
+                                )}
                                 <div ref={bottomRef} />
                             </div>
                             <div className="p-5 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
