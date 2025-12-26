@@ -33,22 +33,22 @@ export const UF_KNOWLEDGE_BASE = `
 
 Du är "UF-läraren", en AI-assistent av absolut högsta klass för Ung Företagsamhet.
 
-### 🛡️ QUALITY PASS PROTOKOLL (MÅSTE FÖLJAS)
-Innan du levererar ett svar, utför en intern kvalitetsgranskning baserat på följande kriterier:
-1. **KLARHET & KONCISENESS**: Ta bort allt "AI-fluff". Svara direkt och pedagogiskt.
-2. **INGA HASHTAGS**: Använd aldrig symbolen '#' för sociala taggar.
-3. **MINIMALA EMOJIS**: Endast enstaka emoji vid hälsning/avslut om det förstärker den professionella tonen. Inga emojis i brödtext.
-4. **TYPOGRAFISK STRUKTUR**: Använd Markdown-rubriker (## Rubrik) för att separera logiska delar. Använd välstrukturerade stycken för läsbarhet.
-5. **TONALITET**: Agnostisk, inspirerande men strikt affärsmässig. Du är en senior affärsrådgivare, inte en chatt-kompis.
+### 🛡️ QUALITY PASS PROTOKOLL (MÅSTE FÖLJAS FÖR VARJE SVAR)
+Innan du levererar ett svar, utför en intern kvalitetsgranskning:
+1. **KLARHET & KONCISENESS**: Ta bort allt onödigt "AI-fluff" och artighetsfraser. Gå direkt på kärnan.
+2. **INGA HASHTAGS**: Använd aldrig symbolen '#' för sociala taggar eller markeringar.
+3. **MINIMALA EMOJIS**: Använd endast enstaka emoji vid hälsning eller avslut om det förstärker den professionella tonen. Inga emojis i brödtext.
+4. **TYPOGRAFISK STRUKTUR**: Använd Markdown-rubriker (## Rubrik) för att separera logiska delar. Skapa luft mellan stycken.
+5. **TONALITET**: Du är en senior affärsrådgivare. Var inspirerande men håll en strikt affärsmässig och pedagogisk ton.
 
 ### ⚖️ JURIDISK GRUND & COMPLIANCE
 - Behandling baseras på Art. 6.1(e) GDPR - Utbildningsändamål.
-- SAMLA ALDRIG och FRÅGA ALDRIG OM: Hälsa (fråga aldrig "hur mår du?"), etnicitet, politiska åsikter (Art. 9).
+- SAMLA ALDRIG och FRÅGA ALDRIG OM: Hälsa, etnicitet eller politiska åsikter (Art. 9).
 - OM ANVÄNDAREN DELAR KÄNSLIG DATA: Svara exakt: "Jag kan tyvärr inte ta emot den typen av information" och styr tillbaka till UF-rådgivning.
 
-### 📖 UF-SPETS
+### 📖 UF-SPETS (KOM IHÅG DESSA REGLER)
 - Riskkapital: Max 15 000 SEK totalt. Max 300 SEK per person. Inga lån tillåtna.
-- Moms: Oftast ej momspliktiga under 80 000 SEK/år.
+- Moms: UF-företag är oftast ej momspliktiga under 80 000 SEK/år.
 `;
 
 interface AdvisorProps {
@@ -103,20 +103,23 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
         let userText = input;
         setInput('');
         setIsLoading(true);
+        setQualityPassActive(false);
 
         const tempUserMsg: ChatMessage = { id: Date.now().toString(), role: 'user', text: userText, timestamp: Date.now(), sessionId: currentSessionId };
         setMessages(prev => [...prev, tempUserMsg]);
 
         try {
+            await db.addMessage(user.id, { role: 'user', text: userText, sessionId: currentSessionId });
+            
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
-            // Steg 1: Generera svar med Gemini 3 Pro + Thinking för inbyggd kvalitetskontroll
+            // Vi använder Gemini 3 Pro för att möjliggöra djup 'Quality Pass' genom thinkingConfig
             const response = await ai.models.generateContent({
                 model: 'gemini-3-pro-preview',
                 config: { 
-                    systemInstruction: advisorMode === 'uf' ? UF_KNOWLEDGE_BASE : "Du är en professionell AI-assistent.",
-                    temperature: 0.3, // Lägre temperatur för mer stabil och professionell output
-                    thinkingConfig: { thinkingBudget: 16000 } // Aktivera resonemang för att följa strikta formateringsregler
+                    systemInstruction: advisorMode === 'uf' ? UF_KNOWLEDGE_BASE : "Du är en professionell och ren AI-assistent.",
+                    temperature: 0.2, // Lägre temperatur för striktare formatering
+                    thinkingConfig: { thinkingBudget: 16000 } // Använd resonemang för att kontrollera kvaliteten
                 },
                 contents: messages.concat(tempUserMsg).slice(-11).map(m => ({
                     role: m.role === 'user' ? 'user' : 'model',
@@ -124,23 +127,24 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                 }))
             });
 
-            // Kvalitetsgranskning UI-trigger
+            // Simulera ett ögonblick av Quality Pass för UX-känsla
             setQualityPassActive(true);
-            await new Promise(resolve => setTimeout(resolve, 800)); // Visuell bekräftelse av "Quality Pass"
+            await new Promise(r => setTimeout(r, 600));
+
+            let finalResponse = response.text || "Jag kunde inte generera ett svar för tillfället.";
             
-            let finalResponse = response.text || "Ursäkta, jag kunde inte generera ett svar just nu.";
-            
-            // Säkerställ att inga hashtags smitit förbi (extra klient-sida rensning)
+            // Extra rensning på klientsidan för att garantera hashtag-frihet
             finalResponse = finalResponse.replace(/#\w+/g, (match) => match.substring(1));
 
-            setMessages(prev => [...prev, { id: 'ai-' + Date.now(), role: 'ai', text: finalResponse, timestamp: Date.now(), sessionId: currentSessionId }]);
+            const aiMsgId = 'ai-' + Date.now();
+            setMessages(prev => [...prev, { id: aiMsgId, role: 'ai', text: finalResponse, timestamp: Date.now(), sessionId: currentSessionId }]);
             await db.addMessage(user.id, { role: 'ai', text: finalResponse, sessionId: currentSessionId });
             loadSessions();
         } catch (error) { 
             console.error(error);
-            setMessages(prev => [...prev, { id: 'err-' + Date.now(), role: 'ai', text: "Ett fel uppstod vid analysen. Kontrollera din anslutning och försök igen.", timestamp: Date.now(), sessionId: currentSessionId }]);
+            setMessages(prev => [...prev, { id: 'err-' + Date.now(), role: 'ai', text: "Ett fel uppstod. Kontrollera din internetanslutning.", timestamp: Date.now(), sessionId: currentSessionId }]);
         } finally { 
-            setIsLoading(false); 
+            setIsLoading(false);
             setQualityPassActive(false);
         }
     };
@@ -150,19 +154,19 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
         const lines = text.split('\n');
         return lines.map((line, idx) => {
             const trimmedLine = line.trim();
-            if (!trimmedLine) return <div key={idx} className="h-2" />;
+            if (!trimmedLine) return <div key={idx} className="h-4" />;
 
             if (trimmedLine.startsWith('## ')) {
-                return <h2 key={idx} className="font-serif-display text-2xl mb-4 mt-6 text-gray-900 dark:text-white border-b border-gray-100 dark:border-gray-800 pb-2">{trimmedLine.replace('## ', '')}</h2>;
+                return <h2 key={idx} className="font-serif-display text-2xl mb-4 mt-8 text-gray-900 dark:text-white border-b border-gray-100 dark:border-gray-800 pb-2">{trimmedLine.replace('## ', '')}</h2>;
             }
             if (trimmedLine.startsWith('### ')) {
-                return <h3 key={idx} className="font-serif-display text-xl mb-3 mt-5 text-gray-900 dark:text-white">{trimmedLine.replace('### ', '')}</h3>;
+                return <h3 key={idx} className="font-serif-display text-xl mb-3 mt-6 text-gray-900 dark:text-white">{trimmedLine.replace('### ', '')}</h3>;
             }
             
             if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
                 return (
-                    <div key={idx} className="flex gap-3 mb-2 ml-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white mt-2 shrink-0" />
+                    <div key={idx} className="flex gap-3 mb-3 ml-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white mt-2 shrink-0 opacity-50" />
                         <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300 font-sans">
                             {trimmedLine.substring(2).split(/(\*\*.*?\*\*)/g).map((part, i) => 
                                 part.startsWith('**') && part.endsWith('**') 
@@ -175,7 +179,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
             }
 
             return (
-                <p key={idx} className="mb-4 text-sm leading-relaxed text-gray-700 dark:text-gray-300 font-sans">
+                <p key={idx} className="mb-5 text-sm leading-relaxed text-gray-700 dark:text-gray-300 font-sans text-justify">
                     {trimmedLine.split(/(\*\*.*?\*\*)/g).map((part, i) => 
                         part.startsWith('**') && part.endsWith('**') 
                             ? <strong key={i} className="font-bold text-gray-900 dark:text-white">{part.slice(2, -2)}</strong> 
@@ -235,7 +239,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                             <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-2xl flex items-center justify-center mb-6 shadow-xl border border-gray-100 dark:border-gray-800">
                                 <Sparkles size={32} className="text-gray-400" />
                             </div>
-                            <h3 className="font-serif-display text-2xl mb-2 text-gray-900 dark:text-white">Hur kan jag hjälpa dig idag?</h3>
+                            <h3 className="font-serif-display text-2xl mb-2 text-gray-900 dark:text-white">Hur kan jag hjälpa dig?</h3>
                             <p className="text-sm text-gray-500">Ställ en fråga om ditt UF-företag, affärsplanen eller marknadsföring.</p>
                         </div>
                     )}
@@ -269,7 +273,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                                 <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 rounded-[2rem] rounded-tl-none shadow-sm w-full max-w-md">
                                     <div className="flex items-center gap-3 mb-4">
                                         <Loader2 className="animate-spin text-gray-400" size={16} />
-                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{qualityPassActive ? 'Kvalitetsgranskning aktiv...' : 'UF-läraren analyserar...'}</span>
+                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{qualityPassActive ? 'Genomför Quality Pass...' : 'UF-läraren analyserar...'}</span>
                                     </div>
                                     <div className="space-y-3">
                                         <div className="h-2 bg-gray-100 dark:bg-gray-800 rounded-full w-full animate-pulse" />
@@ -290,7 +294,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                                 value={input} 
                                 onChange={(e) => setInput(e.target.value)} 
                                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} 
-                                placeholder="Fråga om ditt UF-företag..." 
+                                placeholder="Fråga något om ditt UF-företag..." 
                                 className="w-full bg-transparent border-none focus:ring-0 resize-none max-h-40 min-h-[44px] py-3 px-4 text-sm text-gray-900 dark:text-white placeholder:text-gray-400" 
                                 rows={1} 
                             />
