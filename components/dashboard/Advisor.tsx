@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     ArrowUp, Plus, MessageSquare, PanelLeftClose, PanelLeftOpen, 
@@ -27,15 +28,15 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [sessionToDelete, setSessionToDelete] = useState<ChatSession | null>(null);
-    const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-    const [renameValue, setRenameValue] = useState('');
     const scrollRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { loadSessions(); }, [user.id]);
     
     useEffect(() => { 
-        if (currentSessionId) loadMessages(currentSessionId);
-        else setMessages([]);
+        if (currentSessionId) {
+            setMessages([]); // Rensa lokalt state direkt vid byte för att undvika "ghosting"
+            loadMessages(currentSessionId);
+        }
     }, [currentSessionId]);
 
     useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
@@ -49,7 +50,10 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
 
     const loadMessages = async (sessionId: string) => {
         const data = await db.getUserData(user.id);
-        const chatMsgs = data.chatHistory.filter(m => m.sessionId === sessionId).sort((a, b) => a.timestamp - b.timestamp);
+        // HÅRD FILTRERING: Se till att vi bara visar meddelanden som tillhör just denna sessionId
+        const chatMsgs = data.chatHistory
+            .filter(m => m.sessionId === sessionId)
+            .sort((a, b) => a.timestamp - b.timestamp);
         setMessages(chatMsgs);
     };
 
@@ -118,6 +122,9 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                             </div>
                         </div>
                     ))}
+                    {sessions.length === 0 && (
+                        <div className="text-center py-20 text-gray-300 text-xs font-black uppercase tracking-widest opacity-40 italic">Inga sparade chattar</div>
+                    )}
                 </div>
             </div>
             <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 relative">
@@ -126,12 +133,29 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                     <div className="flex items-center gap-2 px-4 py-1.5 bg-gray-50 dark:bg-gray-800 rounded-xl text-[10px] font-bold uppercase tracking-widest text-black dark:text-white border border-gray-100 shadow-sm"><ShieldCheck size={14} className="text-green-500" /> UF-läraren</div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 custom-scrollbar">
+                    {messages.length === 0 && !isLoading && (
+                        <div className="h-full flex flex-col items-center justify-center text-center p-12 opacity-30 grayscale">
+                            <MessageSquare size={48} className="mb-4 text-gray-300" />
+                            <p className="text-sm font-black uppercase tracking-[0.3em]">Börja skriva för att spara sessionen</p>
+                        </div>
+                    )}
                     {messages.map((msg) => (
                         <div key={msg.id} className={`flex gap-4 max-w-4xl mx-auto ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-slideUp`}>
                             <div className={`w-10 h-10 rounded-2xl flex-shrink-0 flex items-center justify-center shadow-sm border ${msg.role === 'ai' ? 'bg-black text-white' : 'bg-white dark:bg-gray-800 border-gray-200 text-gray-400'}`}>{msg.role === 'ai' ? <ShieldCheck size={20} /> : 'Du'}</div>
                             <div className={`p-6 rounded-[1.5rem] shadow-sm text-sm ${msg.role === 'ai' ? 'bg-gray-50 dark:bg-gray-800 text-gray-800 dark:text-gray-200' : 'bg-black dark:bg-white text-white dark:text-black'}`}>{msg.text}</div>
                         </div>
                     ))}
+                    {isLoading && (
+                        <div className="flex gap-4 max-w-4xl mx-auto animate-pulse">
+                            <div className="w-10 h-10 rounded-2xl bg-black flex items-center justify-center shadow-sm"><Zap size={20} className="text-white" /></div>
+                            <div className="p-6 rounded-[1.5rem] bg-gray-50 dark:bg-gray-800 w-full max-w-md">
+                                <div className="flex items-center gap-3">
+                                    <Loader2 size={14} className="animate-spin text-gray-400" />
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">UF-läraren tänker...</span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     <div ref={scrollRef} />
                 </div>
                 <div className="p-8 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900">
