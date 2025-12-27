@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
     Users, Plus, Search, Filter, Mail, Phone, 
@@ -20,7 +21,7 @@ interface CRMProps {
 
 const STATUS_STAGES = ['Nya', 'Kontaktade', 'Möte bokat', 'Klart'] as const;
 
-type SortField = 'name' | 'company' | 'value' | 'leadScore' | 'status' | 'dateAdded';
+type SortField = 'name' | 'company' | 'value' | 'lead_score' | 'status' | 'created_at';
 type SortDirection = 'asc' | 'desc';
 
 const CRM: React.FC<CRMProps> = ({ user }) => {
@@ -37,7 +38,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('Alla');
     const [priorityFilter, setPriorityFilter] = useState<string>('Alla');
-    const [sortField, setSortField] = useState<SortField>('dateAdded');
+    const [sortField, setSortField] = useState<SortField>('created_at');
     const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
     const [newLead, setNewLead] = useState<Partial<Lead>>({ status: 'Nya', value: 0, priority: 'Medium' });
@@ -111,6 +112,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         if (!newLead.name || !newLead.company) return;
         setIsSavingLead(true);
         try {
+            // Fix: Changed leadScore to lead_score
             const added = await db.addLead(user.id, {
                 name: newLead.name!,
                 company: newLead.company!,
@@ -122,7 +124,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 status: (newLead.status as any) || 'Nya',
                 value: Number(newLead.value) || 0,
                 priority: newLead.priority || 'Medium',
-                leadScore: Math.floor(Math.random() * 40) + 30 
+                lead_score: Math.floor(Math.random() * 40) + 30 
             });
             setLeads(prev => [added, ...prev]);
             setIsAddModalOpen(false);
@@ -203,10 +205,11 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             let valA: any = a[sortField as keyof Lead];
             let valB: any = b[sortField as keyof Lead];
             
-            if (sortField === 'value' || sortField === 'leadScore') {
+            // Fix: Changed leadScore to lead_score
+            if (sortField === 'value' || sortField === 'lead_score') {
                 valA = Number(valA) || 0;
                 valB = Number(valB) || 0;
-            } else if (sortField === 'dateAdded') {
+            } else if (sortField === 'created_at') {
                 valA = new Date(valA || 0).getTime();
                 valB = new Date(valB || 0).getTime();
             } else {
@@ -410,7 +413,8 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                             <MetricCard title="Värde i flödet" value={`${pipelineTotal.toLocaleString()} kr`} icon={<DollarSign size={20} />} trend="Alla affärer" />
                             <MetricCard title="Öppna förfrågningar" value={`${leads.length} st`} icon={<Target size={20} />} trend={`${leads.filter(l => l.status === 'Nya').length} helt nya`} />
-                            <MetricCard title="AI Potential" value={leads.length > 0 ? `${Math.round(leads.reduce((a,b) => a + (b.leadScore || 0), 0) / leads.length)}%` : "0%"} icon={<Zap size={20} />} trend="Genomsnitt" />
+                            {/* Fix: Changed leadScore to lead_score */}
+                            <MetricCard title="AI Potential" value={leads.length > 0 ? `${Math.round(leads.reduce((a,b) => a + (b.lead_score || 0), 0) / leads.length)}%` : "0%"} icon={<Zap size={20} />} trend="Genomsnitt" />
                         </div>
 
                         <div className="grid md:grid-cols-2 gap-10">
@@ -529,7 +533,8 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                                                 </div>
                                                                 <div className="flex flex-col items-end gap-2.5">
                                                                     <div className="flex items-center gap-1.5 text-[9px] font-black text-black dark:text-white bg-gray-100 dark:bg-gray-800 px-3 py-1.5 rounded-full uppercase tracking-widest italic shadow-inner">
-                                                                        <Zap size={10} fill="currentColor"/> {lead.leadScore}%
+                                                                        {/* Fix: Changed leadScore to lead_score */}
+                                                                        <Zap size={10} fill="currentColor"/> {lead.lead_score}%
                                                                     </div>
                                                                     {lead.priority === 'High' && (
                                                                         <span className="text-[8px] font-black px-2.5 py-1 rounded-full uppercase bg-black text-white dark:bg-white dark:text-black tracking-[0.1em] shadow-sm">Prio</span>
@@ -602,7 +607,8 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                                     <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('name')}>Namn</th>
                                                     <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('company')}>Företag</th>
                                                     <th className="px-12 py-9">Status</th>
-                                                    <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('leadScore')}>AI Match</th>
+                                                    {/* Fix: Changed leadScore to lead_score */}
+                                                    <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('lead_score')}>AI Match</th>
                                                     <th className="px-12 py-9 cursor-pointer group hover:text-black dark:hover:text-white" onClick={() => toggleSort('value')}>Värde</th>
                                                     <th className="px-12 py-9 text-right"></th>
                                                 </tr>
@@ -627,9 +633,11 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                                         <td className="px-12 py-9">
                                                             <div className="flex items-center gap-5">
                                                                 <div className="flex-1 max-w-[150px] h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden shadow-inner">
-                                                                    <div className="h-full bg-black dark:bg-white rounded-full transition-all duration-1000 ease-out" style={{ width: `${l.leadScore}%` }}></div>
+                                                                    {/* Fix: Changed leadScore to lead_score */}
+                                                                    <div className="h-full bg-black dark:bg-white rounded-full transition-all duration-1000 ease-out" style={{ width: `${l.lead_score}%` }}></div>
                                                                 </div>
-                                                                <span className="text-[12px] font-black text-gray-400 font-mono tracking-tighter">{l.leadScore}%</span>
+                                                                {/* Fix: Changed leadScore to lead_score */}
+                                                                <span className="text-[12px] font-black text-gray-400 font-mono tracking-tighter">{l.lead_score}%</span>
                                                             </div>
                                                         </td>
                                                         <td className="px-12 py-9 font-black text-gray-950 dark:text-white text-lg italic tracking-tighter">{l.value.toLocaleString()} kr</td>
@@ -868,7 +876,8 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                 <p className="text-gray-400 font-black text-[14px] uppercase tracking-[0.6em] mb-12 italic">{selectedLead.company}</p>
                                 <div className="flex flex-wrap justify-center gap-6">
                                     <div className="flex items-center gap-4 text-[11px] font-black text-black dark:text-white bg-gray-50 dark:bg-gray-800 px-8 py-4 rounded-full border border-black/5 shadow-inner uppercase tracking-[0.3em] italic transition-colors hover:bg-gray-100 dark:hover:bg-gray-700">
-                                        <Zap size={16} fill="currentColor"/> Matchar: {selectedLead.leadScore}%
+                                        {/* Fix: Changed leadScore to lead_score */}
+                                        <Zap size={16} fill="currentColor"/> Matchar: {selectedLead.lead_score}%
                                     </div>
                                     <div className={`text-[11px] font-black px-8 py-4 rounded-full border-2 uppercase tracking-[0.3em] shadow-sm italic transition-all ${selectedLead.priority === 'High' ? 'bg-black text-white border-black dark:bg-white dark:text-black dark:border-white scale-105' : 'bg-white text-gray-400 border-gray-100 dark:bg-gray-900 dark:border-gray-800'}`}>
                                         {selectedLead.priority === 'High' ? 'Viktig affär' : 'Normal'}

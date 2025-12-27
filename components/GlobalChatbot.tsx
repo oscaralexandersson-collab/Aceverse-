@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageCircle, X, Send, Sparkles, Minimize2, Maximize2, Mic, ChevronDown, ShieldCheck, Zap, Loader2, ArrowUp } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
@@ -58,7 +59,8 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
             if (ufSession) {
                 setSessionId(ufSession.id);
                 const data = await db.getUserData(user.id);
-                const sessionMessages = data.chatHistory.filter(m => m.sessionId === ufSession.id).sort((a, b) => a.timestamp - b.timestamp);
+                // Fix: Changed sessionId to session_id
+                const sessionMessages = data.chatHistory.filter(m => m.session_id === ufSession.id).sort((a, b) => a.timestamp - b.timestamp);
                 
                 if (sessionMessages.length > 0) setMessages(sessionMessages);
                 else {
@@ -67,7 +69,9 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
                         role: 'ai',
                         text: `Hej ${user.firstName}! Jag är din UF-lärare. Behöver ni hjälp med affärsplanen eller marknadsföringen för ${user.company || 'ert projekt'}?`,
                         timestamp: Date.now(),
-                        sessionId: ufSession.id
+                        session_id: ufSession.id,
+                        user_id: user.id,
+                        created_at: new Date().toISOString()
                     };
                     setMessages([greeting]);
                 }
@@ -108,11 +112,12 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
 
         let currentInput = input;
         setInput('');
-        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: currentInput, timestamp: Date.now(), sessionId: currentSessId! }]);
+        // Fix: Changed sessionId to session_id
+        setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', text: currentInput, timestamp: Date.now(), session_id: currentSessId!, user_id: user.id, created_at: new Date().toISOString() }]);
         setIsTyping(true);
 
         try {
-            await db.addMessage(user.id, { role: 'user', text: currentInput, sessionId: currentSessId });
+            await db.addMessage(user.id, { role: 'user', text: currentInput, session_id: currentSessId });
             
             // Dispatch sync event
             window.dispatchEvent(new CustomEvent('aceverse-chat-sync', { detail: { sessionId: currentSessId } }));
@@ -126,7 +131,7 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
                     temperature: 0.3,
                     thinkingConfig: { thinkingBudget: 8000 }
                 },
-                contents: messages.concat({ id: 'tmp', role: 'user', text: currentInput, timestamp: Date.now() }).slice(-11).map(m => ({
+                contents: messages.concat({ id: 'tmp', role: 'user', text: currentInput, timestamp: Date.now(), session_id: currentSessId!, user_id: user.id, created_at: new Date().toISOString() }).slice(-11).map(m => ({
                     role: m.role === 'user' ? 'user' : 'model',
                     parts: [{ text: m.text }]
                 }))
@@ -138,9 +143,10 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
             let fullText = response.text || "Jag har problem att svara just nu.";
             fullText = fullText.replace(/#\w+/g, (match) => match.substring(1));
 
-            const finalAiMsg = { id: 'ai-' + Date.now(), role: 'ai', text: fullText, timestamp: Date.now(), sessionId: currentSessId! };
+            // Fix: Changed sessionId to session_id
+            const finalAiMsg: ChatMessage = { id: 'ai-' + Date.now(), role: 'ai', text: fullText, timestamp: Date.now(), session_id: currentSessId!, user_id: user.id, created_at: new Date().toISOString() };
             setMessages(prev => [...prev, finalAiMsg]);
-            await db.addMessage(user.id, { role: 'ai', text: fullText, sessionId: currentSessId });
+            await db.addMessage(user.id, { role: 'ai', text: fullText, session_id: currentSessId });
             
             // Dispatch sync event for AI response
             window.dispatchEvent(new CustomEvent('aceverse-chat-sync', { detail: { sessionId: currentSessId } }));
@@ -166,7 +172,7 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
                     </button>
                 </div>
             ) : (
-                <div className={`fixed bottom-8 right-8 z-[60] bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-200 dark:border-gray-800 flex flex-col transition-all overflow-hidden ${isMinimized ? 'w-72 h-16 rounded-full' : 'w-[90vw] md:w-[420px] h-[650px] max-h-[85vh]'}`}>
+                <div className={`fixed bottom-8 right-8 z-[60] bg-white dark:bg-gray-900 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-800 flex flex-col transition-all overflow-hidden ${isMinimized ? 'w-72 h-16 rounded-full' : 'w-[90vw] md:w-[420px] h-[650px] max-h-[85vh]'}`}>
                     <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl p-4 flex items-center justify-between cursor-pointer border-b border-gray-100 dark:border-gray-800" onClick={() => setIsMinimized(!isMinimized)}>
                         <div className="flex items-center gap-3">
                             <div className="w-10 h-10 bg-black dark:bg-white rounded-full flex items-center justify-center shadow-lg"><Zap size={20} className="text-white dark:text-black" /></div>

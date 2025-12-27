@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowRight, Sparkles, Send, Building2 } from 'lucide-react';
+import { ArrowRight, Sparkles, Send, Building2, AlertCircle } from 'lucide-react';
 import { User, ChatMessage } from '../types';
 import { db } from '../services/db';
 
@@ -16,6 +16,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
   const [inputValue, setInputValue] = useState('');
   const [currentStep, setCurrentStep] = useState<Step>('intro');
   const [isTyping, setIsTyping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [data, setData] = useState({
@@ -41,33 +42,60 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
   }, []);
 
   const addMessage = (role: 'user' | 'ai', text: string) => {
-    const newMsg: ChatMessage = { id: Date.now().toString(), role, text, timestamp: Date.now() };
+    const newMsg: ChatMessage = { 
+      id: Date.now().toString(), 
+      role, 
+      text, 
+      timestamp: Date.now(),
+      user_id: user.id,
+      session_id: 'onboarding',
+      created_at: new Date().toISOString()
+    };
     setMessages(prev => [...prev, newMsg]);
   };
 
   const handleSend = (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || isTyping) return;
+    setError(null);
     addMessage('user', text);
     setInputValue('');
     setIsTyping(true);
 
     setTimeout(async () => {
-      if (currentStep === 'company') {
-        setData(prev => ({ ...prev, company: text }));
-        addMessage('ai', `Ett starkt namn! Vilken bransch arbetar ${text} inom?`);
+      try {
+        if (currentStep === 'company') {
+          setData(prev => ({ ...prev, company: text }));
+          addMessage('ai', `Ett starkt namn! Vilken bransch arbetar ${text} inom?`);
+          setIsTyping(false);
+          setCurrentStep('industry');
+        } else if (currentStep === 'industry') {
+          setData(prev => ({ ...prev, industry: text }));
+          addMessage('ai', 'Uppfattat. Var i UF-resan befinner ni er just nu?');
+          setIsTyping(false);
+          setCurrentStep('stage');
+        } else if (currentStep === 'stage') {
+          // RÄTTAT: Från "skadar" till "skapar"
+          addMessage('ai', 'Tack! Jag skapar din GDPR-säkra arbetsyta nu...');
+          
+          const updatedUser = await db.completeOnboarding(user.id, { ...data, stage: text });
+          
+          setIsTyping(false);
+          if (updatedUser) {
+            onComplete(updatedUser);
+          } else {
+            // Om getCurrentUser returnerar null av någon anledning, skapa en manuell profil för att inte fastna
+            onComplete({
+                ...user,
+                company: data.company,
+                onboardingCompleted: true
+            });
+          }
+        }
+      } catch (e: any) {
+        console.error("Onboarding error:", e);
         setIsTyping(false);
-        setCurrentStep('industry');
-      } else if (currentStep === 'industry') {
-        setData(prev => ({ ...prev, industry: text }));
-        addMessage('ai', 'Uppfattat. Var i UF-resan befinner ni er just nu?');
-        setIsTyping(false);
-        setCurrentStep('stage');
-      } else if (currentStep === 'stage') {
-        addMessage('ai', 'Tack! Jag skapar din GDPR-säkra arbetsyta nu...');
-        try {
-            const updatedUser = await db.completeOnboarding(user.id, { ...data, stage: text });
-            setTimeout(() => onComplete(updatedUser), 1000);
-        } catch (e) { console.error(e); setIsTyping(false); }
+        setError("Kunde inte spara dina inställningar. Prova igen.");
+        addMessage('ai', "Hoppsan, något gick fel när jag försökte spara. Kan du prova att skicka det sista svaret igen?");
       }
     }, 1000);
   };
@@ -89,15 +117,44 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
                         <div className={`max-w-[80%] rounded-2xl px-6 py-4 text-base leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-black text-white rounded-br-none' : 'bg-white text-gray-800 border border-gray-100 rounded-bl-none'}`}><p>{msg.text}</p></div>
                     </div>
                 ))}
-                {isTyping && <div className="flex gap-4 animate-fadeIn"><div className="w-10 h-10 rounded-full bg-black text-white flex items-center justify-center"><Sparkles size={18} /></div><div className="bg-white border border-gray-100 rounded-2xl p-4 flex gap-2"><span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce"></span><span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce delay-75"></span></div></div>}
+                {isTyping && (
+                  <div className="flex gap-4 animate-fadeIn">
+                    <div className="w-10 h-10 rounded-full bg-black text-white flex items-center justify-center"><Sparkles size={18} /></div>
+                    <div className="bg-white border border-gray-100 rounded-2xl p-4 flex gap-2">
+                      <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce"></span>
+                      <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce delay-75"></span>
+                      <span className="w-2 h-2 bg-gray-300 rounded-full animate-bounce delay-150"></span>
+                    </div>
+                  </div>
+                )}
+                {error && (
+                  <div className="flex items-center gap-2 p-4 bg-red-50 text-red-600 rounded-xl text-sm border border-red-100 animate-shake">
+                    <AlertCircle size={16} />
+                    {error}
+                  </div>
+                )}
                 <div ref={messagesEndRef} />
             </div>
         </div>
         <div className="relative z-10 p-6 md:p-8 bg-white border-t border-gray-50">
             <div className="max-w-2xl mx-auto">
                 <form onSubmit={(e) => { e.preventDefault(); handleSend(inputValue); }} className="relative flex items-center">
-                    <input type="text" value={inputValue} onChange={(e) => setInputValue(e.target.value)} placeholder="Svara här..." className="w-full bg-gray-50 border border-gray-200 rounded-full pl-6 pr-14 py-4 text-base focus:ring-1 focus:ring-black outline-none transition-all shadow-sm" autoFocus disabled={isTyping} />
-                    <button type="submit" disabled={!inputValue.trim() || isTyping} className="absolute right-2 p-2 bg-black text-white rounded-full disabled:opacity-50"><ArrowRight size={20} /></button>
+                    <input 
+                      type="text" 
+                      value={inputValue} 
+                      onChange={(e) => setInputValue(e.target.value)} 
+                      placeholder="Svara här..." 
+                      className="w-full bg-gray-50 border border-gray-200 rounded-full pl-6 pr-14 py-4 text-base focus:ring-1 focus:ring-black outline-none transition-all shadow-sm disabled:opacity-50" 
+                      autoFocus 
+                      disabled={isTyping} 
+                    />
+                    <button 
+                      type="submit" 
+                      disabled={!inputValue.trim() || isTyping} 
+                      className="absolute right-2 p-2 bg-black text-white rounded-full disabled:opacity-50 transition-all hover:scale-105 active:scale-95"
+                    >
+                      <ArrowRight size={20} />
+                    </button>
                 </form>
             </div>
         </div>

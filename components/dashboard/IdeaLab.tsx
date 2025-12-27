@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Database, Plus, X, Trash2, Edit2, Check, Send, Sparkles, Loader2, PanelLeftClose, PanelLeftOpen, Layers, FileText, ListChecks, Shield } from 'lucide-react';
 import { User, Idea, ChatMessage } from '../../types';
@@ -19,7 +20,7 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
     const chatEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { loadIdeas(); }, [user.id, view]);
-    useEffect(() => { if (activeIdea?.chatSessionId) loadChat(activeIdea.chatSessionId); }, [activeIdea?.id]);
+    useEffect(() => { if (activeIdea?.chat_session_id) loadChat(activeIdea.chat_session_id); }, [activeIdea?.id]);
     useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
     const loadIdeas = async () => {
@@ -29,16 +30,28 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
 
     const loadChat = async (sid: string) => {
         const data = await db.getUserData(user.id);
-        const history = data.chatHistory.filter(m => m.sessionId === sid).sort((a,b) => a.timestamp - b.timestamp);
-        setMessages(history.length > 0 ? history : [{ id: 'init', role: 'ai', text: "Hej! Vad har du för spännande idé idag?", timestamp: Date.now(), sessionId: sid }]);
+        // Fix: Changed sessionId to session_id
+        const history = data.chatHistory.filter(m => m.session_id === sid).sort((a,b) => a.timestamp - b.timestamp);
+        setMessages(history.length > 0 ? history : [{ id: 'init', role: 'ai', text: "Hej! Vad har du för spännande idé idag?", timestamp: Date.now(), session_id: sid, user_id: user.id, created_at: new Date().toISOString() }]);
     };
 
     const handleCreate = async () => {
         const session = await db.createChatSession(user.id, "Idé-chatt");
+        // Fix: Changed chatSessionId to chat_session_id
         const newI = await db.addIdea(user.id, {
-            title: 'Ny Idé', chatSessionId: session.id, currentPhase: '1',
-            snapshot: { problem_statement: '', icp: '', solution_hypothesis: '', uvp: '' },
-            nodes: [{ id: 'root', node_type: 'problem', label: 'Din Idé', details: { text: 'Startpunkt', status: 'approved' } }],
+            title: 'Ny Idé', chat_session_id: session.id, current_phase: '1',
+            snapshot: { 
+                problem_statement: '', 
+                icp: '', 
+                solution_hypothesis: '', 
+                uvp: '',
+                one_pager: '',
+                persona_summary: '',
+                pricing_hypothesis: '',
+                mvp_definition: '',
+                open_questions: []
+            },
+            nodes: [{ id: 'root', node_type: 'problem', label: 'Din Idé', parent_id: null, details: { text: 'Startpunkt', status: 'approved' } }],
             tasks: []
         });
         setIdeas(prev => [newI, ...prev]); setActiveIdea(newI); setView('workspace');
@@ -47,8 +60,9 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!chatInput.trim() || isThinking || !activeIdea) return;
-        const text = chatInput; const sid = activeIdea.chatSessionId!; setChatInput('');
-        const uMsg = await db.addMessage(user.id, { role: 'user', text, sessionId: sid });
+        const text = chatInput; const sid = activeIdea.chat_session_id!; setChatInput('');
+        // Fix: Changed sessionId to session_id
+        const uMsg = await db.addMessage(user.id, { role: 'user', text, session_id: sid });
         setMessages(prev => [...prev, uMsg]); setIsThinking(true);
 
         try {
@@ -63,7 +77,8 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
             if (patch.title_update) updated.title = patch.title_update;
             if (patch.snapshot_patch) updated.snapshot = { ...updated.snapshot, ...patch.snapshot_patch };
             
-            const aiMsg = await db.addMessage(user.id, { role: 'ai', text: patch.response || "Okej, sparat.", sessionId: sid });
+            // Fix: Changed sessionId to session_id
+            const aiMsg = await db.addMessage(user.id, { role: 'ai', text: patch.response || "Okej, sparat.", session_id: sid });
             setMessages(prev => [...prev, aiMsg]);
             setActiveIdea(updated);
             await db.updateIdeaState(user.id, updated.id, updated);
@@ -73,7 +88,7 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
     const handleDelete = async () => {
         if (!ideaToDelete) return;
         await db.deleteIdea(user.id, ideaToDelete.id);
-        if (ideaToDelete.chatSessionId) await db.deleteChatSession(user.id, ideaToDelete.chatSessionId);
+        if (ideaToDelete.chat_session_id) await db.deleteChatSession(user.id, ideaToDelete.chat_session_id);
         setIdeas(prev => prev.filter(i => i.id !== ideaToDelete.id));
         if (activeIdea?.id === ideaToDelete.id) { setActiveIdea(null); setView('list'); }
         setIdeaToDelete(null);
@@ -90,10 +105,10 @@ const IdeaLab: React.FC<{ user: User, isSidebarOpen?: boolean, toggleSidebar?: (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                     {ideas.map(i => (
                         <div key={i.id} onClick={() => { setActiveIdea(i); setView('workspace'); }} className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-[2.5rem] p-8 shadow-sm hover:shadow-2xl transition-all cursor-pointer group flex flex-col min-h-[250px]">
-                            <div className="flex justify-between mb-8"><div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center"><Database size={20}/></div><div className="text-[10px] font-black text-gray-300">Fas {i.currentPhase}/9</div></div>
+                            <div className="flex justify-between mb-8"><div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center"><Database size={20}/></div><div className="text-[10px] font-black text-gray-300">Fas {i.current_phase}/9</div></div>
                             <h3 className="font-bold text-2xl text-gray-950 dark:text-white mb-auto uppercase italic tracking-tight">{i.title}</h3>
                             <div className="pt-6 border-t flex justify-between items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                <span className="text-[10px] font-black text-gray-300">{new Date(i.dateCreated).toLocaleDateString()}</span>
+                                <span className="text-[10px] font-black text-gray-300">{new Date(i.created_at).toLocaleDateString()}</span>
                                 <button onClick={(e) => { e.stopPropagation(); setIdeaToDelete(i); }} className="text-gray-300 hover:text-red-500"><Trash2 size={16}/></button>
                             </div>
                         </div>

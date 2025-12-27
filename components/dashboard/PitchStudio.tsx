@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     Plus, Presentation, Download, ArrowRight, ArrowLeft, Sparkles, 
@@ -153,11 +154,12 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
             setCurrentDeck(deckData);
             setStep('preview');
 
+            // Fix: Changed type to pitch_type
             const newPitch = await db.addPitch(user.id, {
-                type: 'deck',
+                pitch_type: 'deck',
                 name: deckData.deck?.title || 'Okänd Pitch',
                 content: JSON.stringify(deckData),
-                contextScore: 100
+                context_score: 100
             });
             setSavedPitches(prev => [newPitch, ...prev]);
 
@@ -214,7 +216,7 @@ const PitchStudio: React.FC<PitchStudioProps> = ({ user }) => {
                         <div key={p.id} onClick={() => { setCurrentDeck(JSON.parse(p.content)); setStep('preview'); setView('generator'); }} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl p-6 shadow-sm hover:shadow-xl transition-all cursor-pointer group border-b-4 border-b-black relative overflow-hidden">
                             <div className="flex justify-between items-start mb-6">
                                 <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-xl flex items-center justify-center text-black dark:text-white"><Presentation size={24}/></div>
-                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{new Date(p.dateCreated).toLocaleDateString()}</div>
+                                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{new Date(p.created_at).toLocaleDateString()}</div>
                             </div>
                             <h3 className="font-bold text-xl text-gray-900 dark:text-white mb-2 line-clamp-2 pr-8">{p.name}</h3>
                             <div className="mt-auto flex items-center gap-2 text-xs font-bold text-green-500">

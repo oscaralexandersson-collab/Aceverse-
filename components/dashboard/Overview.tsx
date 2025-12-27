@@ -24,12 +24,12 @@ const Overview: React.FC<OverviewProps> = ({ user, setView }) => {
         try {
             const data = await db.getUserData(user.id);
             setStats({
-                leadsCount: data.leads.length,
-                pitchCount: data.pitches.length,
-                ideaCount: data.ideas.length
+                leadsCount: Array.isArray(data.leads) ? data.leads.length : 0,
+                pitchCount: Array.isArray(data.pitches) ? data.pitches.length : 0,
+                ideaCount: Array.isArray(data.ideas) ? data.ideas.length : 0
             });
         } catch (error) {
-            console.error(error);
+            console.error("Kunde inte hämta översiktsdata", error);
         } finally {
             setLoading(false);
         }
@@ -39,11 +39,19 @@ const Overview: React.FC<OverviewProps> = ({ user, setView }) => {
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-gray-400" /></div>;
 
+  // Förhindra [object Object] genom att garantera strängar
+  const firstName = user.firstName || 'Entreprenör';
+  const companyName = user.company || 'ditt företag';
+
   return (
-    <div>
+    <div className="animate-fadeIn">
       <div className="mb-8">
-        <h1 className="font-serif-display text-4xl mb-2 text-gray-900 dark:text-white">{t('dashboard.overviewContent.greeting', {name: user.firstName})}</h1>
-        <p className="text-gray-500 dark:text-gray-400">{t('dashboard.overviewContent.subtitle', {company: user.company || 'ditt företag'})}</p>
+        <h1 className="font-serif-display text-4xl mb-2 text-gray-900 dark:text-white">
+          {t('dashboard.overviewContent.greeting', {name: firstName})}
+        </h1>
+        <p className="text-gray-500 dark:text-gray-400">
+          {t('dashboard.overviewContent.subtitle', {company: companyName})}
+        </p>
       </div>
 
       {/* Stats Grid */}
