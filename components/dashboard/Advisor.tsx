@@ -202,11 +202,24 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                 </div>
 
                 <div className="p-10 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
-                    <form onSubmit={handleSend} className="max-w-4xl mx-auto flex items-end gap-4 p-2.5 bg-gray-50 dark:bg-gray-800 rounded-[2.5rem] border-2 border-transparent focus-within:border-black/5">
-                        <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} placeholder="Fråga om ditt UF-företag..." className="flex-1 bg-transparent border-none focus:ring-0 resize-none py-4 px-6 text-base font-bold italic" rows={1} />
-                        <button type="submit" disabled={!input.trim() || isLoading} className="h-14 w-14 bg-black text-white rounded-full flex items-center justify-center shadow-2xl hover:scale-105 active:scale-90 transition-all disabled:opacity-20 shrink-0 mb-1 mr-1">
-                            <ArrowUp size={24} strokeWidth={2.5} />
-                        </button>
+                    <form onSubmit={handleSend} className="max-w-4xl mx-auto">
+                        <div className="relative flex items-end gap-2 p-1.5 bg-gray-50 dark:bg-gray-800 rounded-[2.5rem] border-2 border-transparent focus-within:border-black/5 dark:focus-within:border-white/5 transition-all duration-300 shadow-inner group">
+                            <textarea 
+                                value={input} 
+                                onChange={(e) => setInput(e.target.value)} 
+                                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} 
+                                placeholder="Fråga om ditt UF-företag..." 
+                                className="flex-1 bg-transparent border-none focus:ring-0 resize-none py-4 px-6 text-base font-bold italic text-gray-900 dark:text-white placeholder:text-gray-400 outline-none rounded-[2rem]" 
+                                rows={1} 
+                            />
+                            <button 
+                                type="submit" 
+                                disabled={!input.trim() || isLoading} 
+                                className="h-14 w-14 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center shadow-2xl hover:scale-105 active:scale-90 transition-all disabled:opacity-20 shrink-0 mb-1 mr-1"
+                            >
+                                <ArrowUp size={24} strokeWidth={2.5} />
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>
