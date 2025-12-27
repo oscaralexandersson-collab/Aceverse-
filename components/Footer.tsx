@@ -2,7 +2,7 @@
 import React from 'react';
 import { NavProps, Page } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Mail, Phone } from 'lucide-react';
+import { Mail, Phone, MapPin } from 'lucide-react';
 
 const Footer: React.FC<NavProps> = ({ onNavigate }) => {
   const { t } = useLanguage();
@@ -16,6 +16,7 @@ const Footer: React.FC<NavProps> = ({ onNavigate }) => {
     [t('footer.company')]: [
       { label: t('footer.overview'), page: 'about' },
       { label: t('footer.customers'), page: 'customers' },
+      { label: t('footer.career'), page: 'careers' },
     ],
     [t('footer.legal')]: [
       { label: t('footer.terms') },
@@ -51,6 +52,10 @@ const Footer: React.FC<NavProps> = ({ onNavigate }) => {
                   <div className="flex items-center gap-3 text-sm text-gray-600 dark:text-gray-400">
                     <Phone size={16} className="text-gray-400" />
                     <span>070-548-05-60</span>
+                  </div>
+                  <div className="flex items-start gap-3 text-sm text-gray-600 dark:text-gray-400">
+                    <MapPin size={16} className="text-gray-400 mt-0.5" />
+                    <span>Sveavägen 42, 111 34 Stockholm</span>
                   </div>
                </div>
            </div>
