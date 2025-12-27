@@ -2,64 +2,67 @@
 import PptxGenJS from 'pptxgenjs';
 
 export const defineMasters = (pptx: PptxGenJS, theme: any) => {
-  const palette = theme?.palette || { primary: '000000', background: 'FFFFFF' };
-  const primaryColor = palette.primary || '000000';
-  const bgColor = palette.background || 'FFFFFF';
+  // Editorial Aesthetic Colors
+  const palette = theme?.palette || { primary: '1A1C18', background: 'ECE3D0', accent: '5E6D5E' };
+  const darkBg = '1A1C18';
+  const lightText = 'ECE3D0';
+  const sageAccent = '5E6D5E';
   
-  // Master 1: HERO TITLE
+  // Master 1: HERO TITLE (High-Impact Editorial)
   pptx.defineSlideMaster({
     title: 'MASTER_TITLE_HERO',
-    background: { color: bgColor },
+    background: { color: darkBg },
     objects: [
-      { rect: { x: 0, y: 0, w: '100%', h: '100%', fill: { color: primaryColor } } },
-      { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 2.0, w: '90%', h: 1.5, fontSize: 54, bold: true, color: 'FFFFFF', align: 'center' } } },
-      { placeholder: { options: { name: 'subtitle', type: 'body', x: 0.5, y: 3.6, w: '90%', h: 0.5, fontSize: 24, color: 'FFFFFF', align: 'center', transparency: 20 } } }
+      { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 1.5, w: '90%', h: 2.5, fontSize: 80, bold: true, color: lightText, align: 'left', fontFace: 'Playfair Display', charSpacing: -2 } } },
+      { placeholder: { options: { name: 'subtitle', type: 'body', x: 0.5, y: 3.8, w: '90%', h: 0.5, fontSize: 20, color: lightText, align: 'left', fontFace: 'Inter', transparency: 30, italic: true } } },
+      // Bottom Metadata Bar
+      { rect: { x: 0.5, y: 5.0, w: 9.0, h: 0.02, fill: { color: lightText }, transparency: 80 } },
+      { text: { text: '2025', options: { x: 0.5, y: 5.1, w: 1.0, fontSize: 10, color: lightText, fontFace: 'Inter', bold: true } } },
+      { text: { text: 'ACEVERSE STRATEGY', options: { x: 7.0, y: 5.1, w: 2.5, fontSize: 10, color: lightText, fontFace: 'Inter', align: 'right', bold: true } } }
     ]
   });
 
-  // Master 2: SECTION DIVIDER
+  // Master 2: SECTION DIVIDER (Minimalist)
   pptx.defineSlideMaster({
     title: 'MASTER_SECTION_DIVIDER',
-    background: { color: primaryColor },
+    background: { color: darkBg },
     objects: [
-      { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 2.2, w: '90%', h: 1.2, fontSize: 48, bold: true, color: 'FFFFFF', align: 'center' } } },
-      { rect: { x: 4.5, y: 3.5, w: 1, h: 0.05, fill: { color: 'FFFFFF' } } }
+      { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 2.0, w: '90%', h: 1.5, fontSize: 64, bold: true, color: lightText, align: 'center', fontFace: 'Playfair Display' } } },
+      { shape: pptx.ShapeType.rtArrow, options: { x: 4.5, y: 3.5, w: 1, h: 0.4, fill: { color: sageAccent } } }
     ]
   });
 
-  // Master 3: BULLETS (Standard Content)
+  // Master 3: BULLETS (Asymmetric Layout)
   pptx.defineSlideMaster({
     title: 'MASTER_BULLETS',
-    background: { color: bgColor },
+    background: { color: darkBg },
     objects: [
-      { rect: { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: primaryColor } } },
-      { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 0.1, w: '90%', h: 0.6, fontSize: 32, bold: true, color: 'FFFFFF' } } },
-      { placeholder: { options: { name: 'body', type: 'body', x: 0.8, y: 1.4, w: '85%', h: 3.5, fontSize: 18, color: primaryColor } } },
-      { text: { text: '© Aceverse AI', options: { x: 0.5, y: 5.2, w: 2, fontSize: 8, color: '999999' } } },
-      { text: { text: 'Slide ', options: { x: 9, y: 5.2, w: 0.5, fontSize: 8, color: '999999', align: 'right' } } }
+      { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 0.4, w: '90%', h: 1.2, fontSize: 44, bold: true, color: lightText, fontFace: 'Playfair Display', align: 'left' } } },
+      { rect: { x: 0.5, y: 1.6, w: 2.0, h: 0.05, fill: { color: sageAccent } } },
+      { placeholder: { options: { name: 'body', type: 'body', x: 0.5, y: 2.2, w: '85%', h: 2.8, fontSize: 18, color: lightText, fontFace: 'Inter', align: 'left', lineSpacing: 28 } } },
+      { text: { text: 'INTERNAL USE ONLY // RESEARCH DATA', options: { x: 0.5, y: 5.2, w: 4, fontSize: 8, color: sageAccent, fontFace: 'Inter', bold: true } } }
     ]
   });
 
-  // Master 4: TWO COLUMN
+  // Master 4: TWO COLUMN (Split Screen)
   pptx.defineSlideMaster({
     title: 'MASTER_TWO_COLUMN',
-    background: { color: bgColor },
+    background: { color: darkBg },
     objects: [
-      { rect: { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: primaryColor } } },
-      { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 0.1, w: '90%', h: 0.6, fontSize: 32, bold: true, color: 'FFFFFF' } } },
-      { placeholder: { options: { name: 'left', type: 'body', x: 0.5, y: 1.5, w: 4.5, h: 3.5, fontSize: 16 } } },
-      { placeholder: { options: { name: 'right', type: 'body', x: 5.2, y: 1.5, w: 4.5, h: 3.5, fontSize: 16 } } },
-      { line: { x: 5, y: 1.5, w: 0, h: 3.5, line: { color: 'EEEEEE', width: 1 } } }
+      { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 0.3, w: '90%', h: 0.8, fontSize: 38, bold: true, color: lightText, fontFace: 'Playfair Display' } } },
+      { rect: { x: 5.0, y: 1.5, w: 0.01, h: 3.5, fill: { color: lightText }, transparency: 80 } },
+      { placeholder: { options: { name: 'left', type: 'body', x: 0.5, y: 1.5, w: 4.2, h: 3.5, fontSize: 16, color: lightText } } },
+      { placeholder: { options: { name: 'right', type: 'body', x: 5.3, y: 1.5, w: 4.2, h: 3.5, fontSize: 16, color: lightText } } }
     ]
   });
 
-  // Master 5: KPI 3-UP
+  // Master 5: KPI (Infographic Style)
   pptx.defineSlideMaster({
     title: 'MASTER_KPI_3UP',
-    background: { color: bgColor },
+    background: { color: darkBg },
     objects: [
-        { rect: { x: 0, y: 0, w: '100%', h: 0.8, fill: { color: primaryColor } } },
-        { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 0.1, w: '90%', h: 0.6, fontSize: 32, bold: true, color: 'FFFFFF' } } }
+        { placeholder: { options: { name: 'title', type: 'title', x: 0.5, y: 0.4, w: '90%', h: 0.8, fontSize: 40, bold: true, color: lightText, fontFace: 'Playfair Display' } } },
+        { shape: pptx.ShapeType.ellipse, options: { x: 8.5, y: 0.5, w: 1.0, h: 1.0, fill: { color: sageAccent }, transparency: 50 } }
     ]
   });
 };

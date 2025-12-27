@@ -34,7 +34,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
     const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
-    const [isSavingDetails, setIsSavingDetails] = useState(false);
 
     const [searchQuery, setSearchQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('Alla');
@@ -144,36 +143,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
     const handleUpdateValue = async (leadId: string, newValue: number) => {
         setLeads(prev => prev.map(l => l.id === leadId ? { ...l, value: newValue } : l));
-        if (selectedLead?.id === leadId) setSelectedLead({ ...selectedLead, value: newValue });
-        // Local only update for fields that are typically saved via the 'Save' button
-    };
-
-    const handleUpdateField = async (leadId: string, field: keyof Lead, value: any) => {
-        setLeads(prev => prev.map(l => l.id === leadId ? { ...l, [field]: value } : l));
-        if (selectedLead?.id === leadId) setSelectedLead({ ...selectedLead, [field]: value });
-    };
-
-    const handleSaveDetails = async () => {
-        if (!selectedLead) return;
-        setIsSavingDetails(true);
-        try {
-            await db.updateLead(user.id, selectedLead.id, {
-                email: selectedLead.email,
-                phone: selectedLead.phone,
-                linkedin: selectedLead.linkedin,
-                website: selectedLead.website,
-                notes: selectedLead.notes,
-                value: selectedLead.value,
-                status: selectedLead.status,
-                priority: selectedLead.priority
-            });
-            // Brief visual feedback
-            await new Promise(r => setTimeout(r, 500));
-        } catch (e) {
-            alert("Kunde inte spara ändringar.");
-        } finally {
-            setIsSavingDetails(false);
-        }
+        await db.updateLead(user.id, leadId, { value: newValue });
     };
 
     const confirmDeleteLead = async () => {
@@ -359,7 +329,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 ${searchRes.text}
                 
                 Rapporten ska vara på svenska och formaterad i Markdown.
-                Returnera resultatet som JSON med följande fälten:
+                Returnera resultatet som JSON med följande fält:
                 {
                     "meta": { "companyName": "Bolagets Namn", "website": "${reportUrl}", "generatedDate": "${new Date().toLocaleDateString()}", "language": "sv" },
                     "fullMarkdown": "Markdown innehåll...",
@@ -779,7 +749,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* 4. INTELLIGENCE TAB (BOLAGSKOLLEN) */}
+                {/* 4. INTELLIGENCE TAB (BOLAGSKOLLEN) - UNTOUCHED AS REQUESTED */}
                 {activeTab === 'intelligence' && (
                     <div className="h-full pb-12 px-2">
                         {!activeReport ? (
@@ -909,7 +879,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                 <div className="p-8 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border border-gray-100 dark:border-gray-700 shadow-inner group">
                                     <label className="block text-[9px] font-black text-gray-300 uppercase tracking-widest mb-6 italic">Process-steg</label>
                                     <div className="relative">
-                                        <select value={selectedLead.status} onChange={(e) => handleUpdateField(selectedLead.id, 'status', e.target.value as any)} className="w-full bg-transparent font-black text-gray-950 dark:text-white text-xl outline-none cursor-pointer tracking-tight uppercase italic appearance-none">
+                                        <select value={selectedLead.status} onChange={(e) => handleUpdateStatus(selectedLead.id, e.target.value as any)} className="w-full bg-transparent font-black text-gray-950 dark:text-white text-xl outline-none cursor-pointer tracking-tight uppercase italic appearance-none">
                                             {STATUS_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
                                         </select>
                                         <ChevronDown size={18} className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-gray-300" />
@@ -918,7 +888,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                 <div className="p-8 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border border-gray-100 dark:border-gray-700 shadow-inner group">
                                     <label className="block text-[9px] font-black text-gray-300 uppercase tracking-widest mb-6 italic">Affärsvärde</label>
                                     <div className="flex items-end gap-2 font-black text-gray-950 dark:text-white text-xl tracking-tight uppercase italic">
-                                        <input type="number" value={selectedLead.value} onChange={(e) => handleUpdateField(selectedLead.id, 'value', Number(e.target.value))} className="bg-transparent w-full outline-none" />
+                                        <input type="number" value={selectedLead.value} onChange={(e) => handleUpdateValue(selectedLead.id, Number(e.target.value))} className="bg-transparent w-full outline-none" />
                                         <span className="text-[10px] opacity-30 uppercase font-black tracking-widest mb-1">Kr</span>
                                     </div>
                                 </div>
@@ -927,31 +897,26 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                             <div className="space-y-10">
                                 <h4 className="text-[9px] font-black text-gray-300 uppercase tracking-widest italic">Kontaktinfo</h4>
                                 <div className="space-y-8">
-                                    <EditableContactRow icon={<Mail size={20}/>} label="E-post" value={selectedLead.email || ''} onChange={(val) => handleUpdateField(selectedLead.id, 'email', val)} />
-                                    <EditableContactRow icon={<Phone size={20}/>} label="Telefon" value={selectedLead.phone || ''} onChange={(val) => handleUpdateField(selectedLead.id, 'phone', val)} />
-                                    <EditableContactRow icon={<Linkedin size={20}/>} label="LinkedIn" value={selectedLead.linkedin || ''} onChange={(val) => handleUpdateField(selectedLead.id, 'linkedin', val)} isLink />
-                                    <EditableContactRow icon={<Globe size={20}/>} label="Webbplats" value={selectedLead.website || ''} onChange={(val) => handleUpdateField(selectedLead.id, 'website', val)} isLink />
+                                    <ContactRow icon={<Mail size={20}/>} label="E-post" value={selectedLead.email} />
+                                    <ContactRow icon={<Phone size={20}/>} label="Telefon" value={selectedLead.phone || "Ej angivet"} />
+                                    <ContactRow icon={<Linkedin size={20}/>} label="LinkedIn" value={selectedLead.linkedin || "Ingen länk"} link={selectedLead.linkedin} />
+                                    <ContactRow icon={<Globe size={20}/>} label="Webbplats" value={selectedLead.website || "Ej angivet"} link={selectedLead.website} />
                                 </div>
                             </div>
 
                             <div className="space-y-6 pb-20">
                                 <h4 className="text-[9px] font-black text-gray-300 uppercase tracking-widest italic">Anteckningar</h4>
-                                <textarea className="w-full h-48 p-8 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border border-gray-100 dark:border-gray-700 outline-none focus:border-black dark:focus:border-white focus:bg-white dark:focus:bg-gray-900 transition-all text-sm font-bold italic leading-relaxed text-gray-700 dark:text-gray-300 shadow-inner custom-scrollbar" placeholder="Skriv fritt om personen eller mötet..." value={selectedLead.notes || ''} onChange={(e) => handleUpdateField(selectedLead.id, 'notes', e.target.value)} />
+                                <textarea className="w-full h-48 p-8 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border border-gray-100 dark:border-gray-700 outline-none focus:border-black dark:focus:border-white focus:bg-white dark:focus:bg-gray-900 transition-all text-sm font-bold italic leading-relaxed text-gray-700 dark:text-gray-300 shadow-inner custom-scrollbar" placeholder="Skriv fritt om personen eller mötet..." defaultValue={selectedLead.notes} onBlur={(e) => db.updateLead(user.id, selectedLead.id, { notes: e.target.value })} />
                             </div>
                         </div>
 
-                        <div className="p-8 border-t border-gray-100 dark:border-gray-800 flex flex-col gap-3 bg-white dark:bg-gray-900 shadow-xl">
-                            <button onClick={handleSaveDetails} disabled={isSavingDetails} className="w-full py-4 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-4 hover:opacity-90 transition-all active:scale-95 shadow-xl">
-                                {isSavingDetails ? <Loader2 className="animate-spin" size={18} /> : <Save size={18}/>} SPARA ÄNDRINGAR
+                        <div className="p-8 border-t border-gray-100 dark:border-gray-800 flex gap-4 bg-white dark:bg-gray-900 shadow-xl">
+                            <button onClick={() => { setSelectedMailLeadId(selectedLead.id); setActiveTab('mail'); setIsDetailOpen(false); }} className="flex-1 py-4 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-4 hover:opacity-90 transition-all active:scale-95">
+                                <Mail size={18}/> SKRIV SÄLJMAIL
                             </button>
-                            <div className="flex gap-3">
-                                <button onClick={() => { setSelectedMailLeadId(selectedLead.id); setActiveTab('mail'); setIsDetailOpen(false); }} className="flex-1 py-4 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white rounded-2xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-4 hover:bg-gray-100 dark:hover:bg-gray-700 transition-all active:scale-95 border border-gray-100 dark:border-gray-700">
-                                    <Mail size={18}/> SKRIV SÄLJMAIL
-                                </button>
-                                <button onClick={() => { setLeadToDelete(selectedLead); }} className="p-4 bg-gray-50 dark:bg-gray-800 text-gray-300 rounded-2xl hover:text-red-500 transition-all active:scale-90 border border-gray-100 dark:border-gray-700">
-                                    <Trash2 size={20}/>
-                                </button>
-                            </div>
+                            <button onClick={() => { setLeadToDelete(selectedLead); }} className="p-4 bg-gray-50 dark:bg-gray-800 text-gray-300 rounded-2xl hover:text-red-500 transition-all active:scale-90">
+                                <Trash2 size={20}/>
+                            </button>
                         </div>
                     </div>
                 )}
@@ -966,75 +931,42 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             {isAddModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
                     <div className="absolute inset-0 bg-black/60 backdrop-blur-md animate-fadeIn" onClick={() => setIsAddModalOpen(false)}></div>
-                    <div className="relative bg-white dark:bg-gray-900 w-full max-w-4xl rounded-[3rem] shadow-2xl overflow-hidden animate-[slideUp_0.4s_ease-out] border border-gray-100 dark:border-gray-800">
+                    <div className="relative bg-white dark:bg-gray-900 w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden animate-[slideUp_0.4s_ease-out] border border-gray-100 dark:border-gray-800">
                         <div className="p-10 md:p-12 relative overflow-hidden">
                             <div className="absolute top-0 right-0 p-8 opacity-5 pointer-events-none"><Plus size={200} /></div>
                             <div className="flex justify-between items-center mb-10 relative z-10">
                                 <h2 className="font-serif-display text-4xl text-gray-950 dark:text-white uppercase italic leading-none">Ny Kund</h2>
                                 <button onClick={() => setIsAddModalOpen(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all active:scale-90"><X size={28} /></button>
                             </div>
-                            <form onSubmit={handleAddLead} className="space-y-12 relative z-10">
-                                <div>
-                                    <h3 className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-6 border-b border-gray-50 dark:border-gray-800 pb-2">Basfakta</h3>
-                                    <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-                                        <div className="space-y-2 lg:col-span-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Namn *</label>
-                                            <input required value={newLead.name || ''} onChange={e => setNewLead({...newLead, name: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white outline-none font-bold italic shadow-inner dark:text-white" />
-                                        </div>
-                                        <div className="space-y-2 lg:col-span-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Företag *</label>
-                                            <input required value={newLead.company || ''} onChange={e => setNewLead({...newLead, company: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white outline-none font-bold italic shadow-inner dark:text-white" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Status</label>
-                                            <div className="relative group">
-                                                <select value={newLead.status || 'Nya'} onChange={e => setNewLead({...newLead, status: e.target.value as any})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black uppercase tracking-widest shadow-inner appearance-none cursor-pointer">
-                                                    {STATUS_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
-                                                </select>
-                                                <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-300" />
-                                            </div>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Prioritet</label>
-                                            <div className="relative group">
-                                                <select value={newLead.priority || 'Medium'} onChange={e => setNewLead({...newLead, priority: e.target.value as any})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black uppercase tracking-widest shadow-inner appearance-none cursor-pointer">
-                                                    <option value="High">Hög</option>
-                                                    <option value="Medium">Normal</option>
-                                                    <option value="Low">Låg</option>
-                                                </select>
-                                                <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-300" />
-                                            </div>
-                                        </div>
-                                        <div className="space-y-2 lg:col-span-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Värde (kr)</label>
-                                            <input type="number" value={newLead.value || 0} onChange={e => setNewLead({...newLead, value: Number(e.target.value)})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black italic shadow-inner" />
+                            <form onSubmit={handleAddLead} className="space-y-10 relative z-10">
+                                <div className="grid md:grid-cols-2 gap-8">
+                                    <div className="space-y-2">
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Namn *</label>
+                                        <input required value={newLead.name || ''} onChange={e => setNewLead({...newLead, name: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white outline-none font-bold italic shadow-inner dark:text-white" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Företag *</label>
+                                        <input required value={newLead.company || ''} onChange={e => setNewLead({...newLead, company: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white outline-none font-bold italic shadow-inner dark:text-white" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Status</label>
+                                        <div className="relative group">
+                                            <select value={newLead.status || 'Nya'} onChange={e => setNewLead({...newLead, status: e.target.value as any})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black uppercase tracking-widest shadow-inner appearance-none cursor-pointer">
+                                                {STATUS_STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                            <ChevronDown size={16} className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-300" />
                                         </div>
                                     </div>
-                                </div>
-
-                                <div>
-                                    <h3 className="text-[10px] font-black text-gray-300 uppercase tracking-[0.2em] mb-6 border-b border-gray-50 dark:border-gray-800 pb-2">Kontaktvägar</h3>
-                                    <div className="grid md:grid-cols-2 gap-6">
-                                        <div className="space-y-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">E-post</label>
-                                            <input value={newLead.email || ''} onChange={e => setNewLead({...newLead, email: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-bold italic shadow-inner" placeholder="namn@företag.se" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Telefon</label>
-                                            <input value={newLead.phone || ''} onChange={e => setNewLead({...newLead, phone: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-bold italic shadow-inner" placeholder="070-000 00 00" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">LinkedIn</label>
-                                            <input value={newLead.linkedin || ''} onChange={e => setNewLead({...newLead, linkedin: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-bold italic shadow-inner" placeholder="linkedin.com/in/användare" />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Webbplats</label>
-                                            <input value={newLead.website || ''} onChange={e => setNewLead({...newLead, website: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-bold italic shadow-inner" placeholder="www.bolaget.se" />
-                                        </div>
+                                    <div className="space-y-2">
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">Värde (kr)</label>
+                                        <input type="number" value={newLead.value || 0} onChange={e => setNewLead({...newLead, value: Number(e.target.value)})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-black italic shadow-inner" />
+                                    </div>
+                                    <div className="space-y-2 col-span-2">
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest italic">E-post</label>
+                                        <input value={newLead.email || ''} onChange={e => setNewLead({...newLead, email: e.target.value})} className="w-full bg-gray-50 dark:bg-gray-800 p-4 rounded-xl border border-transparent focus:border-black dark:focus:border-white transition-all text-gray-950 dark:text-white outline-none font-bold italic shadow-inner" placeholder="hej@företag.se" />
                                     </div>
                                 </div>
-
-                                <button disabled={isSavingLead} className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black text-[11px] uppercase tracking-[0.3em] hover:opacity-90 transition-all flex items-center justify-center gap-4 shadow-2xl active:scale-[0.98] mt-8">
+                                <button disabled={isSavingLead} className="w-full py-5 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black text-[10px] uppercase tracking-widest hover:opacity-90 transition-all flex items-center justify-center gap-4 shadow-xl active:scale-[0.98] mt-4">
                                     {isSavingLead ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>} SPARA KONTAKT
                                 </button>
                             </form>
@@ -1066,25 +998,18 @@ const MetricCard = ({ title, value, icon, trend }: any) => (
     </div>
 );
 
-const EditableContactRow = ({ icon, label, value, onChange, isLink }: any) => (
+const ContactRow = ({ icon, label, value, link }: any) => (
     <div className="flex items-center gap-6 group">
         <div className="w-10 h-10 rounded-xl bg-gray-50 dark:bg-gray-800 flex items-center justify-center text-gray-300 group-hover:bg-black group-hover:text-white dark:group-hover:text-white transition-all border border-gray-100 dark:border-gray-700 shadow-sm shrink-0">{icon}</div>
         <div className="flex-1 min-w-0">
             <span className="block text-[9px] font-black text-gray-300 uppercase tracking-widest mb-1 italic">{label}</span>
-            <div className="flex items-center gap-2">
-                <input 
-                    type="text" 
-                    value={value} 
-                    onChange={(e) => onChange(e.target.value)}
-                    placeholder={`Ange ${label.toLowerCase()}...`}
-                    className="w-full bg-transparent border-none p-0 text-sm font-bold text-gray-950 dark:text-white outline-none focus:ring-0 placeholder:text-gray-300 dark:placeholder:text-gray-700 italic uppercase" 
-                />
-                {isLink && value && (
-                    <a href={value.startsWith('http') ? value : `https://${value}`} target="_blank" rel="noreferrer" className="text-gray-300 hover:text-black dark:hover:text-white">
-                        <ArrowUpRight size={14} />
-                    </a>
-                )}
-            </div>
+            {link ? (
+                <a href={link.startsWith('http') ? link : `https://${link}`} target="_blank" rel="noreferrer" className="text-sm font-bold text-gray-950 dark:text-white hover:underline truncate block uppercase italic">
+                    {value}
+                </a>
+            ) : (
+                <span className="text-sm font-bold text-gray-950 dark:text-white truncate block uppercase italic">{value}</span>
+            )}
         </div>
     </div>
 );
