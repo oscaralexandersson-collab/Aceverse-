@@ -10,36 +10,92 @@ interface OverviewProps {
     setView: (view: DashboardView) => void;
 }
 
+interface ActivityItem {
+    action: string;
+    target: string;
+    time: string;
+    timestamp: number;
+}
+
 const Overview: React.FC<OverviewProps> = ({ user, setView }) => {
   const [stats, setStats] = useState({
     leadsCount: 0,
     pitchCount: 0,
     ideaCount: 0
   });
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { t } = useLanguage();
 
+  const formatRelativeTime = (dateStr: string) => {
+    const now = new Date();
+    const then = new Date(dateStr);
+    const diffInMs = now.getTime() - then.getTime();
+    const diffInMins = Math.floor(diffInMs / (1000 * 60));
+    const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60));
+    const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24));
+
+    if (diffInMins < 1) return `Nu`;
+    if (diffInMins < 60) return `${diffInMins}m`;
+    if (diffInHours < 24) return `${diffInHours}h`;
+    if (diffInDays < 7) return `${diffInDays}d`;
+    return then.toLocaleDateString('sv-SE', { month: 'short', day: 'numeric' });
+  };
+
   useEffect(() => {
-    const loadStats = async () => {
+    const loadData = async () => {
         try {
             const data = await db.getUserData(user.id);
+            
+            // Stats
             setStats({
                 leadsCount: Array.isArray(data.leads) ? data.leads.length : 0,
                 pitchCount: Array.isArray(data.pitches) ? data.pitches.length : 0,
                 ideaCount: Array.isArray(data.ideas) ? data.ideas.length : 0
             });
+
+            // Activity Aggregation
+            const rawActivities: ActivityItem[] = [
+                ...(data.leads || []).map(l => ({
+                    action: t('dashboard.overviewContent.act1'),
+                    target: l.company || l.name,
+                    time: formatRelativeTime(l.created_at),
+                    timestamp: new Date(l.created_at).getTime()
+                })),
+                ...(data.pitches || []).map(p => ({
+                    action: t('dashboard.overviewContent.act2'),
+                    target: p.name,
+                    time: formatRelativeTime(p.created_at),
+                    timestamp: new Date(p.created_at).getTime()
+                })),
+                ...(data.ideas || []).map(i => ({
+                    action: t('dashboard.overviewContent.act3'),
+                    target: i.title,
+                    time: formatRelativeTime(i.created_at),
+                    timestamp: new Date(i.created_at).getTime()
+                })),
+                ...(data.reports || []).map(r => ({
+                    action: "Analys klar",
+                    target: r.title,
+                    time: formatRelativeTime(r.created_at),
+                    timestamp: new Date(r.created_at).getTime()
+                }))
+            ];
+
+            // Sort by timestamp descending and take top 5
+            setActivities(rawActivities.sort((a, b) => b.timestamp - a.timestamp).slice(0, 5));
+
         } catch (error) {
             console.error("Kunde inte hämta översiktsdata", error);
         } finally {
             setLoading(false);
         }
     };
-    loadStats();
-  }, [user.id]);
+    loadData();
+  }, [user.id, t]);
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-gray-400" /></div>;
 
-  // Förhindra [object Object] genom att garantera strängar
   const firstName = user.firstName || 'Entreprenör';
   const companyName = user.company || 'ditt företag';
 
@@ -139,21 +195,21 @@ const Overview: React.FC<OverviewProps> = ({ user, setView }) => {
         <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-100 dark:border-gray-800 p-6 shadow-sm h-fit">
             <h3 className="font-serif-display text-xl mb-6 text-gray-900 dark:text-white">{t('dashboard.overviewContent.activityTitle')}</h3>
             <div className="space-y-6">
-                {[
-                    { action: t('dashboard.overviewContent.act1'), target: "Acme Corp", time: "2h" },
-                    { action: t('dashboard.overviewContent.act2'), target: "v2_final.pdf", time: "5h" },
-                    { action: t('dashboard.overviewContent.act3'), target: "SaaS Platform", time: "1d" },
-                    { action: t('dashboard.overviewContent.act4'), target: "Marketing Strategy", time: "1d" }
-                ].map((item, idx) => (
+                {activities.length > 0 ? activities.map((item, idx) => (
                     <div key={idx} className="flex items-start gap-3">
                         <div className="w-2 h-2 mt-2 rounded-full bg-black dark:bg-white"></div>
-                        <div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-gray-200">{item.action}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">{item.target}</p>
+                        <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-200 truncate">{item.action}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{item.target}</p>
                         </div>
-                        <span className="ml-auto text-xs text-gray-400">{item.time}</span>
+                        <span className="ml-auto text-xs text-gray-400 whitespace-nowrap pl-2">{item.time}</span>
                     </div>
-                ))}
+                )) : (
+                    <div className="text-center py-8 opacity-40">
+                        <Clock size={32} className="mx-auto mb-2 text-gray-300" />
+                        <p className="text-xs font-bold uppercase tracking-widest">Ingen aktivitet än</p>
+                    </div>
+                )}
             </div>
         </div>
       </div>

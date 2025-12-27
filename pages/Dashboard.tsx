@@ -92,7 +92,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-8 z-10">
           <div className="flex items-center gap-4">
-            {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="text-gray-500"><Menu size={24} /></button>}
+            {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="text-gray-500 hover:text-black dark:hover:text-white transition-colors"><Menu size={24} /></button>}
             <h2 className="text-lg font-bold text-gray-900 dark:text-white capitalize">{currentView}</h2>
             {isSyncing && (
               <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-4">
@@ -100,10 +100,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-4">
-            <button onClick={toggleTheme} className="p-2 text-gray-500">{theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}</button>
-            <button onClick={() => setLanguage(language === 'sv' ? 'en' : 'sv')} className="text-xs font-bold uppercase tracking-widest">{language}</button>
-            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden">
+          <div className="flex items-center gap-3">
+            <button onClick={toggleTheme} className="p-2 text-gray-500 hover:text-black dark:hover:text-white transition-colors" title="Växla tema">
+                {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
+            </button>
+            <button onClick={() => setLanguage(language === 'sv' ? 'en' : 'sv')} className="p-2 text-xs font-bold uppercase tracking-widest text-gray-500 hover:text-black dark:hover:text-white transition-colors" title="Växla språk">
+                {language}
+            </button>
+            <div className="h-6 w-px bg-gray-100 dark:bg-gray-800 mx-1"></div>
+            <button onClick={onLogout} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-950 transition-colors" title="Logga ut">
+                <LogOut size={16} /> <span className="hidden sm:inline">Logga ut</span>
+            </button>
+            <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden ring-2 ring-transparent hover:ring-black dark:hover:ring-white transition-all">
                <img src={`https://ui-avatars.com/api/?name=${user.firstName}+${user.lastName}&background=000&color=fff`} alt="Avatar" />
             </div>
           </div>

@@ -97,9 +97,23 @@ function AppContent() {
   };
 
   const handleLogout = async () => {
-    await db.logout();
-    setCurrentUser(null);
-    handleNavigation('home');
+    if (isTransitioning) return;
+    setIsTransitioning(true);
+    setTransitionStage('in');
+    
+    // Start transition, then logout
+    setTimeout(async () => {
+        await db.logout();
+        setCurrentUser(null);
+        setCurrentPage('home');
+        window.scrollTo(0, 0);
+        
+        setTransitionStage('out');
+        setTimeout(() => {
+            setTransitionStage('idle');
+            setIsTransitioning(false);
+        }, 600);
+    }, 600);
   };
 
   const renderPage = () => {

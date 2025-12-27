@@ -113,7 +113,7 @@ class DatabaseService {
       options: { 
         data: { 
           first_name: firstName, 
-          last_name: lastName,
+          last_name: lastName, 
           full_name: `${firstName} ${lastName}`
         } 
       }
@@ -128,8 +128,13 @@ class DatabaseService {
   }
 
   async logout() {
-    await supabase.auth.signOut();
-    localStorage.removeItem('aceverse-auth-token');
+    try {
+        await supabase.auth.signOut();
+    } catch (e) {
+        console.warn("Supabase signOut error", e);
+    } finally {
+        localStorage.removeItem('aceverse-auth-token');
+    }
   }
 
   async completeOnboarding(userId: string, data: any) {
@@ -426,6 +431,7 @@ class DatabaseService {
         brand_dna_id: campaign.brandDnaId,
         name: campaign.name,
         brief: campaign.brief,
+        /* Fix: Access selectedIdea instead of selected_idea to match MarketingCampaign type */
         selected_idea: campaign.selectedIdea,
         assets: campaign.assets
       }]);
