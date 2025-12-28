@@ -160,11 +160,18 @@ export interface BrandDNA {
       primaryFont: { name: string };
       secondaryFont: { name: string };
     };
+    /* Added aesthetic property to visual identity */
+    aesthetic?: string;
   };
   voice: {
     toneDescriptors: string[];
     doUse: string[];
     dontUse: string[];
+  };
+  /* Added product insights property to Brand DNA */
+  product?: {
+    description: string;
+    uniqueValue: string;
   };
 }
 

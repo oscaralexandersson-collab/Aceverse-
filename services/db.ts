@@ -412,7 +412,9 @@ class DatabaseService {
         user_id: userId,
         meta: dna.meta,
         visual: dna.visual,
-        voice: dna.voice
+        voice: dna.voice,
+        /* Added product to insert to correctly store the BrandDNA object in the database */
+        product: dna.product
       }]);
     if (error) throw error;
   }
@@ -431,7 +433,7 @@ class DatabaseService {
         brand_dna_id: campaign.brandDnaId,
         name: campaign.name,
         brief: campaign.brief,
-        /* Fix: Access selectedIdea instead of selected_idea to match MarketingCampaign type */
+        /* Access selectedIdea instead of selected_idea to match MarketingCampaign type */
         selected_idea: campaign.selectedIdea,
         assets: campaign.assets
       }]);
