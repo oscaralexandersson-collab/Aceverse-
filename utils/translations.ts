@@ -255,7 +255,6 @@ export const translations = {
       crm: 'CRM & Leads',
       pitch: 'Pitch Studio',
       settings: 'Inställningar',
-      marketing: 'Marketing',
       logout: 'Logga ut',
       search: 'Sök...',
       searchCategories: {
@@ -456,7 +455,7 @@ export const translations = {
             custom: "Custom"
         },
         prompts: {
-            system: "DU ÄR EN SENIOR MARKETING DESIGNER OCH PITCH-STRATEG PÅ EN TOPPBYRÅ. Din specialitet är att skapa \"Apple-liknande\", minimalistiska och slagkraftiga presentationer. Less is More. Visuell Hierarki. JSON OUTPUT."
+            system: "DU ÄR EN SENIOR MARKETING DESIGNER AND PITCH-STRATEG PÅ EN TOPPBYRÅ. Din specialitet är att skapa \"Apple-liknande\", minimalistiska och slagkraftiga presentationer. Less is More. Visuell Hierarki. JSON OUTPUT."
         },
         defaultCoaches: {
             shark: { 
@@ -477,35 +476,6 @@ export const translations = {
                 personality: "Inspirerande, känslosam, visionär.",
                 instructions: "Fokusera på berättelsen. Finns det en \"Hero's Journey\"? Väck känslor. Använd metaforer."
             }
-        }
-      },
-      marketingContent: {
-        title: "Marketing Engine",
-        subtitle: "Powered by Gemini 2.0 & Imagen 4.",
-        tabs: { dna: "Brand DNA", campaigns: "Kampanjer" },
-        dna: {
-            title: "Business DNA",
-            desc: "Vi analyserar din hemsida (eller data) för att extrahera ditt varumärkes unika stil.",
-            input: "Klistra in din hemsida (URL)",
-            analyzeBtn: "Analysera varumärke",
-            analyzing: "Avkodar varumärke...",
-            colors: "Färgpalett",
-            fonts: "Typografi",
-            tone: "Tone of Voice"
-        },
-        campaign: {
-            new: "Ny Kampanj",
-            objective: "Vad är målet?",
-            objPlaceholder: "t.ex. Lansera vår nya sommalkollektion...",
-            audience: "Målgrupp",
-            audPlaceholder: "t.ex. Studenter i storstäder",
-            platform: "Platform",
-            generateBtn: "Generera Assets",
-            generating: "Skapar kampanj...",
-            results: "Genererade Resultat",
-            score: "AI Predictive Score",
-            engagement: "Engagement",
-            ctr: "Est. CTR"
         }
       }
     },
@@ -783,7 +753,6 @@ export const translations = {
       crm: 'CRM & Leads',
       pitch: 'Pitch Studio',
       settings: 'Settings',
-      marketing: 'Marketing',
       logout: 'Log out',
       search: 'Search...',
       searchCategories: {
@@ -1005,35 +974,6 @@ export const translations = {
                 personality: "Inspiring, emotional, visionary.",
                 instructions: "Focus on the story. Is there a \"Hero's Journey\"? Väck känslor. Använd metaforer."
             }
-        }
-      },
-      marketingContent: {
-        title: "Marketing Engine",
-        subtitle: "Powered by Gemini 2.0 & Imagen 4.",
-        tabs: { dna: "Brand DNA", campaigns: "Campaigns" },
-        dna: {
-            title: "Business DNA",
-            desc: "We analyze your website (or data) to extract your brand's unique style.",
-            input: "Paste website URL",
-            analyzeBtn: "Analyze Brand",
-            analyzing: "Decoding brand...",
-            colors: "Color Palette",
-            fonts: "Typography",
-            tone: "Tone of Voice"
-        },
-        campaign: {
-            new: "New Campaign",
-            objective: "What is the goal?",
-            objPlaceholder: "e.g. Launch our new summer collection...",
-            audience: "Target Audience",
-            audPlaceholder: "e.g. Students in major cities",
-            platform: "Platform",
-            generateBtn: "Generate Assets",
-            generating: "Creating campaign...",
-            results: "Generated Results",
-            score: "AI Predictive Score",
-            engagement: "Engagement",
-            ctr: "Est. CTR"
         }
       }
     },

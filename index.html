@@ -7,13 +7,10 @@
     <title>Aceverse - Bygg Framtiden</title>
     <link rel="icon" type="image/png" href="https://zinjxhibtukdhkcakkzk.supabase.co/storage/v1/object/sign/Bilder/Logga-Ej%20bakrund.png?token=eyJraWQiOiJzdG9yYWdlLXVybC1zaWduaW5nLWtleV9lNjg2NDQ1Mi0wNDkyLTRmZjctYmQ2Yi1iOTI5YzQ1MzBkZTgiLCJhbGciOiJIUzI1NiJ9.eyJ1cmwiOiJCaWxkZXIvTG9nZ2EtRWogYmFrcnVuZC5wbmciLCJpYXQiOjE3NjQ3NTk3NjYsImV4cCI6MTc5NjI5NTc2Nn0.wItQw7FJaVd5ANf3TXe2kTAYHeEPzQB9gDJxEcs4ZYs">
     <script>
-      // Process Shim to prevent "process is not defined" errors in browser
-      window.process = {
-        env: {
-          NODE_ENV: 'development',
-          API_KEY: '' // Placeholder to prevent crash on access
-        }
-      };
+      // Robust Process Shim to prevent "process is not defined" errors
+      window.process = window.process || {};
+      window.process.env = window.process.env || {};
+      if (!window.process.env.NODE_ENV) window.process.env.NODE_ENV = 'development';
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- html2pdf for direct PDF downloads -->
@@ -207,5 +204,6 @@
 </head>
   <body class="bg-white text-gray-900 dark:bg-black dark:text-white transition-colors duration-300">
     <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
   </body>
 </html>

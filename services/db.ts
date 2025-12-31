@@ -6,7 +6,6 @@ import {
   BrandDNA, MarketingCampaign
 } from '../types';
 
-// Helper for generating IDs safely
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -15,8 +14,6 @@ const generateId = () => {
 };
 
 class DatabaseService {
-  // --- AUTH & PROFILE ---
-  
   async getCurrentUser(): Promise<User | null> {
     try {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -28,7 +25,6 @@ class DatabaseService {
         .eq('id', session.user.id)
         .maybeSingle();
 
-      // Fallback: Om sessionen finns men profilen saknas, skapa den direkt
       if (!profile && session.user) {
         const firstName = session.user.user_metadata?.first_name || 
                         session.user.user_metadata?.full_name?.split(' ')[0] || 
@@ -138,7 +134,6 @@ class DatabaseService {
   }
 
   async completeOnboarding(userId: string, data: any) {
-    // Utför uppdateringen
     const { error } = await supabase
       .from('profiles')
       .update({ 
@@ -148,13 +143,7 @@ class DatabaseService {
       .eq('id', userId);
     
     if (error) throw error;
-    
-    // Försök hämta användaren igen
-    const user = await this.getCurrentUser();
-    
-    // Om vi inte kan hämta användaren (t.ex pga tillfälligt nätverksfel), 
-    // returnera inte null utan låt appen veta att det lyckades
-    return user;
+    return await this.getCurrentUser();
   }
 
   async updateProfile(userId: string, updates: any) {
@@ -183,6 +172,7 @@ class DatabaseService {
     return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   }
 
+  // Updated to fetch marketing campaigns and map DNA/campaign data correctly
   async getUserData(userId: string): Promise<UserData> {
     try {
       const [leads, ideas, pitches, messages, sessions, settings, profile, reports, brandDNAs, campaigns] = await Promise.all([
@@ -195,7 +185,7 @@ class DatabaseService {
         supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
         supabase.from('company_reports').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
         supabase.from('brand_dnas').select('*').eq('user_id', userId),
-        supabase.from('marketing_campaigns').select('*').eq('user_id', userId)
+        supabase.from('marketing_campaigns').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
       ]);
 
       return {
@@ -213,16 +203,8 @@ class DatabaseService {
           reportData: r.report_data, 
           created_at: r.created_at 
         })),
-        brandDNAs: brandDNAs.data || [],
-        marketingCampaigns: (campaigns.data || []).map(c => ({
-          id: c.id,
-          brandDnaId: c.brand_dna_id,
-          name: c.name,
-          brief: c.brief || {},
-          selectedIdea: c.selected_idea || {},
-          assets: c.assets || [],
-          dateCreated: c.created_at
-        }))
+        brandDNAs: (brandDNAs.data || []).map(b => b.dna_data || b),
+        marketingCampaigns: (campaigns.data || []).map(c => c.campaign_data || c),
       };
     } catch (e) {
       console.error("Error fetching all user data", e);
@@ -403,18 +385,18 @@ class DatabaseService {
     if (error) throw error;
   }
 
-  // --- BRAND DNA & CAMPAIGNS ---
+  // --- BRAND DNA ---
+  // Added methods for BrandDNA management for Marketing Engine
   async addBrandDNA(userId: string, dna: BrandDNA) {
     const { error } = await supabase
       .from('brand_dnas')
       .insert([{ 
-        id: dna.id || generateId(),
+        id: dna.id,
         user_id: userId,
-        meta: dna.meta,
-        visual: dna.visual,
-        voice: dna.voice,
-        /* Added product to insert to correctly store the BrandDNA object in the database */
-        product: dna.product
+        brand_name: dna.meta.brandName,
+        site_url: dna.meta.siteUrl,
+        dna_data: dna,
+        generated_at: dna.meta.generatedAt
       }]);
     if (error) throw error;
   }
@@ -424,18 +406,18 @@ class DatabaseService {
     if (error) throw error;
   }
 
+  // --- MARKETING CAMPAIGNS ---
+  // Added methods for MarketingCampaign management for Marketing Engine
   async addMarketingCampaign(userId: string, campaign: MarketingCampaign) {
     const { error } = await supabase
       .from('marketing_campaigns')
-      .insert([{ 
-        id: campaign.id || generateId(),
+      .insert([{
+        id: campaign.id,
         user_id: userId,
         brand_dna_id: campaign.brandDnaId,
         name: campaign.name,
-        brief: campaign.brief,
-        /* Access selectedIdea instead of selected_idea to match MarketingCampaign type */
-        selected_idea: campaign.selectedIdea,
-        assets: campaign.assets
+        campaign_data: campaign,
+        created_at: campaign.dateCreated
       }]);
     if (error) throw error;
   }

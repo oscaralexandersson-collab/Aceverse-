@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Lightbulb, Users, Mic, MessageSquare, 
   Settings as SettingsIcon, LogOut, Bell, Search, Menu, X, 
-  Loader2, Wifi, WifiOff, Megaphone, Moon, Sun, Globe, RefreshCw
+  Loader2, Wifi, WifiOff, Moon, Sun, Globe, RefreshCw
 } from 'lucide-react';
 import { DashboardView, User, SearchResult } from '../types';
 import { db } from '../services/db';
@@ -13,7 +13,6 @@ import Advisor from '../components/dashboard/Advisor';
 import CRM from '../components/dashboard/CRM';
 import PitchStudio from '../components/dashboard/PitchStudio';
 import Settings from '../components/dashboard/Settings';
-import MarketingEngine from '../components/dashboard/MarketingEngine';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTheme } from '../contexts/ThemeContext';
 
@@ -30,14 +29,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const { theme, toggleTheme } = useTheme();
 
   useEffect(() => {
-    // Starta bakgrundssynk omedelbart
     setIsSyncing(true);
     db.getUserData(user.id).finally(() => {
-      // Vi sätter isSyncing till false efter en liten fördröjning för visuell feedback
       setTimeout(() => setIsSyncing(false), 1000);
     });
 
-    // Lyssna på när synken faktiskt blir klar för att uppdatera statsen om det behövs
     const handleSync = () => setIsSyncing(false);
     window.addEventListener('ace_data_synced', handleSync);
     return () => window.removeEventListener('ace_data_synced', handleSync);
@@ -47,7 +43,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     { id: 'overview', label: t('dashboard.overview'), icon: LayoutDashboard },
     { id: 'ideas', label: t('dashboard.ideas'), icon: Lightbulb },
     { id: 'advisor', label: t('dashboard.advisor'), icon: MessageSquare },
-    { id: 'marketing', label: t('dashboard.marketing'), icon: Megaphone },
     { id: 'crm', label: t('dashboard.crm'), icon: Users },
     { id: 'pitch', label: t('dashboard.pitch'), icon: Mic },
     { id: 'settings', label: t('dashboard.settings'), icon: SettingsIcon },
@@ -122,7 +117,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
             {currentView === 'overview' && <Overview user={user} setView={setCurrentView} />}
             {currentView === 'ideas' && <IdeaLab user={user} />}
             {currentView === 'advisor' && <Advisor user={user} />}
-            {currentView === 'marketing' && <MarketingEngine user={user} />}
             {currentView === 'crm' && <CRM user={user} />}
             {currentView === 'pitch' && <PitchStudio user={user} />}
             {currentView === 'settings' && <Settings user={user} />}

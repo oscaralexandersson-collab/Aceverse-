@@ -2,7 +2,7 @@
 import React from 'react';
 
 export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'news' | 'careers' | 'login' | 'dashboard' | 'contact' | 'about' | 'onboarding';
-export type DashboardView = 'overview' | 'advisor' | 'crm' | 'ideas' | 'pitch' | 'settings' | 'marketing';
+export type DashboardView = 'overview' | 'advisor' | 'crm' | 'ideas' | 'pitch' | 'settings';
 
 export interface NavItem {
   label: string;
@@ -160,7 +160,6 @@ export interface BrandDNA {
       primaryFont: { name: string };
       secondaryFont: { name: string };
     };
-    /* Added aesthetic property to visual identity */
     aesthetic?: string;
   };
   voice: {
@@ -168,10 +167,34 @@ export interface BrandDNA {
     doUse: string[];
     dontUse: string[];
   };
-  /* Added product insights property to Brand DNA */
   product?: {
     description: string;
     uniqueValue: string;
+  };
+}
+
+// Added Campaign interfaces for Marketing Engine
+export interface CampaignIdea {
+  id: string;
+  name: string;
+  angle: string;
+}
+
+export interface CampaignAsset {
+  id: string;
+  channel: string;
+  content: {
+    headline: string;
+    body: string;
+    hashtags: string[];
+  };
+  metrics: {
+    ctr: string;
+    roas: string;
+  };
+  image?: {
+    prompt: string;
+    url?: string;
   };
 }
 
@@ -190,26 +213,6 @@ export interface MarketingCampaign {
   dateCreated: string;
 }
 
-export interface CampaignIdea {
-  id: string;
-  name: string;
-  angle: string;
-}
-
-export interface CampaignAsset {
-  id: string;
-  channel: string;
-  content: {
-    headline?: string;
-    body?: string;
-    hashtags?: string[];
-  };
-  image?: {
-    prompt: string;
-    url?: string;
-  };
-}
-
 export interface UserSettings {
   notifications: { email: boolean; push: boolean; marketing: boolean };
   privacy: { publicProfile: boolean; dataSharing: boolean };
@@ -226,7 +229,7 @@ export interface UserData {
   reports?: CompanyReportEntry[];
   notifications?: Notification[];
   brandDNAs?: BrandDNA[];
-  marketingCampaigns?: MarketingCampaign[];
+  marketingCampaigns?: MarketingCampaign[]; // Added property for Marketing Engine
 }
 
 export interface SearchResult { id: string; type: 'lead' | 'idea' | 'pitch'; title: string; subtitle: string; view: DashboardView; }
@@ -234,44 +237,41 @@ export interface ContactRequest { name: string; email: string; subject: string; 
 export interface NavProps { currentPage: Page; onNavigate: (page: Page) => void; user?: User | null; }
 export interface PageProps { onNavigate: (page: Page) => void; }
 
-// Presentation types
 export interface DeckSpec {
-  deck: {
-    title: string;
-    audience: string;
-  };
+  deck_title: string;
+  language: string;
   slides: SlideSpec[];
-  theme?: any;
 }
 
 export interface SlideSpec {
-  id: string;
-  type: string;
-  title: string;
+  slide_number: number;
+  layout_id: string;
+  title?: string;
   subtitle?: string;
+  presenter_name?: string;
+  presenter_role?: string;
+  agenda_items?: string[];
+  col_left?: string;
+  col_right?: string;
+  problems?: { title: string; body: string }[];
+  solutions?: { title: string; body: string; icon_query?: string }[];
+  services?: { title: string; body: string }[];
+  narrative?: string;
+  kpi_primary_value?: string;
+  kpi_primary_caption?: string;
+  kpi_secondary_value?: string;
+  kpi_secondary_caption?: string;
+  direct_bullets?: string[];
+  indirect_bullets?: string[];
+  advantages?: { title: string; body: string }[];
+  kpis?: { value: string; label: string }[];
+  chart?: { series_label: string; x_labels: string[]; y_values: number[] };
+  timeline?: { label: string; body: string }[];
   bullets?: string[];
-  left?: { bullets: string[] };
-  right?: { bullets: string[] };
-  kpis?: { label: string; value: string }[];
-  speakerNotes?: string[];
-}
-
-export interface ClarificationQuestion {
-  id: string;
-  type: 'single' | 'multi' | 'text';
-  question: string;
-  options?: string[];
-  required: boolean;
-}
-
-export interface DeckOutline {
-  deckTitle: string;
-  sections: {
-    title: string;
-    slides: {
-      type: string;
-      title: string;
-      keyMessage: string;
-    }[];
-  }[];
+  pie?: { label: string; percent: number }[];
+  team?: { name: string; role: string; bio: string; image_query?: string }[];
+  phone?: string;
+  website?: string;
+  email?: string;
+  address?: string;
 }
