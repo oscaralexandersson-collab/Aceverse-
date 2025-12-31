@@ -73,6 +73,18 @@ export interface Idea {
   nodes: IdeaNode[];
   tasks: any[];
   created_at: string;
+  is_active_track?: boolean;
+  committed_at?: string;
+}
+
+export interface UFScore {
+  feasibility: number; // 1-10
+  risk: 'Låg' | 'Medel' | 'Hög';
+  time_realism: 'Grön' | 'Gul' | 'Röd';
+  copy_risk: 'Låg' | 'Medel' | 'Hög';
+  complexity: 'Enkel' | 'Medel' | 'Avancerad';
+  warning_point: string;
+  motivation: string;
 }
 
 export interface ProjectSnapshot {
@@ -85,6 +97,9 @@ export interface ProjectSnapshot {
   pricing_hypothesis: string;
   mvp_definition: string;
   open_questions: string[];
+  next_step: string;
+  uf_score?: UFScore;
+  is_high_risk?: boolean;
 }
 
 export interface IdeaNode {
@@ -173,7 +188,6 @@ export interface BrandDNA {
   };
 }
 
-// Added Campaign interfaces for Marketing Engine
 export interface CampaignIdea {
   id: string;
   name: string;
@@ -229,7 +243,7 @@ export interface UserData {
   reports?: CompanyReportEntry[];
   notifications?: Notification[];
   brandDNAs?: BrandDNA[];
-  marketingCampaigns?: MarketingCampaign[]; // Added property for Marketing Engine
+  marketingCampaigns?: MarketingCampaign[];
 }
 
 export interface SearchResult { id: string; type: 'lead' | 'idea' | 'pitch'; title: string; subtitle: string; view: DashboardView; }
