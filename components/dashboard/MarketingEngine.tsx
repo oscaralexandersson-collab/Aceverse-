@@ -74,6 +74,16 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
         finally { setItemToDelete(null); }
     };
 
+    const getSafeHostname = (url: string | undefined) => {
+        if (!url || url === 'undefined') return 'okänd';
+        try {
+            const cleanUrl = url.includes('://') ? url : 'https://' + url;
+            return new URL(cleanUrl).hostname;
+        } catch (e) {
+            return url;
+        }
+    };
+
     // --- Core Logic: Business DNA Analysis (RAG Pattern) ---
     const analyzeBrandDNA = async () => {
         if (!brandUrl) return;
@@ -304,7 +314,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user }) => {
                             <div className="p-4 cursor-pointer flex items-center justify-between group" onClick={() => { setDna(d); setStep('dna_review'); }}>
                                 <div className="flex-1 min-w-0">
                                     <h3 className="font-bold text-sm truncate uppercase tracking-tight italic">{d.meta?.brandName || 'Namnlöst'}</h3>
-                                    <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest truncate mt-1">{d.meta?.siteUrl ? new URL(d.meta.siteUrl).hostname : 'okänd URL'}</p>
+                                    <p className="text-[9px] text-gray-400 font-black uppercase tracking-widest truncate mt-1">{getSafeHostname(d.meta?.siteUrl)}</p>
                                 </div>
                                 <button onClick={(e) => { e.stopPropagation(); setItemToDelete({type: 'dna', id: d.id, name: d.meta.brandName}); }} className="opacity-0 group-hover:opacity-100 p-2 text-gray-300 hover:text-red-500 transition-all"><Trash2 size={14} /></button>
                             </div>
