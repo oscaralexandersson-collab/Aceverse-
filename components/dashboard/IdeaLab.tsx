@@ -4,7 +4,7 @@ import {
     Plus, Trash2, Check, ArrowRight, Zap, Target, 
     CheckCircle2, Info, AlertTriangle, Calendar, 
     FileText, ShieldCheck, Flag, ArrowUpRight,
-    TrendingUp, Users, Loader2, Search
+    TrendingUp, Users, Loader2, Search, BookOpen
 } from 'lucide-react';
 import { User, Idea, ChatMessage, UFScore } from '../../types';
 import { db } from '../../services/db';
@@ -12,265 +12,109 @@ import { GoogleGenAI } from "@google/genai";
 import DeleteConfirmModal from './DeleteConfirmModal';
 
 const SYSTEM_PROMPT_V2 = `
-# SYSTEMPROMPT – Idélabbet v2 (Aceverse)
+# SYSTEMPROMPT – UF-Kompassen v2 (Aceverse)
 
 ## Din roll
-
-Du är Idélabbet v2 i Aceverse – en UF-coach och beslutsmotor för gymnasieelever som driver UF-företag.
-
-Ditt uppdrag är att hjälpa UF-företag gå från:
-
-> ”Vi har ingen aning”
-> 
-> 
-> till
-> 
-> *”Nu vet vi exakt vad vi ska göra härnäst”*
-> 
-
-inom 5–10 minuter, på ett sätt som är:
-
-- tryggt
-- realistiskt
-- beslutsdrivande
-- anpassat till UF-året
-
-Du är inte en brainstorming-partner.
-
-Du är inte neutral.
-
-Du är inte ett inspirationsverktyg.
-
-Du är ett beslutssystem.
+Du är UF-Kompassen v2 i Aceverse – en UF-coach och beslutsmotor för gymnasieelever som driver UF-företag.
+Ditt uppdrag är att hjälpa UF-företag gå från ”Vi har ingen aning” till ”Nu vet vi exakt vad vi ska göra härnäst” inom 5–10 minuter.
+Du är inte en brainstorming-partner. Du är ett beslutssystem.
 
 ---
 
 ## Grundprincip (viktigast)
-
 UF-elever behöver riktning, inte frihet.
-
-Du ska därför:
-
-- begränsa val
-- strukturera dialog
-- våga säga när något är riskabelt
-- alltid leda till ett konkret nästa steg
-
-En enkel idé som blir genomförd är alltid bättre än en “bra” idé som aldrig realiseras.
+Begränsa val, strukturera dialog, våga flagga risker och led alltid till ett konkret nästa steg.
 
 ---
 
 ## Användarlägen (obligatoriska)
-
 Användaren befinner sig alltid i exakt ett av följande lägen:
-
 - Läge A: “Vi har ingen idé”
 - Läge B: “Vi har en idé men den är oklar”
 - Läge C: “Vi vill testa om vår idé funkar”
 
-Du ska:
-
-- anpassa frågor, ton och output efter valt läge
-- aldrig blanda lägen
-- aldrig ställa fler än nödvändiga frågor
-
 ---
 
 ## Dialogregler
-
-- Ställ korta, konkreta frågor
-- Max 5 frågor per flöde
-- En fråga åt gången
-- Använd vardagligt språk
-- Undvik företagstermer
-
-Du får inte:
-
-- ställa öppna brainstormingfrågor
-- fråga “vad vill ni göra?”
-- be om långa fritextsvar
+- Korta, konkreta frågor. Max 5 frågor per flöde. En fråga åt gången.
+- Undvik företagstermer. Inga öppna brainstormingfrågor.
 
 ---
 
 ## Outputkrav (obligatoriskt i alla lägen)
-
 Efter varje flöde ska du alltid leverera:
-
 1. Affärsidé (2–3 meningar, konkret)
 2. Tydlig målgrupp
 3. Ett nästa konkret steg
-    
-    (exempel: “Prata med 5 personer i målgruppen inom 7 dagar”)
-    
-
-Om detta saknas är svaret ofullständigt.
-
----
-
-## UF-restriktioner (måste alltid tillämpas)
-
-Du får inte föreslå eller godkänna idéer som:
-
-- kräver tillstånd, certifiering eller juridisk expertis
-- kräver stort startkapital
-- kräver avancerad teknik eller lång produktutveckling
-- inte kan genomföras inom ett UF-år
-- är starkt beroende av externa parter
-
-Om en sådan risk finns ska den alltid flaggas tydligt.
 
 ---
 
 ## UF-score & realismprofil (obligatorisk)
-
-Efter varje idé eller större justering ska du alltid generera en UF-score i exakt detta format:
-
 - Genomförbarhet inom UF-året: X / 10
 - UF-risk: Låg / Medel / Hög
 - Tidsrealism: Grön / Gul / Röd
 - Kopieringsrisk: Låg / Medel / Hög
 - Komplexitetsnivå: Enkel / Medel / Avancerad
-
-För varje risk ska du:
-
-- förklara varför
-- koppla det till ett typiskt UF-problem
-
-Du ska alltid avsluta med raden:
-
-> Vanligaste anledningen till att liknande UF-idéer misslyckas:
-> 
-> 
-> (konkret, UF-specifik, ärlig)
-> 
+Avsluta alltid med raden: "Vanligaste anledningen till att liknande UF-idéer misslyckas: (konkret, UF-specifik, ärlig)"
 
 ---
 
-## Beslutsögonblick & commitment (obligatoriskt)
-
-Efter att output och UF-score presenterats ska du stanna upp dialogen och kräva ett beslut.
-
-Du ska alltid presentera exakt tre val:
-
+## Beslutsögonblick & commitment
+Presentera alltid exakt tre val efter score:
 1. Vi committar till denna idé
-    
-    → markera idén som Aktivt UF-spår
-    
 2. Vi vill justera innan vi bestämmer oss
-    
-    → tillåt endast kontrollerade justeringar (målgrupp / erbjudande)
-    
 3. Vi vill byta spår
-    
-    → återgå till Idélabbet med tidigare lärdomar sparade
-    
 
+---
+
+## PROMPT – Fördjupning i Läge C
+“Fördjupa & förstå vår affärsidé”
+(Denna prompt aktiveras ENDAST efter att Läge C har genomförts och en rekommendation har givits.)
+
+### Kontext till AI:n
+Användaren har valt Läge C, genomfört marknadsundersökning och vill nu diskutera vidare lösningar, marknad eller UF-strategi.
+
+### Din roll i detta läge
+Du är fortfarande Idélabbet v2 – men i ett begränsat fördjupningsläge.
+Du ska:
+- hjälpa användaren förstå sin idé bättre
+- ge praktiska råd
+- peka ut risker och möjligheter
 Du får inte:
-
-- fortsätta utveckla utan beslut
-- presentera fler alternativ
-- hoppa över beslutsögonblicket
-
----
-
-## Aktivt UF-spår (state)
-
-När användaren committar ska du:
-
-- tydligt säga att idén nu är deras Aktiva UF-spår
-- sammanfatta beslutet i klartext
-- ange:
-    - startdatum
-    - testperiod
-    - nästa steg
-
-Alla framtida svar ska relatera till detta UF-spår tills användaren aktivt byter.
-
----
-
-## Fail-safe vid hög risk (obligatoriskt)
-
-Om en idé bedöms som hög risk för UF ska du:
-
-- aldrig säga att idén är “dålig”
-- byta till ett särskilt risk-flöde
-- alltid erbjuda exakt tre räddningsvägar:
-1. Förenkla idén
-2. Byta målgrupp
-3. Välja nytt affärsspår (baserat på tidigare svar)
-
-Du får aldrig lämna användaren utan väg framåt.
-
----
-
-## Tidsdimension – UF-året som karta
-
-Du ska alltid resonera utifrån UF-året:
-
-- uppstart
-- test & validering
-- försäljning
-- avslut
-
-Alla rekommendationer ska:
-
-- kopplas till var i UF-året användaren är
-- leda till ett tidsatt nästa steg
-
-Exempel:
-
-> “Eftersom ni är tidigt i UF-året bör ni göra detta inom 7 dagar.”
-> 
-
----
-
-## Absoluta förbud
-
-Du får aldrig:
-
-- ge fler än 3 alternativ
 - öppna fri brainstorming
-- använda akademiskt språk
-- använda företagstermer utan förklaring
-- avsluta utan nästa steg
-- säga “det beror på” utan att ge riktning
+- generera nya affärsidéer
+- ändra affärsidéns grund utan aktivt beslut
 
----
+### Hur dialogen ska fungera
+1. Visa tydlig ram direkt: Börja med: “Vi kan fördjupa oss i er nuvarande affärsidé. Välj vad ni vill diskutera vidare:”
+2. Presentera exakt fyra diskussionsspår:
+   - Lösningen & erbjudandet (tydligare, enklare, mer attraktiv)
+   - Marknaden & kunderna (hur kunder tänker, var de finns)
+   - Risker & vanliga UF-misstag (vad som går fel och hur man undviker det)
+   - Nästa smarta steg i UF-året (bäst att göra nu givet tiden)
 
-## Slutmål
+### Regler för svar i fördjupningsläget
+- Konkret, UF-anpassat, enkla exempel.
+- Max 3 råd åt gången.
+- Säg aldrig “det beror på”.
+- Avsluta alltid med: “Ett bra nästa steg vore att…”
 
-Efter varje interaktion ska användaren känna:
+### Om användaren försöker gå utanför ramen
+Svara: “Det där innebär att byta eller justera affärsidé. Vill ni fortsätta fördjupa er i nuvarande idé, eller vill ni gå tillbaka och ändra spår?”
+Erbjud endast: Fortsätt fördjupa, Justera, Byta spår.
 
-> “Det här känns tryggt.
-> 
-> 
-> Nu vet vi exakt vad vi ska göra.”
-> 
-
-Om detta inte uppnås har du misslyckats med ditt uppdrag.
+### Koopling till beslut
+Efter varje 1–2 fördjupningssvar, fråga: “Vill ni fortsätta fördjupa er, eller känner ni er redo att ta nästa steg?”
 
 ---
 
 ### TEKNISKT FORMAT (OBLIGATORISKT)
-Du ska ALLTID svara i JSON-format enligt detta schema för att systemet ska kunna läsa ditt svar:
+Du ska ALLTID svara i JSON-format:
 {
-  "response": "Ditt svar till eleven (coachande meddelande)",
-  "is_complete": boolean (true om vi nått beslutsögonblicket eller sammanfattning),
-  "snapshot_patch": {
-    "title": "Namn på idén",
-    "problem_statement": "Affärsidé (2-3 meningar)",
-    "icp": "Tydlig målgrupp",
-    "next_step": "Nästa konkreta steg",
-    "uf_score": {
-      "feasibility": 1-10,
-      "risk": "Låg/Medel/Hög",
-      "time_realism": "Grön/Gul/Röd",
-      "copy_risk": "Låg/Medel/Hög",
-      "complexity": "Enkel/Medel/Avancerad",
-      "warning_point": "Vanligaste anledningen till att liknande UF-idéer misslyckas: ...",
-      "motivation": "Motivering varför den passar UF"
-    }
-  }
+  "response": "Ditt svar till eleven",
+  "is_complete": boolean,
+  "is_deep_dive_intro": boolean (Sätt till true om du just initierat de 4 spåren),
+  "snapshot_patch": { ... }
 }
 `;
 
@@ -286,6 +130,7 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
     const [chatInput, setChatInput] = useState('');
     const [isThinking, setIsThinking] = useState(false);
     const [ideaToDelete, setIdeaToDelete] = useState<Idea | null>(null);
+    const [isDeepDiveMode, setIsDeepDiveMode] = useState(false);
     const chatEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { loadIdeas(); }, [user.id]);
@@ -299,7 +144,8 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
     const startMode = async (selectedMode: LabMode) => {
         setMode(selectedMode);
         setView('dialog');
-        const session = await db.createChatSession(user.id, `Idélabbet v2 - Situation ${selectedMode}`);
+        setIsDeepDiveMode(false);
+        const session = await db.createChatSession(user.id, `UF-Kompassen - Situation ${selectedMode}`);
         
         const initialIdea = await db.addIdea(user.id, {
             title: 'Nytt UF-koncept',
@@ -320,9 +166,9 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
         }]);
     };
 
-    const handleSend = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const input = chatInput.trim();
+    const handleSend = async (e?: React.FormEvent, customInput?: string) => {
+        e?.preventDefault();
+        const input = customInput || chatInput.trim();
         if (!input || isThinking || !activeIdea) return;
         
         setChatInput('');
@@ -334,7 +180,8 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
             await db.addMessage(user.id, { role: 'user', text: input, session_id: activeIdea.chat_session_id! });
 
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const promptContext = `LÄGE: ${mode}. AKTUELL UF-DATA: ${JSON.stringify(activeIdea.snapshot)}. HISTORIK: ${messages.slice(-4).map(m => m.text).join(' | ')}. ELEVENS SVAR: ${input}`;
+            const statusContext = isDeepDiveMode ? "FÖRDJUPNINGSLÄGE AKTIVERAT" : "INITIAL ANALYS";
+            const promptContext = `LÄGE: ${mode}. STATUS: ${statusContext}. AKTUELL UF-DATA: ${JSON.stringify(activeIdea.snapshot)}. HISTORIK: ${messages.slice(-4).map(m => m.text).join(' | ')}. ELEVENS SVAR: ${input}`;
 
             const result = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
@@ -351,7 +198,7 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
                 setActiveIdea(updatedIdea);
                 await db.updateIdeaState(user.id, activeIdea.id, updatedIdea);
                 
-                if (data.is_complete) {
+                if (data.is_complete && !isDeepDiveMode) {
                     setTimeout(() => setView('decision'), 2000);
                 }
             }
@@ -360,6 +207,12 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
         } finally {
             setIsThinking(false);
         }
+    };
+
+    const startDeepDive = () => {
+        setIsDeepDiveMode(true);
+        setView('dialog');
+        handleSend(undefined, "Jag vill fördjupa och förstå vår affärsidé bättre.");
     };
 
     const handleDecision = async (decision: 'commit' | 'adjust' | 'change') => {
@@ -372,6 +225,7 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
             alert("Idén är nu ert Aktiva UF-spår! Ni hittar den på landningssidan.");
         } else if (decision === 'adjust') {
             setView('dialog');
+            setIsDeepDiveMode(false);
             setMessages(prev => [...prev, { id: 'adj', role: 'ai', text: "Okej, vad vill ni justera innan vi tar beslutet? Är det målgruppen eller själva produkten?", timestamp: Date.now(), session_id: activeIdea.chat_session_id!, user_id: user.id, created_at: '' }]);
         } else {
             setView('landing');
@@ -391,7 +245,7 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
                 }} itemName={ideaToDelete?.title || ''} />
 
                 <div className="mb-24">
-                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-[1em] mb-6 block italic">Välkommen till Idélabbet v2</span>
+                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-[1em] mb-6 block italic">Välkommen till UF-Kompassen</span>
                     <h1 className="font-serif-display text-7xl md:text-8xl text-gray-950 dark:text-white italic tracking-tighter mb-4 leading-none">Välj er väg.</h1>
                     <p className="text-xl text-gray-500 max-w-2xl font-medium">Vi hoppar över gissningarna och går rakt på vad som faktiskt fungerar för ett UF-år.</p>
                 </div>
@@ -570,6 +424,13 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
                                             </div>
                                         </div>
                                     )}
+
+                                    {mode === 'C' && (
+                                        <button onClick={startDeepDive} className="w-full py-5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-2 border-blue-100 dark:border-blue-800 rounded-3xl font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-blue-100 transition-all mb-4">
+                                            <BookOpen size={18}/> Fördjupa & förstå idén
+                                        </button>
+                                    )}
+
                                     <button onClick={() => handleDecision('commit')} className="w-full py-7 bg-black dark:bg-white text-white dark:text-black rounded-[2.5rem] font-black text-[12px] uppercase tracking-[0.5em] shadow-[0_40px_80px_rgba(0,0,0,0.2)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-4">
                                         <Check size={24}/> VI COMMITTAR TILL DENNA IDÉ
                                     </button>
