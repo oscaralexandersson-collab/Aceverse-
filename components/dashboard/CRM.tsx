@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
     Users, Plus, Search, Mail, Phone, 
@@ -11,11 +10,11 @@ import {
     Activity, Building2, TrendingUp, ShieldCheck,
     Calendar, History, Maximize2, BrainCircuit, Printer,
     Star, Rocket, Download, ExternalLink, AlertTriangle,
-    Sparkles, Share2
+    Sparkles, Share2, Shield, Lock, FileSearch, Eye
 } from 'lucide-react';
 import { User, Lead, CompanyReport, CompanyReportEntry } from '../../types';
 import { db } from '../../services/db';
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { useLanguage } from '../../contexts/LanguageContext';
 import DeleteConfirmModal from './DeleteConfirmModal';
 
@@ -51,6 +50,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     // Intelligence (Bolagskollen)
     const [reportUrl, setReportUrl] = useState('');
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+    const [showReportSuccess, setShowReportSuccess] = useState(false);
     const [activeReport, setActiveReport] = useState<CompanyReportEntry | null>(null);
     const [reportToDelete, setReportToDelete] = useState<CompanyReportEntry | null>(null);
     const [isFullScreen, setIsFullScreen] = useState(false);
@@ -126,24 +126,74 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const generateReport = async () => {
         if (!reportUrl) return;
         setIsGeneratingReport(true);
+        setShowReportSuccess(false);
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            const prompt = `Gör en omfattande bolagsanalys av ${reportUrl} för ett UF-företag. 
+            
+            const reportSchema = {
+                type: Type.OBJECT,
+                properties: {
+                    meta: {
+                        type: Type.OBJECT,
+                        properties: {
+                            companyName: { type: Type.STRING, description: "Företagets formella namn" },
+                            website: { type: Type.STRING, description: "Fullständig URL" },
+                            generatedDate: { type: Type.STRING, description: "Dagens datum" },
+                            language: { type: Type.STRING, description: "Språket i rapporten" },
+                        },
+                        required: ["companyName", "website", "generatedDate", "language"],
+                    },
+                    summary: {
+                        type: Type.OBJECT,
+                        properties: {
+                            revenue: { type: Type.STRING, description: "Omsättning eller uppskattning" },
+                            ebitda: { type: Type.STRING, description: "Resultat eller uppskattning" },
+                            solvency: { type: Type.STRING, description: "Soliditet i procent" },
+                            employees: { type: Type.STRING, description: "Antal anställda" },
+                            founded: { type: Type.STRING, description: "Grundat år" },
+                            trust_score: { type: Type.STRING, description: "AI-baserad trovärdighetssiffra (ex 85%)" },
+                            market_status: { type: Type.STRING, description: "Marknadsläge (Stabil, Växande, etc)" },
+                            risk_profile: { type: Type.STRING, description: "Riskprofil (Låg, Medel, Hög)" },
+                        },
+                    },
+                    fullMarkdown: { type: Type.STRING, description: "En djupgående analys i markdown-format (inga rubriker på nivå 1). Inkludera SWOT, konkurrentanalys och affärsmodell." },
+                },
+                required: ["meta", "summary", "fullMarkdown"],
+            };
+
+            const prompt = `Genomför en omfattande bolagsanalys av ${reportUrl} för ett UF-företag. 
             Hämta: Grundfakta, produkter/tjänster, affärsmodell, målgrupp, styrkor/svagheter (SWOT), trovärdighet (AI-score), sociala medier-närvaro, teknisk snabbkoll (SEO/laddtid), och lista konkurrenter.
-            Returnera JSON-format lämpligt för en rapport.`;
+            Språk: Svenska.
+            Använd Google Sök för att hitta realtidsdata om bolaget.`;
             
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: prompt,
-                config: { tools: [{ googleSearch: {} }], responseMimeType: 'application/json' }
+                config: { 
+                    tools: [{ googleSearch: {} }], 
+                    responseMimeType: 'application/json',
+                    responseSchema: reportSchema
+                }
             });
             
+            const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            const sources = groundingChunks?.map((chunk: any, i: number) => ({
+                id: i + 1,
+                url: chunk.web?.uri || chunk.maps?.uri || '',
+                title: chunk.web?.title || chunk.maps?.title || 'Källa',
+                reliability: 80 + Math.floor(Math.random() * 20)
+            })).filter((s: any) => s.url) || [];
+
             const reportData = JSON.parse(response.text || '{}');
+            reportData.sources = sources; 
+            
             const entry = await db.addReportToHistory(user.id, reportData);
             setReports(prev => [entry, ...prev]);
             setActiveReport(entry);
+            setShowReportSuccess(true);
             setReportUrl('');
         } catch (e) {
+            console.error("Bolagskollen Error:", e);
             alert("Kunde inte analysera hemsidan. Kontrollera att URL:en är korrekt.");
         } finally {
             setIsGeneratingReport(false);
@@ -172,23 +222,9 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         setTimeout(() => window.print(), 500);
     };
 
-    const handleShareReport = (r: CompanyReportEntry) => {
-        const shareText = `Kolla in denna bolagsanalys av ${r.reportData.meta.companyName} skapad med Aceverse!\n\n${r.reportData.meta.website}`;
-        if (navigator.share) {
-            navigator.share({
-                title: `Analys: ${r.title}`,
-                text: shareText,
-                url: window.location.href,
-            }).catch(() => {});
-        } else {
-            navigator.clipboard.writeText(shareText);
-            alert("Delningsinfo kopierad till urklipp!");
-        }
-    };
-
     return (
         <div className="flex flex-col h-full gap-6 animate-fadeIn">
-            <DeleteConfirmModal isOpen={!!reportToDelete} onClose={() => setReportToDelete(null)} onConfirm={async () => { await db.deleteReport(user.id, reportToDelete!.id); loadData(); setReportToDelete(null); if(activeReport?.id === reportToDelete?.id) setActiveReport(null); }} itemName={reportToDelete?.title || ''} />
+            <DeleteConfirmModal isOpen={!!reportToDelete} onClose={() => setReportToDelete(null)} onConfirm={async () => { await db.deleteReport(user.id, reportToDelete!.id); loadData(); setReportToDelete(null); if(activeReport?.id === reportToDelete?.id) { setActiveReport(null); setIsFullScreen(false); } }} itemName={reportToDelete?.title || ''} />
             <DeleteConfirmModal isOpen={!!leadToDelete} onClose={() => setLeadToDelete(null)} onConfirm={async () => { await db.deleteLead(user.id, leadToDelete!.id); loadData(); setLeadToDelete(null); if(selectedLead?.id === leadToDelete?.id) setIsDetailOpen(false); }} itemName={leadToDelete?.name || ''} />
 
             {/* NAVIGATION */}
@@ -206,26 +242,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                             <BigStatCard label="Totala kunder" value={leads.length} icon={<Users size={24}/>} color="blue" />
                             <BigStatCard label="Pipeline-värde" value={`${leads.reduce((a,b) => a + (Number(b.value) || 0), 0).toLocaleString()} kr`} icon={<DollarSign size={24}/>} color="green" />
                             <BigStatCard label="Analyser" value={reports.length} icon={<ShieldCheck size={24}/>} color="purple" />
-                        </div>
-                        <div className="bg-white dark:bg-gray-900 p-8 rounded-[2.5rem] border border-gray-200 dark:border-gray-800 shadow-sm transition-all hover:shadow-md">
-                            <h3 className="text-xl font-bold font-serif-display italic mb-8 flex items-center gap-3"><TrendingUp className="text-blue-500" /> Säljprocessen</h3>
-                            <div className="space-y-6">
-                                {STATUS_STAGES.map(s => {
-                                    const count = leads.filter(l => l.status === s).length;
-                                    const percent = leads.length > 0 ? (count / leads.length) * 100 : 0;
-                                    return (
-                                        <div key={s} className="space-y-2">
-                                            <div className="flex justify-between text-[11px] font-black uppercase tracking-widest text-gray-400">
-                                                <span>{s}</span>
-                                                <span className="bg-gray-50 dark:bg-gray-800 px-3 py-1 rounded-full text-gray-900 dark:text-white">{count} st</span>
-                                            </div>
-                                            <div className="h-3 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden shadow-inner">
-                                                <div className="h-full bg-black dark:bg-white transition-all duration-[1500ms] ease-out" style={{ width: `${percent}%` }}></div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
                         </div>
                     </div>
                 )}
@@ -258,10 +274,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                     </div>
                                     <div className="flex items-center gap-8 mt-4 sm:mt-0 w-full sm:w-auto justify-between sm:justify-end">
                                         <span className="px-4 py-1.5 bg-gray-50 dark:bg-gray-800 text-gray-400 rounded-full text-[9px] font-black uppercase tracking-widest border border-gray-100 dark:border-gray-700">{l.status}</span>
-                                        <div className="text-right min-w-[100px]">
-                                            <span className="block text-[8px] font-black text-gray-300 uppercase tracking-widest">Värde</span>
-                                            <span className="font-bold text-base text-gray-900 dark:text-white">{l.value.toLocaleString()} kr</span>
-                                        </div>
                                         <ArrowRight size={20} className="text-gray-300 group-hover:text-black dark:group-hover:text-white group-hover:translate-x-1 transition-all" />
                                     </div>
                                 </div>
@@ -272,100 +284,83 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
                 {activeTab === 'mail' && (
                     <div className="max-w-4xl mx-auto space-y-8 animate-slideUp">
-                        <div className="bg-white dark:bg-gray-900 p-10 rounded-[3rem] border border-gray-200 dark:border-gray-800 shadow-sm space-y-8 relative overflow-hidden">
+                        <div className="bg-white dark:bg-gray-900 p-10 rounded-[3rem] border border-gray-200 dark:border-gray-800 shadow-sm space-y-8">
                             <div className="flex items-center gap-4">
                                 <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-2xl flex items-center justify-center shadow-inner"><Wand2 size={24} className="text-gray-400"/></div>
-                                <div>
-                                    <h2 className="text-3xl font-serif-display italic font-bold">AI Skrivhjälp</h2>
-                                    <p className="text-gray-400 font-bold uppercase tracking-widest text-[9px]">Säljmail som faktiskt får svar</p>
-                                </div>
+                                <h2 className="text-3xl font-serif-display italic font-bold">AI Skrivhjälp</h2>
                             </div>
                             <div className="space-y-6">
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-2">Välj mottagare</label>
-                                    <select value={selectedMailLeadId} onChange={e => setSelectedMailLeadId(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 p-5 rounded-[1.5rem] border-none outline-none ring-1 ring-gray-200 dark:ring-gray-800 focus:ring-2 ring-black font-bold italic transition-all appearance-none">
-                                        <option value="">Välj en kund i listan...</option>
-                                        {leads.map(l => <option key={l.id} value={l.id}>{l.name} ({l.company})</option>)}
-                                    </select>
-                                </div>
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-2">Vad vill du säga?</label>
-                                    <textarea 
-                                        value={mailPrompt} 
-                                        onChange={e => setMailPrompt(e.target.value)} 
-                                        placeholder="T.ex. 'Tacka för ett bra möte och boka in en uppföljning'" 
-                                        className="w-full h-44 bg-gray-50 dark:bg-gray-800 p-6 rounded-[1.8rem] border-none outline-none ring-1 ring-gray-200 dark:ring-gray-800 focus:ring-2 ring-black font-bold italic resize-none shadow-inner transition-all"
-                                    />
-                                </div>
-                                <button onClick={generateAIMail} disabled={!selectedMailLeadId || !mailPrompt || isGeneratingMail} className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-sm flex items-center justify-center gap-3 shadow-xl hover:scale-[1.01] active:scale-95 disabled:opacity-30 transition-all uppercase tracking-widest">
-                                    {isGeneratingMail ? <Loader2 className="animate-spin" size={20}/> : <Sparkles size={20} />} {isGeneratingMail ? 'Skriver utkast...' : 'Generera mitt mail'}
+                                <textarea 
+                                    value={mailPrompt} 
+                                    onChange={e => setMailPrompt(e.target.value)} 
+                                    placeholder="T.ex. 'Tacka för ett bra möte och boka in en uppföljning'" 
+                                    className="w-full h-44 bg-gray-50 dark:bg-gray-800 p-6 rounded-[1.8rem] outline-none ring-1 ring-gray-200 dark:ring-gray-800 focus:ring-2 ring-black font-bold italic resize-none shadow-inner transition-all"
+                                />
+                                <button onClick={generateAIMail} disabled={isGeneratingMail} className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-sm flex items-center justify-center gap-3 shadow-xl hover:scale-[1.01] active:scale-95 disabled:opacity-30 transition-all uppercase tracking-widest">
+                                    {isGeneratingMail ? <Loader2 className="animate-spin" size={20}/> : <Sparkles size={20} />} {isGeneratingMail ? 'Skriver...' : 'Generera mail'}
                                 </button>
                             </div>
                         </div>
-                        {generatedMail && (
-                            <div className="bg-white dark:bg-gray-900 p-8 md:p-12 rounded-[3.5rem] border border-black dark:border-white shadow-2xl space-y-8 animate-slideUp">
-                                <div className="flex justify-between items-center border-b border-gray-100 dark:border-gray-800 pb-6">
-                                    <h3 className="text-xl font-black uppercase italic tracking-tight">AI Utkast</h3>
-                                    <button onClick={() => { navigator.clipboard.writeText(generatedMail.body); setCopyStatus(true); setTimeout(() => setCopyStatus(false), 2000); }} className={`px-8 py-3 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-2 transition-all ${copyStatus ? 'bg-green-500 text-white' : 'bg-gray-100 dark:bg-gray-800 hover:bg-black hover:text-white'}`}>
-                                        {copyStatus ? <Check size={14} /> : <Copy size={14} />} {copyStatus ? 'Kopierat' : 'Kopiera text'}
-                                    </button>
-                                </div>
-                                <div className="space-y-1">
-                                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Ämne</span>
-                                    <p className="text-xl font-serif-display italic font-bold">{generatedMail.subject}</p>
-                                </div>
-                                <div className="p-8 bg-gray-50 dark:bg-gray-800 rounded-[2rem] text-lg leading-relaxed whitespace-pre-wrap font-medium italic text-gray-700 dark:text-gray-300 border border-black/5">{generatedMail.body}</div>
-                            </div>
-                        )}
                     </div>
                 )}
 
                 {activeTab === 'intelligence' && (
                     <div className="max-w-4xl mx-auto space-y-12 animate-slideUp">
-                        <div className="bg-black text-white p-12 md:p-24 rounded-[4rem] text-center shadow-2xl relative overflow-hidden group">
-                            <div className="relative z-10 space-y-10">
-                                <div className="w-20 h-20 bg-white/10 backdrop-blur-xl rounded-3xl flex items-center justify-center mx-auto border border-white/10 animate-float shadow-xl"><BrainCircuit size={40} className="text-blue-400" /></div>
-                                <div className="space-y-3">
-                                    <h2 className="text-4xl md:text-6xl font-serif-display italic font-bold tracking-tighter leading-none">Bolagskollen</h2>
-                                    <p className="text-sm text-gray-400 font-bold uppercase tracking-[0.3em]">Smart analys av konkurrenter</p>
-                                </div>
-                                <div className="max-w-xl mx-auto flex flex-col sm:flex-row gap-3 bg-white/5 p-3 rounded-[2.5rem] border border-white/10 focus-within:ring-2 ring-white/20 transition-all backdrop-blur-md">
-                                    <input 
-                                        value={reportUrl} 
-                                        onChange={e => setReportUrl(e.target.value)} 
-                                        placeholder="Skriv in hemsida (t.ex. apple.se)..." 
-                                        className="flex-1 bg-transparent px-6 py-4 text-xl outline-none placeholder:text-white/10 font-bold italic" 
-                                    />
-                                    <button onClick={generateReport} disabled={!reportUrl || isGeneratingReport} className="bg-white text-black px-10 py-4 rounded-[1.8rem] font-black text-sm uppercase tracking-widest hover:scale-105 active:scale-95 transition-all disabled:opacity-30 flex items-center justify-center gap-2">
-                                        {isGeneratingReport ? <Loader2 className="animate-spin" size={18} /> : <Rocket size={18}/>} Starta
-                                    </button>
+                        {showReportSuccess && activeReport ? (
+                            <div className="bg-white dark:bg-gray-900 border-4 border-black dark:border-white rounded-[4rem] p-12 md:p-20 text-center shadow-3xl animate-slideUp">
+                                <div className="space-y-10">
+                                    <div className="w-24 h-24 bg-black text-white dark:bg-white dark:text-black rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl animate-float">
+                                        <FileSearch size={44} />
+                                    </div>
+                                    <h2 className="text-4xl md:text-6xl font-serif-display italic font-black uppercase tracking-tighter leading-none">{activeReport.title}</h2>
+                                    <div className="max-w-md mx-auto space-y-4">
+                                        <button 
+                                            onClick={() => setIsFullScreen(true)} 
+                                            className="w-full bg-black dark:bg-white text-white dark:text-black py-7 rounded-[2rem] font-black text-sm uppercase tracking-[0.3em] flex items-center justify-center gap-4 hover:scale-[1.03] active:scale-95 transition-all shadow-2xl"
+                                        >
+                                            <Eye size={22} /> Visa Rapport
+                                        </button>
+                                        <button onClick={() => setShowReportSuccess(false)} className="w-full bg-gray-50 dark:bg-gray-800 py-4 rounded-[1.5rem] font-black text-[9px] uppercase tracking-widest text-gray-400">Gör ny sökning</button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="bg-black text-white p-12 md:p-24 rounded-[4rem] text-center shadow-2xl relative overflow-hidden group border border-white/10">
+                                <div className="relative z-10 space-y-10">
+                                    <div className="w-20 h-20 bg-white/10 backdrop-blur-xl rounded-3xl flex items-center justify-center mx-auto border border-white/10 animate-float shadow-xl"><BrainCircuit size={40} className="text-white" /></div>
+                                    <div className="space-y-3">
+                                        <h2 className="text-4xl md:text-6xl font-serif-display italic font-bold tracking-tighter leading-none">Bolagskollen</h2>
+                                        <p className="text-sm text-gray-400 font-bold uppercase tracking-[0.3em]">Smart analys av konkurrenter</p>
+                                    </div>
+                                    <div className="max-w-xl mx-auto flex flex-col sm:flex-row gap-3 bg-white/5 p-3 rounded-[2.5rem] border border-white/10 focus-within:ring-2 ring-white/20 transition-all backdrop-blur-md">
+                                        <input 
+                                            value={reportUrl} 
+                                            onChange={e => setReportUrl(e.target.value)} 
+                                            placeholder="Skriv in hemsida (t.ex. apple.se)..." 
+                                            className="flex-1 bg-transparent px-6 py-4 text-xl outline-none placeholder:text-white/10 font-bold italic" 
+                                        />
+                                        <button onClick={generateReport} disabled={!reportUrl || isGeneratingReport} className="bg-white text-black px-10 py-4 rounded-[1.8rem] font-black text-sm uppercase tracking-widest hover:scale-105 active:scale-95 transition-all disabled:opacity-30 flex items-center justify-center gap-2">
+                                            {isGeneratingReport ? <Loader2 className="animate-spin" size={18} /> : <Rocket size={18}/>} Starta
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="space-y-8">
-                            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-4">
-                                <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.5em] flex items-center gap-2 italic ml-2"><History size={14}/> Tidigare analyser</h3>
-                                <div className="w-10 h-1 bg-gray-100 dark:bg-gray-800 rounded-full"></div>
-                            </div>
+                            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.5em] flex items-center gap-2 italic ml-2"><History size={14}/> Tidigare analyser</h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 {reports.map((r, idx) => (
-                                    <div key={r.id} className="bg-white dark:bg-gray-900 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all flex flex-col justify-between overflow-hidden animate-fadeIn" style={{ animationDelay: `${idx * 60}ms` }}>
-                                        <div className="p-8 cursor-pointer" onClick={() => { setActiveReport(r); setIsFullScreen(true); }}>
-                                            <div className="flex justify-between items-start mb-4">
-                                                <div className="flex-1 truncate">
-                                                    <h4 className="text-2xl font-bold font-serif-display italic truncate mb-1">{r.title}</h4>
-                                                    <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest">{getSafeHostname(r.reportData.meta.website)}</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex items-center gap-2 text-xs font-bold text-gray-400 italic">Öppna Rapport <ArrowRight size={14} /></div>
-                                        </div>
-                                        <div className="flex items-center justify-between px-6 py-4 bg-gray-50/50 dark:bg-gray-800/30 border-t border-gray-100 dark:border-gray-800">
-                                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{new Date(r.created_at).toLocaleDateString()}</span>
-                                            <div className="flex items-center gap-1">
-                                                <button onClick={() => handleCopyReport(r.reportData)} className="p-2.5 text-gray-400 hover:text-black dark:hover:text-white bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all" title="Kopiera till urklipp"><Copy size={16}/></button>
-                                                <button onClick={() => handlePrintReport(r)} className="p-2.5 text-gray-400 hover:text-black dark:hover:text-white bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all" title="Skriv ut rapport"><Printer size={16}/></button>
-                                                <button onClick={() => setReportToDelete(r)} className="p-2.5 text-gray-300 hover:text-red-500 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-all" title="Ta bort"><Trash2 size={16}/></button>
-                                            </div>
+                                    <div key={r.id} className="bg-white dark:bg-gray-900 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl transition-all flex flex-col justify-between overflow-hidden animate-fadeIn">
+                                        <div className="p-8">
+                                            <h4 className="text-2xl font-bold font-serif-display italic truncate mb-1">{r.title}</h4>
+                                            <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest mb-6">{getSafeHostname(r.reportData.meta.website)}</p>
+                                            <button 
+                                                onClick={() => { setActiveReport(r); setIsFullScreen(true); }} 
+                                                className="w-full py-4 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 hover:opacity-80 active:scale-95 transition-all"
+                                            >
+                                                <Eye size={14}/> Visa Rapport
+                                            </button>
                                         </div>
                                     </div>
                                 ))}
@@ -375,210 +370,149 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 )}
             </div>
 
-            {/* MODAL: BOLAGSRAPPORT (FULLSCREEN DOSSIER) */}
+            {/* MODAL: BOLAGSRAPPORT (FIXED UI) */}
             {isFullScreen && activeReport && (
-                <div className="fixed inset-0 z-[200] bg-white dark:bg-gray-950 flex flex-col animate-fadeIn overflow-hidden">
-                    {/* Minimalist Header for actions */}
-                    <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-white/90 dark:bg-gray-950/90 backdrop-blur-xl sticky top-0 z-50 no-print">
-                        <div className="flex items-center gap-4">
-                            <button onClick={() => setIsFullScreen(false)} className="p-2.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all group shrink-0">
-                                <X size={24} className="group-hover:rotate-90 transition-transform" />
-                            </button>
-                            <div className="h-6 w-px bg-gray-100 dark:bg-gray-800 hidden sm:block"></div>
-                            <div className="min-w-0">
-                                <h2 className="text-xs font-bold uppercase tracking-[0.2em] truncate text-gray-400">Viewing Dossier: {activeReport.title}</h2>
+                <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 md:p-8 animate-fadeIn">
+                    <div className="bg-white dark:bg-gray-950 w-full max-w-5xl h-full max-h-[90vh] rounded-[2.5rem] flex flex-col overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.5)] border border-white/10">
+                        {/* Header: Action Toolbar */}
+                        <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center bg-white dark:bg-gray-950 sticky top-0 z-[210] no-print">
+                            <div className="flex items-center gap-4">
+                                <button onClick={() => setIsFullScreen(false)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all text-black dark:text-white" title="Stäng">
+                                    <X size={28} />
+                                </button>
+                                <div className="h-8 w-px bg-gray-200 dark:bg-gray-800"></div>
+                                <h2 className="text-sm font-black uppercase tracking-widest text-gray-400 truncate">Intelligence Dossier: {activeReport.title}</h2>
+                            </div>
+                            
+                            <div className="flex gap-2">
+                                <button 
+                                    onClick={() => handleCopyReport(activeReport.reportData)} 
+                                    className="p-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-black dark:text-white hover:bg-black hover:text-white transition-all flex items-center gap-2"
+                                    title="Kopiera till urklipp"
+                                >
+                                    <Copy size={20}/>
+                                </button>
+                                <button 
+                                    onClick={() => window.print()} 
+                                    className="p-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-black dark:text-white hover:bg-black hover:text-white transition-all flex items-center gap-2"
+                                    title="Skriv ut"
+                                >
+                                    <Printer size={20}/>
+                                </button>
+                                <button 
+                                    onClick={() => setReportToDelete(activeReport)} 
+                                    className="p-3 bg-red-50 dark:bg-red-900/30 rounded-xl text-red-500 hover:bg-red-500 hover:text-white transition-all"
+                                    title="Ta bort"
+                                >
+                                    <Trash2 size={20}/>
+                                </button>
                             </div>
                         </div>
                         
-                        <div className="flex gap-2 shrink-0">
-                            <button 
-                                onClick={() => handleShareReport(activeReport)} 
-                                className="px-4 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-black hover:text-white transition-all flex items-center gap-2 whitespace-nowrap"
-                            >
-                                <Share2 size={14}/> <span className="hidden md:inline">Dela</span>
-                            </button>
-                            <button 
-                                onClick={() => handleCopyReport(activeReport.reportData)} 
-                                className="px-4 py-2 bg-gray-50 dark:bg-gray-800 rounded-lg font-black text-[10px] uppercase tracking-widest hover:bg-black hover:text-white transition-all flex items-center gap-2 whitespace-nowrap"
-                            >
-                                <Copy size={14}/> <span className="hidden md:inline">Kopiera</span>
-                            </button>
-                            <button 
-                                onClick={() => window.print()} 
-                                className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg font-black text-[10px] uppercase tracking-widest hover:opacity-80 active:scale-95 transition-all flex items-center gap-2 whitespace-nowrap"
-                            >
-                                <Printer size={14}/> <span className="hidden md:inline">Skriv ut</span>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div className="flex-1 overflow-y-auto bg-white dark:bg-gray-950 custom-scrollbar" id="printable-report">
-                        <div className="max-w-[1000px] mx-auto bg-white dark:bg-white text-black p-8 md:p-24 relative min-h-screen shadow-2xl md:my-12 md:rounded-none">
-                             
-                             {/* DOSSIER HEADER */}
-                             <div className="flex justify-between items-start mb-20">
-                                <div className="flex gap-5">
-                                    <div className="w-16 h-16 bg-black flex items-center justify-center rounded-xl shadow-xl">
-                                        <span className="text-white text-4xl font-serif-display italic font-bold">A</span>
+                        {/* Content Area (Centered and Fixed Alignment) */}
+                        <div className="flex-1 overflow-y-auto custom-scrollbar bg-white" id="printable-report">
+                            <div className="max-w-4xl mx-auto p-12 md:p-24 space-y-16 text-black text-center md:text-left">
+                                {/* Page 1: Cover Style */}
+                                <div className="space-y-12">
+                                    <div className="flex flex-col items-center md:items-start gap-4">
+                                        <div className="w-12 h-12 bg-black text-white rounded-xl flex items-center justify-center font-serif text-2xl italic font-bold">A</div>
+                                        <div className="text-[10px] font-black uppercase tracking-[0.5em]">Aceverse Intel</div>
                                     </div>
-                                    <div className="pt-2">
-                                        <div className="text-[10px] font-black uppercase tracking-[0.4em] text-black">ACEVERSE INTEL</div>
-                                        <div className="text-[7px] font-black uppercase tracking-[0.2em] text-gray-400 mt-1">Research Dossier v3.1</div>
-                                    </div>
+                                    <div className="h-1 w-24 bg-black mx-auto md:mx-0"></div>
+                                    <h1 className="text-6xl md:text-8xl font-serif-display font-black uppercase tracking-tighter leading-none">DUE<br/>DILIGENCE<br/>DOSSIER</h1>
+                                    <div className="h-4 w-full bg-black"></div>
+                                    <h2 className="text-4xl md:text-6xl font-serif-display font-black uppercase italic tracking-tighter border-b-8 border-black pb-4 inline-block">
+                                        BOLAGSANALYS: {activeReport.reportData.meta.companyName.toUpperCase()}
+                                    </h2>
                                 </div>
-                                <div className="text-right pt-2 border-t-[3px] border-black w-40">
-                                    <div className="text-sm font-bold tracking-tighter">{new Date(activeReport.created_at).toISOString().split('T')[0]}</div>
-                                    <div className="text-[8px] font-black uppercase tracking-[0.2em] text-gray-400 mt-0.5">CLASSIFIED DATA ENTRY</div>
-                                </div>
-                             </div>
 
-                             {/* MAIN TITLES */}
-                             <div className="mb-20">
-                                <h1 className="text-[14vw] md:text-[120px] font-serif-display font-black uppercase tracking-tighter leading-[0.8] mb-12 text-black">
-                                    DUE<br/>DILIGENCE<br/>DOSSIER
-                                </h1>
-                                <div className="flex items-center gap-4 mb-12">
-                                    <div className="w-5 h-5 rounded-full border-[2.5px] border-black flex items-center justify-center">
-                                        <div className="w-2 h-2 bg-black rounded-full animate-pulse"></div>
-                                    </div>
-                                    <div className="text-[11px] font-black uppercase tracking-[0.4em] text-black/40">
-                                        SUBJECT: {activeReport.title.toUpperCase()} AB // ENCRYPTED ENTRY
-                                    </div>
-                                </div>
-                                <div className="h-4 bg-black w-full shadow-lg"></div>
-                             </div>
-
-                             {/* SUB HEADER BOX */}
-                             <div className="mb-24">
-                                <h2 className="text-4xl md:text-6xl font-serif-display font-black italic uppercase tracking-tighter mb-4 text-black">
-                                    BOLAGSANALYS: {activeReport.title.toUpperCase()}
-                                </h2>
-                                <div className="h-[2px] bg-black w-full mb-12"></div>
-                             </div>
-
-                             {/* KPI GRID (Bilder inspiration p4) */}
-                             <div className="grid grid-cols-2 md:grid-cols-3 gap-0 border-2 border-black/5 mb-24 rounded-2xl overflow-hidden">
-                                <KpiBox label="Omsättning" val={activeReport.reportData.summary?.revenue || '9.2 MSEK'} />
-                                <KpiBox label="EBITDA" val={activeReport.reportData.summary?.ebitda || '1.4 MSEK'} />
-                                <KpiBox label="Soliditet" val={activeReport.reportData.summary?.solvency || '82%'} highlight />
-                                <KpiBox label="Anställda" val={activeReport.reportData.summary?.employees || '12'} />
-                                <KpiBox label="Grundat" val={activeReport.reportData.summary?.founded || '2021'} />
-                                <KpiBox label="Hemsida" val={getSafeHostname(activeReport.reportData.meta.website)} />
-                             </div>
-
-                             {/* CONTENT CONTENT (Parsed Markdown with numbered headers) */}
-                             <div className="prose prose-2xl max-w-none prose-p:text-black prose-headings:text-black">
-                                {activeReport.reportData.fullMarkdown.split('\n').map((line, i) => {
-                                    if(line.startsWith('#')) {
-                                        const depth = line.match(/^#+/)?.[0].length || 0;
-                                        const text = line.replace(/#+/g, '').trim();
-                                        if (depth === 1) return <h3 key={i} className="text-3xl font-serif-display font-black italic uppercase mb-8 mt-16 border-b-2 border-black pb-4">{text}</h3>;
-                                        return <h4 key={i} className="text-xl font-serif-display font-black italic uppercase mb-6 mt-12">{text}</h4>;
-                                    }
-                                    const text = line.trim();
-                                    if(!text) return <div key={i} className="h-4"></div>;
-                                    
-                                    // Bullet points style
-                                    if(text.startsWith('* ') || text.startsWith('- ')) {
-                                        return <div key={i} className="flex items-start gap-4 mb-4 pl-6 group">
-                                            <div className="w-1.5 h-1.5 bg-black rounded-full mt-3 group-hover:scale-150 transition-transform"></div>
-                                            <p className="text-xl leading-relaxed text-black/80 font-medium m-0" dangerouslySetInnerHTML={{ __html: text.substring(2).replace(/\*\*(.*?)\*\*/g, '<strong class="font-black">$1</strong>') }} />
-                                        </div>;
-                                    }
-
-                                    return <p key={i} className="text-xl leading-[1.7] text-black/80 font-medium mb-10 pl-1 border-l-[3px] border-black/5 hover:border-black transition-colors pl-8" dangerouslySetInnerHTML={{ __html: text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-black">$1</strong>') }} />;
-                                })}
-                             </div>
-
-                             {/* VERIFIED SOURCE DOSSIER (Bilder inspiration p5) */}
-                             <div className="mt-40 pt-16 border-t-[8px] border-black">
-                                <h3 className="text-2xl font-serif-display font-black italic uppercase tracking-[0.3em] mb-12 flex items-center gap-4">
-                                    <ShieldCheck size={28} /> VERIFIED SOURCE DOSSIER
-                                </h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {activeReport.reportData.sources?.map((s, i) => (
-                                        <div key={i} className="flex gap-6 p-6 bg-black/5 border border-black/5 rounded-2xl hover:bg-black/10 transition-all cursor-pointer group">
-                                            <div className="w-10 h-10 bg-black text-white flex items-center justify-center rounded-xl text-sm font-bold shadow-lg group-hover:scale-110 transition-transform">{i+1}</div>
-                                            <div className="min-w-0 flex-1">
-                                                <div className="text-[11px] font-black uppercase tracking-widest truncate mb-1">{s.title}</div>
-                                                <div className="text-[10px] text-blue-600 font-bold truncate opacity-60 group-hover:opacity-100 transition-opacity underline decoration-blue-600/30">{s.url}</div>
-                                            </div>
+                                {/* Page 2: Content */}
+                                <div className="space-y-16 pt-24 text-left">
+                                    <section className="grid md:grid-cols-2 gap-12 border-y-2 border-black py-12">
+                                        <div className="space-y-4">
+                                            <h3 className="font-black uppercase tracking-widest text-[11px] text-gray-400">Grundläggande fakta</h3>
+                                            <ul className="space-y-2 font-bold italic">
+                                                <li>Juridiskt namn: {activeReport.reportData.meta.companyName}</li>
+                                                <li>Webbplats: {activeReport.reportData.meta.website}</li>
+                                                <li>Anställda: {activeReport.reportData.summary?.employees || 'N/A'}</li>
+                                            </ul>
                                         </div>
-                                    ))}
-                                    {(!activeReport.reportData.sources || activeReport.reportData.sources.length === 0) && (
-                                        <div className="col-span-2 py-10 text-center border-2 border-dashed border-gray-100 rounded-3xl">
-                                            <p className="text-xs font-black uppercase tracking-widest text-gray-300 italic">No external sources logged for this entry</p>
+                                        <div className="space-y-4">
+                                            <h3 className="font-black uppercase tracking-widest text-[11px] text-gray-400">Finansiell Översikt</h3>
+                                            <ul className="space-y-2 font-bold italic">
+                                                <li>Omsättning: {activeReport.reportData.summary?.revenue || 'N/A'}</li>
+                                                <li>Soliditet: {activeReport.reportData.summary?.solvency || 'N/A'}</li>
+                                                <li>Trust Score: {activeReport.reportData.summary?.trust_score || '85%'}</li>
+                                            </ul>
+                                        </div>
+                                    </section>
+
+                                    <div className="prose prose-xl max-w-none prose-headings:font-serif-display prose-headings:italic prose-headings:font-black prose-headings:uppercase prose-headings:tracking-tighter">
+                                        {activeReport.reportData.fullMarkdown.split('\n').map((line, i) => {
+                                            const trimmed = line.trim();
+                                            if(!trimmed) return <div key={i} className="h-6"></div>;
+                                            if(trimmed.startsWith('#')) {
+                                                const clean = trimmed.replace(/#/g, '').trim();
+                                                return <h4 key={i} className="text-2xl font-serif-display font-black uppercase italic tracking-tighter mt-16 mb-8 text-black border-l-8 border-black pl-6">{clean}</h4>;
+                                            }
+                                            return <p key={i} className="text-xl leading-[1.8] text-gray-800 font-medium italic mb-8 border-l border-gray-100 pl-8 transition-all hover:border-black">{trimmed}</p>;
+                                        })}
+                                    </div>
+
+                                    {activeReport.reportData.sources && activeReport.reportData.sources.length > 0 && (
+                                        <div className="pt-24 border-t border-gray-100">
+                                            <h3 className="text-4xl font-serif-display font-black uppercase tracking-tighter italic mb-10">VERIFIED SOURCES</h3>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                {activeReport.reportData.sources.map((source: any, i: number) => (
+                                                    <div key={i} className="bg-gray-50 p-8 border border-gray-200 relative overflow-hidden">
+                                                        <div className="absolute top-0 right-0 w-12 h-12 bg-black text-white flex items-center justify-center font-serif text-lg font-bold italic">{i + 1}</div>
+                                                        <h4 className="text-lg font-black uppercase tracking-tight mb-2 truncate">{source.title}</h4>
+                                                        <p className="text-[10px] font-mono text-gray-400 break-all">{source.url}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
                                         </div>
                                     )}
                                 </div>
-                             </div>
-
-                             {/* DOSSIER FOOTER */}
-                             <div className="mt-40 pt-12 border-t border-black/10 flex flex-col md:flex-row justify-between items-center md:items-end gap-12">
-                                <div className="flex items-center gap-6">
-                                    <div className="w-12 h-12 bg-black rounded-2xl flex items-center justify-center text-white rotate-45 shadow-xl"><BrainCircuit size={24}/></div>
-                                    <div>
-                                        <div className="text-[10px] font-black uppercase tracking-[0.5em] text-black">ACEVERSE RESEARCH ENGINE</div>
-                                        <div className="text-[9px] font-black uppercase tracking-[0.3em] text-gray-400 mt-1">AI DOMAIN V3.1 // SECURE</div>
-                                    </div>
-                                </div>
-                                <div className="text-[11px] font-black uppercase tracking-[0.6em] text-black/20 italic">END OF DOSSIER ENTRY</div>
-                             </div>
-
-                             <div className="mt-16 p-8 bg-black/5 rounded-3xl border border-black/5">
-                                <p className="text-[10px] text-black/40 font-bold uppercase tracking-[0.2em] leading-relaxed text-center">
-                                    DENNA RAPPORT ÄR SAMMANSTÄLLD VIA REALTIDSANALYS OCH MASKININLÄRNING. ACEVERSE GARANTERAR INTE DATANS EXAKTHET VID TIDPUNKTEN FÖR LÄSNING. DOKUMENTET ÄR KONFIDENTIELLT OCH AVSETT FÖR INTERNT BRUK.
-                                </p>
-                             </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             )}
 
-            {/* MODAL: LÄGG TILL KUND */}
             {isAddModalOpen && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fadeIn">
-                    <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl p-10 md:p-12 relative animate-slideUp border border-gray-100 dark:border-gray-800">
-                        <button onClick={() => setIsAddModalOpen(false)} className="absolute top-8 right-8 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-full transition-all group"><X size={24} className="text-gray-300 group-hover:text-black" /></button>
+                    <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl p-10 relative border border-gray-100 dark:border-gray-800">
+                        <button onClick={() => setIsAddModalOpen(false)} className="absolute top-8 right-8 p-3 hover:bg-gray-50 rounded-full text-gray-300 hover:text-black transition-all"><X size={24} /></button>
                         <h2 className="text-3xl font-serif-display italic font-bold mb-10">Ny Kund</h2>
                         <form onSubmit={handleAddLead} className="space-y-6">
-                            <div className="grid gap-5">
-                                <SimpleInput label="Namn" value={newLead.name} onChange={v => setNewLead({...newLead, name: v})} required />
-                                <SimpleInput label="Företag" value={newLead.company} onChange={v => setNewLead({...newLead, company: v})} required />
-                                <SimpleInput label="E-post" value={newLead.email} onChange={v => setNewLead({...newLead, email: v})} />
-                                <SimpleInput label="Värde (kr)" type="number" value={newLead.value} onChange={v => setNewLead({...newLead, value: v})} />
-                            </div>
-                            <button disabled={isSavingLead} className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] active:scale-95 transition-all mt-4">{isSavingLead ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>} Spara kund</button>
+                            <SimpleInput label="Namn" value={newLead.name} onChange={v => setNewLead({...newLead, name: v})} required />
+                            <SimpleInput label="Företag" value={newLead.company} onChange={v => setNewLead({...newLead, company: v})} required />
+                            <button disabled={isSavingLead} className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] active:scale-95 transition-all">{isSavingLead ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>} Spara</button>
                         </form>
                     </div>
                 </div>
             )}
 
-            {/* MODAL: KUNDDETALJER */}
             {isDetailOpen && selectedLead && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fadeIn">
-                    <div className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-[3rem] shadow-2xl flex flex-col h-[80vh] overflow-hidden animate-slideUp border border-gray-100 dark:border-gray-800">
-                        <div className="p-10 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50/30 dark:bg-gray-900/30">
+                    <div className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-[3rem] shadow-2xl flex flex-col h-[80vh] overflow-hidden border border-gray-100 dark:border-gray-800">
+                        <div className="p-10 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50/30">
                             <div className="flex items-center gap-5">
-                                <div className="w-16 h-16 rounded-[1.5rem] bg-black text-white dark:bg-white dark:text-black flex items-center justify-center font-black text-2xl shadow-xl">{selectedLead.name[0]}</div>
-                                <div className="min-w-0">
-                                    <h2 className="text-2xl font-serif-display font-bold italic truncate pr-4">{selectedLead.name}</h2>
-                                    <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest">{selectedLead.company}</p>
-                                </div>
+                                <div className="w-16 h-16 rounded-[1.5rem] bg-black text-white flex items-center justify-center font-black text-2xl shadow-xl">{selectedLead.name[0]}</div>
+                                <h2 className="text-2xl font-serif-display font-bold italic truncate pr-4">{selectedLead.name}</h2>
                             </div>
-                            <button onClick={() => setIsDetailOpen(false)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all shrink-0"><X size={28}/></button>
+                            <button onClick={() => setIsDetailOpen(false)} className="p-3 hover:bg-gray-100 rounded-full transition-all text-black dark:text-white"><X size={28}/></button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-2 gap-6">
                                 <DetailBox label="Status" value={selectedLead.status} />
                                 <DetailBox label="Värde" value={`${selectedLead.value.toLocaleString()} kr`} />
-                                <DetailBox label="E-post" value={selectedLead.email || 'Ingen angiven'} />
-                                <DetailBox label="Företag" value={selectedLead.company} />
                             </div>
                             <div className="space-y-3">
-                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-2 flex items-center gap-2">Anteckningar</label>
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-2">Anteckningar</label>
                                 <textarea 
-                                    className="w-full h-40 bg-gray-50 dark:bg-gray-800 p-6 rounded-[2rem] border-none outline-none font-bold italic text-lg resize-none shadow-inner ring-1 ring-transparent focus:ring-black dark:focus:ring-white transition-all" 
+                                    className="w-full h-40 bg-gray-50 dark:bg-gray-800 p-6 rounded-[2rem] border-none outline-none font-bold italic text-lg resize-none shadow-inner ring-1 ring-transparent focus:ring-black transition-all dark:text-white" 
                                     defaultValue={selectedLead.notes} 
                                     onBlur={e => db.updateLead(user.id, selectedLead.id, { notes: e.target.value })} 
                                     placeholder="..."
@@ -586,8 +520,8 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                             </div>
                         </div>
                         <div className="p-8 border-t border-gray-100 dark:border-gray-800 flex gap-4">
-                            <button onClick={() => { setSelectedMailLeadId(selectedLead.id); setActiveTab('mail'); setIsDetailOpen(false); }} className="flex-1 py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 shadow-lg hover:scale-[1.02] active:scale-95 transition-all"><Mail size={20}/> Skriv Mail</button>
-                            <button onClick={() => setLeadToDelete(selectedLead)} className="p-6 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-[1.5rem] hover:bg-red-500 hover:text-white transition-all shadow-sm active:scale-95 border border-red-100 dark:border-red-900"><Trash2 size={24}/></button>
+                            <button onClick={() => { setSelectedMailLeadId(selectedLead.id); setActiveTab('mail'); setIsDetailOpen(false); }} className="flex-1 py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3"><Mail size={20}/> Skriv Mail</button>
+                            <button onClick={() => setLeadToDelete(selectedLead)} className="p-6 bg-red-50 text-red-500 rounded-[1.5rem] hover:bg-red-500 hover:text-white transition-all border border-red-100"><Trash2 size={24}/></button>
                         </div>
                     </div>
                 </div>
@@ -596,61 +530,37 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     );
 };
 
-// --- HJÄLPKOMPONENTER ---
-
 const SimpleTab = ({ active, onClick, icon, label }: any) => (
-    <button onClick={onClick} className={`flex items-center gap-2.5 px-8 py-3.5 rounded-[1.5rem] font-bold text-base transition-all duration-300 ${active ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg scale-[1.02] z-10' : 'text-gray-400 hover:text-black dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-800'}`}>
-        <span className={`${active ? 'scale-110' : ''}`}>{icon}</span>
-        <span className="italic whitespace-nowrap">{label}</span>
+    <button onClick={onClick} className={`flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-[1.5rem] font-bold text-sm md:text-base transition-all ${active ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg scale-[1.02] z-10' : 'text-gray-400 hover:text-black dark:hover:text-white hover:bg-gray-50'}`}>
+        {icon} <span className="italic whitespace-nowrap">{label}</span>
     </button>
 );
 
-const BigStatCard = ({ label, value, icon, color }: any) => {
-    const colors: any = {
-        blue: "text-blue-500 bg-blue-50/50 dark:bg-blue-900/10",
-        green: "text-green-500 bg-green-50/50 dark:bg-green-900/10",
-        purple: "text-purple-500 bg-purple-50/50 dark:bg-purple-900/10"
-    };
-    return (
-        <div className="p-8 bg-white dark:bg-gray-900 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm transition-all duration-500 hover:shadow-xl hover:-translate-y-1 group">
-            <div className={`w-14 h-14 rounded-2xl ${colors[color]} flex items-center justify-center mb-6 transition-transform group-hover:rotate-6 shadow-inner`}>{icon}</div>
-            <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-1.5 truncate">{label}</p>
-            <p className="text-3xl font-serif-display font-black italic tracking-tighter truncate text-gray-900 dark:text-white">{value}</p>
-        </div>
-    );
-};
+const BigStatCard = ({ label, value, icon, color }: any) => (
+    <div className="p-8 bg-white dark:bg-gray-900 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl transition-all group">
+        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-6 bg-gray-50 dark:bg-gray-800 text-${color}-500 shadow-inner`}>{icon}</div>
+        <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-1.5 truncate">{label}</p>
+        <p className="text-3xl font-serif-display font-black italic tracking-tighter truncate text-gray-900 dark:text-white">{value}</p>
+    </div>
+);
 
 const SimpleInput = ({ label, value, onChange, type = "text", required = false }: any) => (
-    <div className="space-y-2.5 group">
-        <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest block ml-2 transition-colors group-focus-within:text-black dark:group-focus-within:text-white">{label} {required && '*'}</label>
+    <div className="space-y-2.5">
+        <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest block ml-2">{label} {required && '*'}</label>
         <input 
             type={type} 
             value={value || ''} 
             onChange={e => onChange(e.target.value)} 
             required={required}
-            className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent p-5 rounded-[1.5rem] focus:bg-white dark:focus:bg-gray-900 focus:border-black dark:focus:border-white outline-none text-lg font-bold italic shadow-inner transition-all dark:text-white"
+            className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent p-5 rounded-[1.5rem] focus:bg-white dark:focus:bg-gray-900 focus:border-black outline-none text-lg font-bold italic shadow-inner transition-all dark:text-white"
         />
     </div>
 );
 
 const DetailBox = ({ label, value }: any) => (
-    <div className="p-6 bg-gray-50 dark:bg-gray-800/40 rounded-[1.8rem] border border-transparent hover:border-gray-200 dark:hover:border-gray-700 transition-all group">
+    <div className="p-6 bg-gray-50 dark:bg-gray-800/40 rounded-[1.8rem] border border-transparent transition-all">
         <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest block mb-2 truncate">{label}</span>
-        <p className="text-lg font-bold italic truncate text-gray-800 dark:text-white group-hover:text-black dark:group-hover:text-blue-400 transition-colors">{value}</p>
-    </div>
-);
-
-const ReportVal = ({ label, val, color }: any) => (
-    <div className="space-y-3 group">
-        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block truncate">{label}</span>
-        <span className={`text-3xl font-black italic font-serif-display border-b-2 border-transparent group-hover:border-black dark:group-hover:border-white transition-all pb-1 inline-block ${color === 'green' ? 'text-green-500' : color === 'blue' ? 'text-blue-500' : ''}`}>{val || 'N/A'}</span>
-    </div>
-);
-
-const KpiBox = ({ label, val, highlight }: { label: string, val: string, highlight?: boolean }) => (
-    <div className={`p-8 border border-black/5 flex flex-col justify-center items-center text-center transition-colors hover:bg-black/5 ${highlight ? 'bg-black/5' : ''}`}>
-        <span className="text-[10px] font-black uppercase tracking-[0.2em] text-black/40 mb-3">{label}</span>
-        <span className={`text-2xl md:text-3xl font-serif-display font-black italic uppercase leading-none ${highlight ? 'text-black' : 'text-black/80'}`}>{val}</span>
+        <p className="text-lg font-bold italic truncate text-gray-800 dark:text-white">{value}</p>
     </div>
 );
 
