@@ -14,6 +14,16 @@ const generateId = () => {
 };
 
 class DatabaseService {
+  // --- CONNECTION HEALTH CHECK ---
+  async checkHealth(): Promise<boolean> {
+    try {
+      const { error } = await supabase.from('user_settings').select('id').limit(1).maybeSingle();
+      return !error;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async getCurrentUser(): Promise<User | null> {
     try {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
@@ -208,7 +218,8 @@ class DatabaseService {
       };
     } catch (e) {
       console.error("Error fetching all user data", e);
-      return { profile: {}, leads: [], ideas: [], pitches: [], chatHistory: [], sessions: [] };
+      // Return empty structures on error, but the UI should handle the connection failure
+      throw e; 
     }
   }
 
@@ -259,6 +270,15 @@ class DatabaseService {
       .single();
     if (error) throw error;
     return data;
+  }
+
+  async updateChatSession(userId: string, sessionId: string, name: string) {
+    const { error } = await supabase
+      .from('chat_sessions')
+      .update({ name })
+      .eq('id', sessionId)
+      .eq('user_id', userId);
+    if (error) throw error;
   }
 
   async addMessage(userId: string, msg: Partial<ChatMessage>) {

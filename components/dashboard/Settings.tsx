@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Notification, Invoice, UserSettings } from '../../types';
 import { db } from '../../services/db';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -7,7 +7,7 @@ import {
     Globe, User as UserIcon, Bell, Shield, CreditCard, Check, 
     Download, Trash2, Mail, Smartphone, AlertTriangle, FileText,
     Star, ArrowRight, Loader2, Calendar, MapPin, Briefcase,
-    PauseCircle, Lock
+    PauseCircle, Lock, Upload, XCircle
 } from 'lucide-react';
 
 interface SettingsProps {
@@ -128,8 +128,15 @@ const ProfileSection = ({ user, language, setLanguage }: { user: User, language:
     const [lastName, setLastName] = useState(user.lastName);
     const [company, setCompany] = useState(user.company || '');
     const [bio, setBio] = useState(user.bio || '');
+    
+    // UI States
     const [msg, setMsg] = useState('');
+    const [avatarError, setAvatarError] = useState('');
     const [isSaving, setIsSaving] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
+    const [previewAvatar, setPreviewAvatar] = useState(user.avatar);
+    
+    const fileInputRef = useRef<HTMLInputElement>(null);
     
     const handleSave = async () => {
         setIsSaving(true);
@@ -137,11 +144,61 @@ const ProfileSection = ({ user, language, setLanguage }: { user: User, language:
             await db.updateProfile(user.id, { firstName, lastName, company, bio });
             setMsg('Profil uppdaterad.');
             setTimeout(() => setMsg(''), 3000);
+            
+            // Reload if name changed to update sidebar
+            if (firstName !== user.firstName || lastName !== user.lastName) {
+                setTimeout(() => window.location.reload(), 500);
+            }
         } catch (error) {
             setMsg('Fel vid uppdatering.');
         } finally {
             setIsSaving(false);
         }
+    };
+
+    const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setAvatarError('');
+        
+        // Validation: Max 800KB
+        if (file.size > 800 * 1024) {
+            setAvatarError("Filen är för stor (Max 800KB).");
+            // Reset input so user can try again immediately
+            if (fileInputRef.current) fileInputRef.current.value = ""; 
+            return;
+        }
+
+        setIsUploading(true);
+        const reader = new FileReader();
+        
+        reader.onloadend = async () => {
+            const base64String = reader.result as string;
+            try {
+                // Update local preview immediately for UX
+                setPreviewAvatar(base64String);
+                
+                // Save to DB
+                await db.updateProfile(user.id, { avatar: base64String });
+                
+                setMsg('Avatar uppdaterad. Sidan laddas om...');
+                
+                // Automatically reload page to sync all components (Sidebar, Navbar)
+                setTimeout(() => {
+                    window.location.reload();
+                }, 800);
+            } catch (error) {
+                console.error("Failed to upload avatar", error);
+                setAvatarError("Kunde inte spara bilden. Försök igen.");
+                // Revert preview on error
+                setPreviewAvatar(user.avatar);
+            } finally {
+                setIsUploading(false);
+            }
+        };
+        
+        reader.readAsDataURL(file);
     };
 
     const inputClasses = "w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 text-sm font-medium text-gray-900 dark:text-white focus:bg-white dark:focus:bg-gray-900 focus:border-black dark:focus:border-white focus:ring-1 focus:ring-black dark:focus:ring-white outline-none transition-all placeholder:text-gray-400";
@@ -162,12 +219,41 @@ const ProfileSection = ({ user, language, setLanguage }: { user: User, language:
             
             {/* Avatar */}
             <div className="flex items-center gap-6 mb-10 pb-10 border-b border-gray-100 dark:border-gray-800">
-                <div className="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden border-4 border-gray-50 dark:border-gray-800 shadow-inner">
-                        <img src={user.avatar || `https://ui-avatars.com/api/?name=${firstName}+${lastName}&background=000&color=fff`} alt="User" className="w-full h-full object-cover" />
+                <div className="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden border-4 border-gray-50 dark:border-gray-800 shadow-inner group relative">
+                        {isUploading ? (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10 backdrop-blur-sm">
+                                <Loader2 className="animate-spin text-white" size={24} />
+                            </div>
+                        ) : null}
+                        <img 
+                            src={previewAvatar || `https://ui-avatars.com/api/?name=${firstName}+${lastName}&background=000&color=fff`} 
+                            alt="User" 
+                            className="w-full h-full object-cover" 
+                        />
                 </div>
                 <div>
-                    <button className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-5 py-2.5 rounded-full text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-black dark:hover:border-white transition-all mb-2 block shadow-sm text-gray-900 dark:text-white">Byt avatar</button>
-                    <p className="text-xs text-gray-400">JPG, GIF eller PNG. Max storlek 800K</p>
+                    <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        className="hidden" 
+                        accept="image/png, image/jpeg, image/gif"
+                        onChange={handleAvatarChange}
+                    />
+                    <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 px-5 py-2.5 rounded-full text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 hover:border-black dark:hover:border-white transition-all mb-2 flex items-center gap-2 shadow-sm text-gray-900 dark:text-white disabled:opacity-50"
+                    >
+                        <Upload size={16} /> {isUploading ? 'Laddar upp...' : 'Byt avatar'}
+                    </button>
+                    
+                    {avatarError ? (
+                        <p className="text-xs text-red-500 font-bold flex items-center gap-1 animate-shake">
+                            <XCircle size={12} /> {avatarError}
+                        </p>
+                    ) : (
+                        <p className="text-xs text-gray-400">JPG, GIF eller PNG. Max storlek 800K</p>
+                    )}
                 </div>
             </div>
 

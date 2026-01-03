@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
 import Home from './pages/Home';
@@ -27,44 +27,49 @@ function AppContent() {
   const [loading, setLoading] = useState(true);
   const [transitionStage, setTransitionStage] = useState<'idle' | 'in' | 'out'>('idle');
   const [isTransitioning, setIsTransitioning] = useState(false);
+  
+  // Connection State
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [syncTrigger, setSyncTrigger] = useState(0);
 
-  useEffect(() => {
-    const initApp = async () => {
-      try {
-        const user = await db.getCurrentUser();
-        if (user) {
-          setCurrentUser(user);
+  // --- 1. SESSION RECOVERY & INITIAL LOAD ---
+  const loadUser = useCallback(async () => {
+    try {
+      const user = await db.getCurrentUser();
+      if (user) {
+        setCurrentUser(user);
+        // Only redirect if we are on landing/auth pages
+        if (currentPage === 'home' || currentPage === 'login') {
           if (user.onboardingCompleted) {
             setCurrentPage('dashboard');
           } else {
             setCurrentPage('onboarding');
           }
-        } else {
-          // No user found, just stay on home
-          setCurrentPage('home');
         }
-      } catch (e) {
-        console.error("Initial load failed", e);
-        setCurrentPage('home');
-      } finally {
-        // Essential: must hide loading even if DB fails
-        setLoading(false);
+      } else {
+        // Only clear if we actually expected a user but got none
+        if (localStorage.getItem('aceverse-auth-token')) {
+             console.warn("Token exists but no user found - session likely expired");
+        }
       }
-    };
+    } catch (e) {
+      console.error("Load user failed", e);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage]);
 
-    initApp();
+  useEffect(() => {
+    loadUser();
 
+    // Supabase Auth Listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log(`Supabase Auth Event: ${event}`);
+      
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        const user = await db.getCurrentUser();
-        if (user) {
-          setCurrentUser(user);
-          // If already on home/login, push to dashboard/onboarding
-          if (currentPage === 'home' || currentPage === 'login') {
-            if (user.onboardingCompleted) setCurrentPage('dashboard');
-            else setCurrentPage('onboarding');
-          }
-        }
+        loadUser();
+        // Trigger a data refresh in children
+        setSyncTrigger(prev => prev + 1); 
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
         setCurrentPage('home');
@@ -73,7 +78,61 @@ function AppContent() {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [loadUser]);
+
+  // --- 2. CONNECTION & WAKE-UP LISTENERS ---
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log("Network back online. Reconnecting...");
+      setIsOnline(true);
+      setSyncTrigger(prev => prev + 1); // Force dashboard refresh
+      loadUser(); // Re-verify session
+    };
+
+    const handleOffline = () => {
+      console.log("Network lost.");
+      setIsOnline(false);
+    };
+
+    const handleFocus = () => {
+        // When tab comes into focus (e.g. laptop wake), check health
+        if (document.visibilityState === 'visible') {
+            console.log("Tab focused. Checking session health...");
+            db.checkHealth().then(healthy => {
+                if (!healthy) {
+                    console.warn("Health check failed on focus. Retrying load...");
+                    setSyncTrigger(prev => prev + 1);
+                }
+            });
+        }
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      document.removeEventListener('visibilitychange', handleFocus);
+    };
+  }, [loadUser]);
+
+  // --- 3. HEARTBEAT (KEEP-ALIVE) ---
+  useEffect(() => {
+    // Ping database every 2 minutes to keep connection warm and detect silent drops
+    const heartbeat = setInterval(async () => {
+        if (!currentUser) return;
+        const isHealthy = await db.checkHealth();
+        if (!isHealthy && navigator.onLine) {
+            console.warn("Heartbeat missed. Triggering refresh...");
+            setSyncTrigger(prev => prev + 1);
+        }
+    }, 2 * 60 * 1000); 
+
+    return () => clearInterval(heartbeat);
+  }, [currentUser]);
+
 
   const handleNavigation = (newPage: Page) => {
     if (newPage === currentPage || isTransitioning) return;
@@ -142,11 +201,11 @@ function AppContent() {
         if (!currentUser) return <Login onLogin={handleLogin} onBack={() => handleNavigation('home')} />;
         return <Onboarding user={currentUser} onComplete={(u) => { setCurrentUser(u); handleNavigation('dashboard'); }} />;
       case 'login': 
-        if (currentUser) return <Dashboard user={currentUser} onLogout={handleLogout} />;
+        if (currentUser) return <Dashboard user={currentUser} onLogout={handleLogout} syncTrigger={syncTrigger} />;
         return <Login onLogin={handleLogin} onBack={() => handleNavigation('home')} />;
       case 'dashboard': 
         if (!currentUser) return <Login onLogin={handleLogin} onBack={() => handleNavigation('home')} />;
-        return <Dashboard user={currentUser} onLogout={handleLogout} />;
+        return <Dashboard user={currentUser} onLogout={handleLogout} syncTrigger={syncTrigger} />;
       default: return <Home onNavigate={handleNavigation} />;
     }
   };

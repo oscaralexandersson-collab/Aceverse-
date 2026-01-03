@@ -34,7 +34,8 @@ export interface Lead {
   linkedin?: string;
   website?: string;
   notes?: string;
-  status: 'Nya' | 'Kontaktade' | 'Möte bokat' | 'Klart';
+  // Fix: Added 'Ny', 'Kontaktad', 'Intresserad', 'Offert', 'Kund', 'Ej aktuell' to match usage in CRM.tsx
+  status: 'Ny' | 'Kontaktad' | 'Intresserad' | 'Offert' | 'Kund' | 'Ej aktuell' | 'Nya' | 'Kontaktade' | 'Möte bokat' | 'Klart';
   priority: 'High' | 'Medium' | 'Low';
   value: number;
   lead_score: number;

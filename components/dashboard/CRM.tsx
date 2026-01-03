@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
     Users, Plus, Search, Mail, Phone, 
     Globe, Linkedin, ArrowRight, BarChart3, 
@@ -10,7 +10,10 @@ import {
     Activity, Building2, TrendingUp, ShieldCheck,
     Calendar, History, Maximize2, BrainCircuit, Printer,
     Star, Rocket, Download, ExternalLink, AlertTriangle,
-    Sparkles, Share2, Shield, Lock, FileSearch, Eye
+    Sparkles, Share2, Shield, Lock, FileSearch, Eye,
+    ChevronRight, RefreshCw, PanelLeftClose, PanelLeftOpen,
+    Menu, TrendingDown, Lightbulb, FileWarning, Timer,
+    ArrowUpCircle, MessageSquare, Clock, User as UserIcon
 } from 'lucide-react';
 import { User, Lead, CompanyReport, CompanyReportEntry } from '../../types';
 import { db } from '../../services/db';
@@ -22,38 +25,34 @@ interface CRMProps {
     user: User;
 }
 
-const STATUS_STAGES = ['Nya', 'Kontaktade', 'Möte bokat', 'Klart'] as const;
+type CRMStatus = 'Ny' | 'Kontaktad' | 'Intresserad' | 'Offert' | 'Kund' | 'Ej aktuell';
+type MailType = 'Första kontakt' | 'Uppföljning' | 'Skicka offert' | 'Tack' | 'Påminnelse' | 'Fritt mejl';
 
 const CRM: React.FC<CRMProps> = ({ user }) => {
     const { t } = useLanguage();
-    const [activeTab, setActiveTab] = useState<'overview' | 'contacts' | 'mail' | 'intelligence'>('contacts');
     const [leads, setLeads] = useState<Lead[]>([]);
     const [reports, setReports] = useState<CompanyReportEntry[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [filter, setFilter] = useState<'all' | 'leads' | 'deals' | 'customers'>('all');
 
-    // Filter/Search
-    const [searchQuery, setSearchQuery] = useState('');
-    const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-    const [isDetailOpen, setIsDetailOpen] = useState(false);
+    // Modals & Views
     const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-    const [newLead, setNewLead] = useState<Partial<Lead>>({ status: 'Nya', value: 0, priority: 'Medium' });
-    const [isSavingLead, setIsSavingLead] = useState(false);
-    const [leadToDelete, setLeadToDelete] = useState<Lead | null>(null);
-
-    // AI Mail
-    const [selectedMailLeadId, setSelectedMailLeadId] = useState<string>('');
-    const [mailPrompt, setMailPrompt] = useState('');
-    const [generatedMail, setGeneratedMail] = useState<{ subject: string, body: string } | null>(null);
+    const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+    const [isMailDrawerOpen, setIsMailDrawerOpen] = useState(false);
+    const [isIntelligenceOpen, setIsIntelligenceOpen] = useState(false);
+    
+    // AI Mail State
+    const [mailType, setMailType] = useState<MailType>('Första kontakt');
+    const [generatedMail, setGeneratedMail] = useState('');
     const [isGeneratingMail, setIsGeneratingMail] = useState(false);
-    const [copyStatus, setCopyStatus] = useState(false);
+    const [mailError, setMailError] = useState(false);
 
-    // Intelligence (Bolagskollen)
+    // Bolagskollen State
     const [reportUrl, setReportUrl] = useState('');
     const [isGeneratingReport, setIsGeneratingReport] = useState(false);
-    const [showReportSuccess, setShowReportSuccess] = useState(false);
+    const [reportError, setReportError] = useState(false);
     const [activeReport, setActiveReport] = useState<CompanyReportEntry | null>(null);
-    const [reportToDelete, setReportToDelete] = useState<CompanyReportEntry | null>(null);
-    const [isFullScreen, setIsFullScreen] = useState(false);
+    const [isFullScreenReport, setIsFullScreenReport] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -65,6 +64,9 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             const data = await db.getUserData(user.id);
             setLeads(Array.isArray(data.leads) ? data.leads : []);
             setReports(Array.isArray(data.reports) ? data.reports : []);
+            if (data.reports && data.reports.length > 0) {
+                setActiveReport(data.reports[0]);
+            }
         } catch (e) {
             console.error("Kunde inte hämta data", e);
         } finally {
@@ -72,52 +74,84 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         }
     };
 
+    const stats = useMemo(() => {
+        const totalLeads = leads.filter(l => l.status !== 'Kund').length;
+        const deals = leads.filter(l => l.status === 'Offert' || l.status === 'Intresserad').length;
+        const customers = leads.filter(l => l.status === 'Kund').length;
+        const revenue = leads.filter(l => l.status === 'Kund').reduce((acc, l) => acc + (l.value || 0), 0);
+        return { totalLeads, deals, customers, revenue };
+    }, [leads]);
+
+    const filteredLeads = useMemo(() => {
+        if (filter === 'all') return leads;
+        if (filter === 'leads') return leads.filter(l => l.status === 'Ny' || l.status === 'Kontaktad');
+        if (filter === 'deals') return leads.filter(l => l.status === 'Intresserad' || l.status === 'Offert');
+        if (filter === 'customers') return leads.filter(l => l.status === 'Kund');
+        return leads;
+    }, [leads, filter]);
+
     const handleAddLead = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newLead.name || !newLead.company) return;
-        setIsSavingLead(true);
+        const form = e.target as HTMLFormElement;
+        const formData = new FormData(form);
+        
         try {
             const added = await db.addLead(user.id, {
-                name: newLead.name!,
-                company: newLead.company!,
-                email: newLead.email || '',
-                phone: newLead.phone || '',
-                status: (newLead.status as any) || 'Nya',
-                value: Number(newLead.value) || 0,
+                name: formData.get('name') as string,
+                company: formData.get('company') as string,
+                email: formData.get('email') as string,
+                status: 'Ny',
+                value: Number(formData.get('value')) || 0,
                 priority: 'Medium',
-                lead_score: 85
+                lead_score: 70
             });
             setLeads(prev => [added, ...prev]);
             setIsAddModalOpen(false);
-            setNewLead({ status: 'Nya', value: 0, priority: 'Medium' });
         } catch (e) {
-            alert("Kunde inte spara.");
-        } finally {
-            setIsSavingLead(false);
+            alert("Kunde inte spara kontakten.");
         }
     };
 
-    const filteredLeads = useMemo(() => {
-        return leads.filter(l => 
-            (l.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
-            (l.company || '').toLowerCase().includes(searchQuery.toLowerCase())
-        );
-    }, [leads, searchQuery]);
+    const updateLeadStatus = async (id: string, newStatus: CRMStatus) => {
+        try {
+            await db.updateLead(user.id, id, { status: newStatus as any });
+            setLeads(prev => prev.map(l => l.id === id ? { ...l, status: newStatus as any } : l));
+            if (selectedLead?.id === id) setSelectedLead({ ...selectedLead, status: newStatus as any });
+        } catch (e) {
+            alert("Kunde inte uppdatera status.");
+        }
+    };
 
     const generateAIMail = async () => {
-        const lead = leads.find(l => l.id === selectedMailLeadId);
-        if (!lead || !mailPrompt) return;
+        if (!selectedLead) return;
         setIsGeneratingMail(true);
+        setMailError(false);
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const prompt = `
+                Skriv ett professionellt men ungt mejl (120-150 ord) på svenska.
+                Mottagare: ${selectedLead.name} från företaget ${selectedLead.company}.
+                Status i CRM: ${selectedLead.status}.
+                Mejltyp: ${mailType}.
+                
+                KONTEXT OM MITT UF-FÖRETAG (från Bolagskollen):
+                ${activeReport ? activeReport.reportData.fullMarkdown.substring(0, 500) : "Vi är ett drivet UF-företag."}
+                
+                REGLER:
+                - Korta stycken.
+                - Personlig ton.
+                - Tydligt nästa steg i slutet.
+                - Inga placeholders som [Namn], använd datan jag gav dig.
+            `;
+
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
-                contents: `Skriv ett säljmail till ${lead.name} på ${lead.company}. Prompt: ${mailPrompt}. Svara i JSON: {"subject": "...", "body": "..."}`,
-                config: { responseMimeType: 'application/json' }
+                contents: prompt,
             });
-            setGeneratedMail(JSON.parse(response.text || '{}'));
+
+            setGeneratedMail(response.text || '');
         } catch (e) {
-            alert("Gick inte att skriva mailet.");
+            setMailError(true);
         } finally {
             setIsGeneratingMail(false);
         }
@@ -126,403 +160,410 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const generateReport = async () => {
         if (!reportUrl) return;
         setIsGeneratingReport(true);
-        setShowReportSuccess(false);
+        setReportError(false);
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            
-            const reportSchema = {
-                type: Type.OBJECT,
-                properties: {
-                    meta: {
-                        type: Type.OBJECT,
-                        properties: {
-                            companyName: { type: Type.STRING, description: "Företagets formella namn" },
-                            website: { type: Type.STRING, description: "Fullständig URL" },
-                            generatedDate: { type: Type.STRING, description: "Dagens datum" },
-                            language: { type: Type.STRING, description: "Språket i rapporten" },
-                        },
-                        required: ["companyName", "website", "generatedDate", "language"],
-                    },
-                    summary: {
-                        type: Type.OBJECT,
-                        properties: {
-                            revenue: { type: Type.STRING, description: "Omsättning eller uppskattning" },
-                            ebitda: { type: Type.STRING, description: "Resultat eller uppskattning" },
-                            solvency: { type: Type.STRING, description: "Soliditet i procent" },
-                            employees: { type: Type.STRING, description: "Antal anställda" },
-                            founded: { type: Type.STRING, description: "Grundat år" },
-                            trust_score: { type: Type.STRING, description: "AI-baserad trovärdighetssiffra (ex 85%)" },
-                            market_status: { type: Type.STRING, description: "Marknadsläge (Stabil, Växande, etc)" },
-                            risk_profile: { type: Type.STRING, description: "Riskprofil (Låg, Medel, Hög)" },
-                        },
-                    },
-                    fullMarkdown: { type: Type.STRING, description: "En djupgående analys i markdown-format (inga rubriker på nivå 1). Inkludera SWOT, konkurrentanalys och affärsmodell." },
-                },
-                required: ["meta", "summary", "fullMarkdown"],
-            };
-
-            const prompt = `Genomför en omfattande bolagsanalys av ${reportUrl} för ett UF-företag. 
-            Hämta: Grundfakta, produkter/tjänster, affärsmodell, målgrupp, styrkor/svagheter (SWOT), trovärdighet (AI-score), sociala medier-närvaro, teknisk snabbkoll (SEO/laddtid), och lista konkurrenter.
-            Språk: Svenska.
-            Använd Google Sök för att hitta realtidsdata om bolaget.`;
-            
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
-                contents: prompt,
+                contents: `Gör en djuplodande bolagsanalys av ${reportUrl} för ett UF-företag. Svara på svenska i JSON.`,
                 config: { 
                     tools: [{ googleSearch: {} }], 
                     responseMimeType: 'application/json',
-                    responseSchema: reportSchema
+                    responseSchema: {
+                        type: Type.OBJECT,
+                        properties: {
+                            meta: { type: Type.OBJECT, properties: { companyName: { type: Type.STRING }, website: { type: Type.STRING }, generatedDate: { type: Type.STRING } } },
+                            summary: { type: Type.OBJECT, properties: { revenue: { type: Type.STRING }, employees: { type: Type.STRING }, founded: { type: Type.STRING }, solvency: { type: Type.STRING }, ebitda: { type: Type.STRING } } },
+                            fullMarkdown: { type: Type.STRING }
+                        }
+                    }
                 }
             });
-            
-            const groundingChunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-            const sources = groundingChunks?.map((chunk: any, i: number) => ({
-                id: i + 1,
-                url: chunk.web?.uri || chunk.maps?.uri || '',
-                title: chunk.web?.title || chunk.maps?.title || 'Källa',
-                reliability: 80 + Math.floor(Math.random() * 20)
-            })).filter((s: any) => s.url) || [];
-
-            const reportData = JSON.parse(response.text || '{}');
-            reportData.sources = sources; 
-            
-            const entry = await db.addReportToHistory(user.id, reportData);
+            const data = JSON.parse(response.text || '{}');
+            const entry = await db.addReportToHistory(user.id, data);
             setReports(prev => [entry, ...prev]);
             setActiveReport(entry);
-            setShowReportSuccess(true);
             setReportUrl('');
         } catch (e) {
-            console.error("Bolagskollen Error:", e);
-            alert("Kunde inte analysera hemsidan. Kontrollera att URL:en är korrekt.");
+            setReportError(true);
         } finally {
             setIsGeneratingReport(false);
         }
     };
 
-    const getSafeHostname = (url: string | undefined) => {
-        if (!url || url === 'undefined') return 'okänd';
-        try {
-            const cleanUrl = url.includes('://') ? url : 'https://' + url;
-            return new URL(cleanUrl).hostname;
-        } catch (e) {
-            return url;
-        }
-    };
-
-    const handleCopyReport = (report: CompanyReport) => {
-        const text = `BOLAGSRAPPORT: ${report.meta.companyName.toUpperCase()}\nWEBBSIDA: ${report.meta.website}\nDATUM: ${report.meta.generatedDate}\n\nSUMMERING:\nOmsättning: ${report.summary?.revenue || 'N/A'}\nEBITDA: ${report.summary?.ebitda || 'N/A'}\nSoliditet: ${report.summary?.solvency || 'N/A'}\nAnställda: ${report.summary?.employees || 'N/A'}\n\nANALYS:\n${report.fullMarkdown}`;
-        navigator.clipboard.writeText(text);
-        alert("Rapporten har kopierats till urklipp!");
-    };
-
-    const handlePrintReport = (r: CompanyReportEntry) => {
-        setActiveReport(r);
-        setIsFullScreen(true);
-        setTimeout(() => window.print(), 500);
-    };
+    if (isLoading) return (
+        <div className="h-full flex flex-col items-center justify-center space-y-4">
+            <Loader2 className="animate-spin text-black" size={40} />
+            <p className="text-sm font-black uppercase tracking-widest text-gray-400 italic">Laddar din arbetsyta...</p>
+        </div>
+    );
 
     return (
-        <div className="flex flex-col h-full gap-6 animate-fadeIn">
-            <DeleteConfirmModal isOpen={!!reportToDelete} onClose={() => setReportToDelete(null)} onConfirm={async () => { await db.deleteReport(user.id, reportToDelete!.id); loadData(); setReportToDelete(null); if(activeReport?.id === reportToDelete?.id) { setActiveReport(null); setIsFullScreen(false); } }} itemName={reportToDelete?.title || ''} />
-            <DeleteConfirmModal isOpen={!!leadToDelete} onClose={() => setLeadToDelete(null)} onConfirm={async () => { await db.deleteLead(user.id, leadToDelete!.id); loadData(); setLeadToDelete(null); if(selectedLead?.id === leadToDelete?.id) setIsDetailOpen(false); }} itemName={leadToDelete?.name || ''} />
-
-            {/* NAVIGATION */}
-            <div className="bg-white dark:bg-gray-900 p-2 rounded-[2rem] border border-gray-200 dark:border-gray-800 shadow-sm flex flex-wrap gap-2 sticky top-0 z-40 backdrop-blur-md bg-white/90">
-                <SimpleTab active={activeTab === 'overview'} onClick={() => setActiveTab('overview')} icon={<BarChart3 size={20}/>} label="Överblick" />
-                <SimpleTab active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} icon={<Users size={20}/>} label="Kunder" />
-                <SimpleTab active={activeTab === 'mail'} onClick={() => setActiveTab('mail')} icon={<Mail size={20}/>} label="Skrivhjälp" />
-                <SimpleTab active={activeTab === 'intelligence'} onClick={() => setActiveTab('intelligence')} icon={<Zap size={20}/>} label="Bolagskoll" />
+        <div className="flex flex-col h-full gap-8 animate-fadeIn pb-20">
+            {/* 1. ÖVERSIKT */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard 
+                    label="Leads" 
+                    value={stats.totalLeads} 
+                    icon={<Users size={20} />} 
+                    active={filter === 'leads'} 
+                    onClick={() => setFilter(filter === 'leads' ? 'all' : 'leads')}
+                />
+                <StatCard 
+                    label="Affärer" 
+                    value={stats.deals} 
+                    icon={<Target size={20} />} 
+                    active={filter === 'deals'} 
+                    onClick={() => setFilter(filter === 'deals' ? 'all' : 'deals')}
+                />
+                <StatCard 
+                    label="Kunder" 
+                    value={stats.customers} 
+                    icon={<CheckCircle2 size={20} />} 
+                    active={filter === 'customers'} 
+                    onClick={() => setFilter(filter === 'customers' ? 'all' : 'customers')}
+                />
+                <StatCard 
+                    label="Intäkter" 
+                    value={`${stats.revenue} kr`} 
+                    icon={<DollarSign size={20} />} 
+                    active={false} 
+                    onClick={() => {}}
+                />
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar">
-                {activeTab === 'overview' && (
-                    <div className="space-y-8 animate-slideUp">
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <BigStatCard label="Totala kunder" value={leads.length} icon={<Users size={24}/>} color="blue" />
-                            <BigStatCard label="Pipeline-värde" value={`${leads.reduce((a,b) => a + (Number(b.value) || 0), 0).toLocaleString()} kr`} icon={<DollarSign size={24}/>} color="green" />
-                            <BigStatCard label="Analyser" value={reports.length} icon={<ShieldCheck size={24}/>} color="purple" />
-                        </div>
+            {/* 2. HUVUDYTA: KONTAKTLISTA */}
+            <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm flex flex-col overflow-hidden flex-1">
+                <div className="p-8 border-b border-gray-50 dark:border-gray-800 flex flex-col md:flex-row justify-between items-center gap-6">
+                    <div>
+                        <h2 className="text-2xl font-serif-display font-black italic uppercase tracking-tighter text-gray-950 dark:text-white">Mina Kontakter</h2>
+                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mt-1">Här samlar du alla dina leads och kunder</p>
                     </div>
-                )}
+                    <div className="flex items-center gap-3 w-full md:w-auto">
+                        <button 
+                            onClick={() => setIsIntelligenceOpen(true)}
+                            className="flex-1 md:flex-none px-6 py-4 bg-gray-50 dark:bg-gray-800 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-black hover:text-white transition-all"
+                        >
+                            <Zap size={16} /> Bolagskollen
+                        </button>
+                        <button 
+                            onClick={() => setIsAddModalOpen(true)}
+                            className="flex-1 md:flex-none px-8 py-4 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl hover:scale-105 active:scale-95 transition-all"
+                        >
+                            <Plus size={18} /> Lägg till kontakt
+                        </button>
+                    </div>
+                </div>
 
-                {activeTab === 'contacts' && (
-                    <div className="space-y-6 animate-slideUp">
-                        <div className="flex flex-col md:flex-row gap-3 items-center">
-                            <div className="relative flex-1 w-full">
-                                <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-300" size={20} />
-                                <input 
-                                    value={searchQuery} 
-                                    onChange={e => setSearchQuery(e.target.value)} 
-                                    placeholder="Sök på namn eller företag..." 
-                                    className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-[1.8rem] pl-16 pr-8 py-5 text-lg font-medium focus:ring-2 ring-black outline-none shadow-sm transition-all"
-                                />
-                            </div>
-                            <button onClick={() => setIsAddModalOpen(true)} className="w-full md:w-auto bg-black dark:bg-white text-white dark:text-black px-10 py-5 rounded-[1.8rem] font-bold text-base flex items-center justify-center gap-2 shadow-lg hover:scale-[1.02] active:scale-95 transition-all">
-                                <Plus size={22} strokeWidth={2.5} /> Lägg till ny
-                            </button>
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                    {filteredLeads.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-center p-12 opacity-40">
+                            <Users size={64} strokeWidth={1} className="mb-6" />
+                            <h3 className="text-xl font-serif-display font-bold italic mb-2">Inga kontakter än</h3>
+                            <p className="max-w-xs text-sm font-medium italic mb-8">Använd den här fliken för att hålla koll på alla företag och personer ni vill sälja till eller samarbeta med.</p>
+                            <button onClick={() => setIsAddModalOpen(true)} className="px-10 py-4 border-2 border-black rounded-full font-black text-[10px] uppercase tracking-widest hover:bg-black hover:text-white transition-all">Lägg till första kontakten</button>
                         </div>
-                        <div className="grid gap-3">
-                            {filteredLeads.length > 0 ? filteredLeads.map((l, idx) => (
-                                <div key={l.id} onClick={() => { setSelectedLead(l); setIsDetailOpen(true); }} className="bg-white dark:bg-gray-900 p-6 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl hover:-translate-y-0.5 cursor-pointer transition-all flex flex-col sm:flex-row items-center justify-between group animate-fadeIn" style={{ animationDelay: `${idx * 40}ms` }}>
-                                    <div className="flex items-center gap-6 w-full sm:w-auto">
-                                        <div className="w-14 h-14 rounded-2xl bg-gray-50 dark:bg-gray-800 flex items-center justify-center font-bold text-xl text-gray-400 group-hover:bg-black group-hover:text-white transition-all shadow-inner">{l.name[0]}</div>
+                    ) : (
+                        <div className="divide-y divide-gray-50 dark:divide-gray-800">
+                            {filteredLeads.map((lead) => (
+                                <div 
+                                    key={lead.id} 
+                                    onClick={() => setSelectedLead(lead)}
+                                    className="p-6 md:p-8 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all cursor-pointer group flex items-center justify-between"
+                                >
+                                    <div className="flex items-center gap-6">
+                                        <div className="w-14 h-14 bg-gray-100 dark:bg-gray-800 rounded-2xl flex items-center justify-center font-serif text-xl font-bold italic text-gray-400 group-hover:bg-black group-hover:text-white transition-all">
+                                            {lead.name[0]}
+                                        </div>
                                         <div>
-                                            <h4 className="text-xl font-bold font-serif-display group-hover:text-black dark:group-hover:text-white transition-colors">{l.name}</h4>
-                                            <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mt-0.5">{l.company}</p>
+                                            <h4 className="font-bold text-lg text-gray-950 dark:text-white leading-none mb-2">{lead.name}</h4>
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">{lead.company}</span>
+                                                <span className="w-1 h-1 rounded-full bg-gray-200"></span>
+                                                <span className={`text-[9px] font-black uppercase px-3 py-1 rounded-full ${getStatusColor(lead.status as any)}`}>{lead.status}</span>
+                                            </div>
                                         </div>
                                     </div>
-                                    <div className="flex items-center gap-8 mt-4 sm:mt-0 w-full sm:w-auto justify-between sm:justify-end">
-                                        <span className="px-4 py-1.5 bg-gray-50 dark:bg-gray-800 text-gray-400 rounded-full text-[9px] font-black uppercase tracking-widest border border-gray-100 dark:border-gray-700">{l.status}</span>
-                                        <ArrowRight size={20} className="text-gray-300 group-hover:text-black dark:group-hover:text-white group-hover:translate-x-1 transition-all" />
+                                    <div className="hidden md:flex items-center gap-12">
+                                        <div className="text-right">
+                                            <p className="text-[9px] font-black text-gray-300 uppercase tracking-widest mb-1">Senaste aktivitet</p>
+                                            <p className="text-xs font-bold italic">{new Date(lead.created_at).toLocaleDateString()}</p>
+                                        </div>
+                                        <ChevronRight size={20} className="text-gray-200 group-hover:text-black dark:group-hover:text-white group-hover:translate-x-1 transition-all" />
                                     </div>
                                 </div>
-                            )) : <div className="py-40 text-center text-gray-300 font-bold uppercase tracking-[0.4em] italic">Här var det tomt</div>}
+                            ))}
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
+            </div>
 
-                {activeTab === 'mail' && (
-                    <div className="max-w-4xl mx-auto space-y-8 animate-slideUp">
-                        <div className="bg-white dark:bg-gray-900 p-10 rounded-[3rem] border border-gray-200 dark:border-gray-800 shadow-sm space-y-8">
+            {/* 3. KONTAKTVY (MODAL/DRAWER) */}
+            {selectedLead && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fadeIn">
+                    <div className="bg-white dark:bg-gray-950 w-full max-w-4xl max-h-[90vh] rounded-[3rem] shadow-3xl flex flex-col overflow-hidden border border-gray-100 dark:border-gray-800">
+                        <div className="p-8 border-b border-gray-50 dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
                             <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-2xl flex items-center justify-center shadow-inner"><Wand2 size={24} className="text-gray-400"/></div>
-                                <h2 className="text-3xl font-serif-display italic font-bold">AI Skrivhjälp</h2>
+                                <div className="w-12 h-12 bg-black text-white rounded-xl flex items-center justify-center font-serif text-xl italic font-bold">
+                                    {selectedLead.name[0]}
+                                </div>
+                                <div>
+                                    <h2 className="text-2xl font-serif-display font-black italic uppercase tracking-tighter">{selectedLead.name}</h2>
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">{selectedLead.company}</p>
+                                </div>
                             </div>
-                            <div className="space-y-6">
-                                <textarea 
-                                    value={mailPrompt} 
-                                    onChange={e => setMailPrompt(e.target.value)} 
-                                    placeholder="T.ex. 'Tacka för ett bra möte och boka in en uppföljning'" 
-                                    className="w-full h-44 bg-gray-50 dark:bg-gray-800 p-6 rounded-[1.8rem] outline-none ring-1 ring-gray-200 dark:ring-gray-800 focus:ring-2 ring-black font-bold italic resize-none shadow-inner transition-all"
-                                />
-                                <button onClick={generateAIMail} disabled={isGeneratingMail} className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-sm flex items-center justify-center gap-3 shadow-xl hover:scale-[1.01] active:scale-95 disabled:opacity-30 transition-all uppercase tracking-widest">
-                                    {isGeneratingMail ? <Loader2 className="animate-spin" size={20}/> : <Sparkles size={20} />} {isGeneratingMail ? 'Skriver...' : 'Generera mail'}
+                            <button onClick={() => setSelectedLead(null)} className="p-3 hover:bg-white dark:hover:bg-gray-800 rounded-full transition-all text-gray-400 hover:text-black"><X size={24} /></button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-10 grid md:grid-cols-2 gap-12 custom-scrollbar">
+                            {/* Left: Info */}
+                            <div className="space-y-10">
+                                <div>
+                                    <h4 className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-6 italic border-b pb-2">Status & Detaljer</h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-2xl">
+                                            <span className="text-[8px] font-black text-gray-400 uppercase block mb-2">Nuvarande Status</span>
+                                            <select 
+                                                value={selectedLead.status} 
+                                                onChange={(e) => updateLeadStatus(selectedLead.id, e.target.value as CRMStatus)}
+                                                className="w-full bg-transparent font-bold italic outline-none text-sm cursor-pointer"
+                                            >
+                                                {['Ny', 'Kontaktad', 'Intresserad', 'Offert', 'Kund', 'Ej aktuell'].map(s => <option key={s} value={s}>{s}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-2xl">
+                                            <span className="text-[8px] font-black text-gray-400 uppercase block mb-2">Värde</span>
+                                            <p className="font-bold italic text-sm">{selectedLead.value || 0} kr</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-4">
+                                    <h4 className="text-[10px] font-black text-gray-300 uppercase tracking-widest italic">Kontaktuppgifter</h4>
+                                    <ContactItem icon={<Mail size={16}/>} label="E-post" value={selectedLead.email || 'Saknas'} />
+                                    <ContactItem icon={<Phone size={16}/>} label="Telefon" value={selectedLead.phone || 'Saknas'} />
+                                    <ContactItem icon={<Linkedin size={16}/>} label="LinkedIn" value={selectedLead.linkedin || 'Saknas'} />
+                                </div>
+
+                                <button 
+                                    onClick={() => { setIsMailDrawerOpen(true); }}
+                                    className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-[2rem] font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl flex items-center justify-center gap-4 hover:scale-105 transition-all"
+                                >
+                                    <Wand2 size={20} /> Skriv mejl med AI
                                 </button>
                             </div>
-                        </div>
-                    </div>
-                )}
 
-                {activeTab === 'intelligence' && (
-                    <div className="max-w-4xl mx-auto space-y-12 animate-slideUp">
-                        {showReportSuccess && activeReport ? (
-                            <div className="bg-white dark:bg-gray-900 border-4 border-black dark:border-white rounded-[4rem] p-12 md:p-20 text-center shadow-3xl animate-slideUp">
-                                <div className="space-y-10">
-                                    <div className="w-24 h-24 bg-black text-white dark:bg-white dark:text-black rounded-[2rem] flex items-center justify-center mx-auto shadow-2xl animate-float">
-                                        <FileSearch size={44} />
+                            {/* Right: Timeline & Notes */}
+                            <div className="space-y-8 flex flex-col h-full">
+                                <h4 className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-2 italic border-b pb-2">Historik & Anteckningar</h4>
+                                <div className="flex-1 space-y-6">
+                                    <div className="flex gap-4">
+                                        <div className="w-1 h-12 bg-gray-100 rounded-full mt-2"></div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Skapad</p>
+                                            <p className="text-sm font-medium italic">Kontakten lades till i CRM-systemet.</p>
+                                            <span className="text-[9px] font-bold text-gray-300">{new Date(selectedLead.created_at).toLocaleDateString()}</span>
+                                        </div>
                                     </div>
-                                    <h2 className="text-4xl md:text-6xl font-serif-display italic font-black uppercase tracking-tighter leading-none">{activeReport.title}</h2>
-                                    <div className="max-w-md mx-auto space-y-4">
-                                        <button 
-                                            onClick={() => setIsFullScreen(true)} 
-                                            className="w-full bg-black dark:bg-white text-white dark:text-black py-7 rounded-[2rem] font-black text-sm uppercase tracking-[0.3em] flex items-center justify-center gap-4 hover:scale-[1.03] active:scale-95 transition-all shadow-2xl"
-                                        >
-                                            <Eye size={22} /> Visa Rapport
-                                        </button>
-                                        <button onClick={() => setShowReportSuccess(false)} className="w-full bg-gray-50 dark:bg-gray-800 py-4 rounded-[1.5rem] font-black text-[9px] uppercase tracking-widest text-gray-400">Gör ny sökning</button>
+                                    <div className="p-6 bg-gray-50 dark:bg-gray-900 rounded-[2rem] border border-dashed border-gray-200">
+                                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Mina Anteckningar</p>
+                                        <textarea 
+                                            placeholder="Skriv något här för att komma ihåg till nästa gång..." 
+                                            className="w-full bg-transparent resize-none h-32 outline-none text-sm font-medium italic"
+                                        />
                                     </div>
                                 </div>
+                                <button className="w-full py-4 text-gray-300 hover:text-red-500 font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all"><Trash2 size={14}/> Ta bort kontakt</button>
                             </div>
-                        ) : (
-                            <div className="bg-black text-white p-12 md:p-24 rounded-[4rem] text-center shadow-2xl relative overflow-hidden group border border-white/10">
-                                <div className="relative z-10 space-y-10">
-                                    <div className="w-20 h-20 bg-white/10 backdrop-blur-xl rounded-3xl flex items-center justify-center mx-auto border border-white/10 animate-float shadow-xl"><BrainCircuit size={40} className="text-white" /></div>
-                                    <div className="space-y-3">
-                                        <h2 className="text-4xl md:text-6xl font-serif-display italic font-bold tracking-tighter leading-none">Bolagskollen</h2>
-                                        <p className="text-sm text-gray-400 font-bold uppercase tracking-[0.3em]">Smart analys av konkurrenter</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 4. AI-MEJL SKRIVARE (OVERLAY) */}
+            {isMailDrawerOpen && selectedLead && (
+                <div className="fixed inset-0 z-[110] flex flex-col md:flex-row animate-fadeIn">
+                    <div className="absolute inset-0 bg-black/80 backdrop-blur-xl" onClick={() => setIsMailDrawerOpen(false)}></div>
+                    <div className="relative w-full md:w-[600px] h-full bg-white dark:bg-gray-950 shadow-3xl ml-auto flex flex-col overflow-hidden animate-slideInRight">
+                        <div className="p-8 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
+                            <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 bg-black dark:bg-white text-white dark:text-black rounded-xl flex items-center justify-center"><Wand2 size={20}/></div>
+                                <div>
+                                    <h2 className="text-xl font-serif-display font-black italic uppercase">AI-Mejlskrivare</h2>
+                                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Till: {selectedLead.name}</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsMailDrawerOpen(false)} className="p-2 text-gray-300 hover:text-black transition-all"><X size={24}/></button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-10 space-y-12 custom-scrollbar">
+                            <div className="space-y-4">
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest block italic">Välj mejltyp</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    {['Första kontakt', 'Uppföljning', 'Skicka offert', 'Tack', 'Påminnelse', 'Fritt mejl'].map((type) => (
+                                        <button 
+                                            key={type} 
+                                            onClick={() => setMailType(type as MailType)}
+                                            className={`py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest border transition-all ${mailType === type ? 'bg-black text-white border-black shadow-xl scale-105' : 'bg-gray-50 border-transparent text-gray-400 hover:border-black/10'}`}
+                                        >
+                                            {type}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="p-8 bg-blue-50 dark:bg-blue-900/10 rounded-[2.5rem] border border-blue-100 flex gap-6">
+                                <Info size={24} className="text-blue-500 shrink-0" />
+                                <p className="text-xs text-blue-800 dark:text-blue-300 font-bold italic leading-relaxed">AI kommer att använda information om ditt företag från Bolagskollen för att göra mejlet mer personligt och relevant.</p>
+                            </div>
+
+                            {!generatedMail && !isGeneratingMail ? (
+                                <button 
+                                    onClick={generateAIMail}
+                                    className="w-full py-8 bg-black dark:bg-white text-white dark:text-black rounded-[2.5rem] font-black text-[12px] uppercase tracking-[0.4em] shadow-2xl flex items-center justify-center gap-4 hover:scale-105 transition-all"
+                                >
+                                    Skapa utkast <Zap size={20} fill="currentColor" />
+                                </button>
+                            ) : isGeneratingMail ? (
+                                <div className="flex flex-col items-center justify-center py-20 animate-pulse">
+                                    <Loader2 className="animate-spin text-black mb-6" size={32} />
+                                    <span className="text-[10px] font-black uppercase tracking-[0.5em] text-gray-400">Analysen sammanställs...</span>
+                                </div>
+                            ) : (
+                                <div className="space-y-6 animate-slideUp">
+                                    <div className="flex justify-between items-center mb-2">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest italic">AI Genererat Utkast</label>
+                                        <button onClick={() => { navigator.clipboard.writeText(generatedMail); alert("Kopierat!"); }} className="text-[9px] font-black uppercase text-blue-500 flex items-center gap-2 hover:underline"><Copy size={12}/> Kopiera</button>
                                     </div>
-                                    <div className="max-w-xl mx-auto flex flex-col sm:flex-row gap-3 bg-white/5 p-3 rounded-[2.5rem] border border-white/10 focus-within:ring-2 ring-white/20 transition-all backdrop-blur-md">
+                                    <div className="bg-gray-50 dark:bg-gray-900 p-10 rounded-[3rem] border border-gray-100 min-h-[300px] text-sm leading-relaxed font-bold italic text-gray-700 dark:text-gray-300 shadow-inner">
+                                        <textarea 
+                                            value={generatedMail}
+                                            onChange={(e) => setGeneratedMail(e.target.value)}
+                                            className="w-full bg-transparent border-none outline-none min-h-[300px] resize-none"
+                                        />
+                                    </div>
+                                    <div className="flex gap-4">
+                                        <button onClick={() => { alert("Skickat (simulerat)!"); setIsMailDrawerOpen(false); }} className="flex-1 py-6 bg-black dark:bg-white text-white dark:text-black rounded-[2rem] font-black text-[10px] uppercase tracking-[0.3em] shadow-2xl flex items-center justify-center gap-4 active:scale-95"><Send size={18}/> Skicka mejl</button>
+                                        <button onClick={generateAIMail} className="p-6 bg-gray-50 dark:bg-gray-800 rounded-[2rem] text-gray-400 hover:text-black transition-all shadow-md"><RefreshCw size={20}/></button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 5. BOLAGSKOLLEN (SIDE PANEL) */}
+            {isIntelligenceOpen && (
+                <div className="fixed inset-0 z-[110] flex animate-fadeIn">
+                    <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsIntelligenceOpen(false)}></div>
+                    <div className="relative w-full max-w-4xl h-full bg-white dark:bg-gray-950 shadow-3xl flex flex-col overflow-hidden animate-slideInRight">
+                        <div className="p-8 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-900">
+                            <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 bg-black text-white rounded-xl flex items-center justify-center"><Zap size={20} fill="currentColor" /></div>
+                                <div>
+                                    <h2 className="text-xl font-serif-display font-black italic uppercase">Bolagskollen</h2>
+                                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest italic">Research & Insikter</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setIsIntelligenceOpen(false)} className="p-2 text-gray-300 hover:text-black transition-all"><X size={24}/></button>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-10 custom-scrollbar space-y-12">
+                            <div className="bg-black text-white p-12 rounded-[4rem] text-center relative overflow-hidden group">
+                                <div className="relative z-10 space-y-8">
+                                    <h3 className="text-4xl font-serif-display italic tracking-tighter uppercase leading-none">Analysera ett företag</h3>
+                                    <p className="text-xs font-bold text-gray-400 uppercase tracking-widest italic">Klistra in en webbadress för att hämta all info du behöver för säljsamtalet</p>
+                                    <div className="max-w-xl mx-auto flex flex-col md:flex-row gap-3 bg-white/10 p-3 rounded-[2.5rem] backdrop-blur-md">
                                         <input 
                                             value={reportUrl} 
                                             onChange={e => setReportUrl(e.target.value)} 
-                                            placeholder="Skriv in hemsida (t.ex. apple.se)..." 
-                                            className="flex-1 bg-transparent px-6 py-4 text-xl outline-none placeholder:text-white/10 font-bold italic" 
+                                            placeholder="t.ex. apple.se..." 
+                                            className="flex-1 bg-transparent px-6 py-4 text-xl outline-none placeholder:text-white/20 font-bold italic" 
                                         />
-                                        <button onClick={generateReport} disabled={!reportUrl || isGeneratingReport} className="bg-white text-black px-10 py-4 rounded-[1.8rem] font-black text-sm uppercase tracking-widest hover:scale-105 active:scale-95 transition-all disabled:opacity-30 flex items-center justify-center gap-2">
-                                            {isGeneratingReport ? <Loader2 className="animate-spin" size={18} /> : <Rocket size={18}/>} Starta
+                                        <button 
+                                            onClick={generateReport} 
+                                            disabled={!reportUrl || isGeneratingReport}
+                                            className="bg-white text-black px-10 py-4 rounded-[1.8rem] font-black uppercase text-[10px] tracking-widest hover:scale-105 active:scale-95 transition-all disabled:opacity-30"
+                                        >
+                                            {isGeneratingReport ? <Loader2 className="animate-spin" size={20} /> : "Analysera"}
                                         </button>
                                     </div>
                                 </div>
                             </div>
-                        )}
 
-                        <div className="space-y-8">
-                            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.5em] flex items-center gap-2 italic ml-2"><History size={14}/> Tidigare analyser</h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                {reports.map((r, idx) => (
-                                    <div key={r.id} className="bg-white dark:bg-gray-900 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl transition-all flex flex-col justify-between overflow-hidden animate-fadeIn">
-                                        <div className="p-8">
-                                            <h4 className="text-2xl font-bold font-serif-display italic truncate mb-1">{r.title}</h4>
-                                            <p className="text-[10px] text-blue-500 font-black uppercase tracking-widest mb-6">{getSafeHostname(r.reportData.meta.website)}</p>
-                                            <button 
-                                                onClick={() => { setActiveReport(r); setIsFullScreen(true); }} 
-                                                className="w-full py-4 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black text-[9px] uppercase tracking-widest flex items-center justify-center gap-2 hover:opacity-80 active:scale-95 transition-all"
-                                            >
-                                                <Eye size={14}/> Visa Rapport
-                                            </button>
-                                        </div>
+                            {reports.length > 0 && (
+                                <div className="space-y-6 pb-20">
+                                    <h4 className="text-[10px] font-black text-gray-300 uppercase tracking-widest italic border-b pb-2">Tidigare Analyser</h4>
+                                    <div className="grid md:grid-cols-2 gap-6">
+                                        {reports.map(r => (
+                                            <div key={r.id} className="bg-white dark:bg-gray-900 p-8 rounded-[3rem] border border-gray-100 shadow-sm flex flex-col justify-between group hover:shadow-xl transition-all">
+                                                <div>
+                                                    <h5 className="text-2xl font-serif-display font-black italic uppercase mb-2 truncate">{r.title}</h5>
+                                                    <div className="flex gap-2 mb-6">
+                                                        <span className="text-[8px] font-black uppercase text-blue-500 bg-blue-50 px-2 py-1 rounded-md">{r.reportData.summary.employees} anställda</span>
+                                                        <span className="text-[8px] font-black uppercase text-green-500 bg-green-50 px-2 py-1 rounded-md">V. {r.reportData.summary.revenue}</span>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center justify-between pt-6 border-t border-gray-50">
+                                                    <span className="text-[9px] font-bold text-gray-300">{new Date(r.created_at).toLocaleDateString()}</span>
+                                                    <button onClick={() => { setActiveReport(r); setIsFullScreenReport(true); }} className="p-3 bg-black text-white rounded-xl hover:scale-110 active:scale-90 transition-all shadow-lg"><Eye size={16}/></button>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* FULLSCREEN REPORT MODAL (SAME AS CRM VIEW) */}
+            {isFullScreenReport && activeReport && (
+                <div className="fixed inset-0 z-[200] bg-white flex flex-col animate-fadeIn">
+                    <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                        <div className="flex items-center gap-4">
+                            <div className="w-12 h-12 bg-black text-white rounded-2xl flex items-center justify-center font-serif text-2xl italic font-bold">A</div>
+                            <h2 className="text-2xl font-serif-display font-black italic uppercase tracking-tighter leading-none">Bolagsanalys: {activeReport.title}</h2>
+                        </div>
+                        <button onClick={() => setIsFullScreenReport(false)} className="p-4 bg-black text-white rounded-full hover:scale-110 active:scale-90 transition-all shadow-2xl"><X size={24}/></button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-12 md:p-32 custom-scrollbar">
+                        <div className="max-w-4xl mx-auto space-y-24">
+                            <div className="border-b-[16px] border-black pb-16 pt-8">
+                                <h1 className="text-7xl md:text-[10rem] font-serif-display font-black uppercase italic tracking-tighter leading-[0.8] mb-12">BOLAGS<br/>DOSSIER</h1>
+                                <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-8">
+                                    <div>
+                                        <p className="text-4xl font-bold uppercase tracking-tight mb-2">{activeReport.reportData.meta.companyName}</p>
+                                        <p className="text-lg font-mono text-gray-400">{activeReport.reportData.meta.website}</p>
+                                    </div>
+                                    <p className="text-2xl font-mono font-bold">{activeReport.reportData.meta.generatedDate}</p>
+                                </div>
+                            </div>
+                            <div className="prose prose-2xl max-w-none">
+                                {activeReport.reportData.fullMarkdown.split('\n').map((line, i) => (
+                                    <p key={i} className="text-2xl leading-[1.7] text-gray-800 font-medium italic mb-10 border-l-2 border-gray-100 pl-8">{line}</p>
                                 ))}
                             </div>
                         </div>
                     </div>
-                )}
-            </div>
-
-            {/* MODAL: BOLAGSRAPPORT (FIXED UI) */}
-            {isFullScreen && activeReport && (
-                <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 md:p-8 animate-fadeIn">
-                    <div className="bg-white dark:bg-gray-950 w-full max-w-5xl h-full max-h-[90vh] rounded-[2.5rem] flex flex-col overflow-hidden shadow-[0_40px_100px_rgba(0,0,0,0.5)] border border-white/10">
-                        {/* Header: Action Toolbar */}
-                        <div className="p-6 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center bg-white dark:bg-gray-950 sticky top-0 z-[210] no-print">
-                            <div className="flex items-center gap-4">
-                                <button onClick={() => setIsFullScreen(false)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all text-black dark:text-white" title="Stäng">
-                                    <X size={28} />
-                                </button>
-                                <div className="h-8 w-px bg-gray-200 dark:bg-gray-800"></div>
-                                <h2 className="text-sm font-black uppercase tracking-widest text-gray-400 truncate">Intelligence Dossier: {activeReport.title}</h2>
-                            </div>
-                            
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={() => handleCopyReport(activeReport.reportData)} 
-                                    className="p-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-black dark:text-white hover:bg-black hover:text-white transition-all flex items-center gap-2"
-                                    title="Kopiera till urklipp"
-                                >
-                                    <Copy size={20}/>
-                                </button>
-                                <button 
-                                    onClick={() => window.print()} 
-                                    className="p-3 bg-gray-100 dark:bg-gray-800 rounded-xl text-black dark:text-white hover:bg-black hover:text-white transition-all flex items-center gap-2"
-                                    title="Skriv ut"
-                                >
-                                    <Printer size={20}/>
-                                </button>
-                                <button 
-                                    onClick={() => setReportToDelete(activeReport)} 
-                                    className="p-3 bg-red-50 dark:bg-red-900/30 rounded-xl text-red-500 hover:bg-red-500 hover:text-white transition-all"
-                                    title="Ta bort"
-                                >
-                                    <Trash2 size={20}/>
-                                </button>
-                            </div>
-                        </div>
-                        
-                        {/* Content Area (Centered and Fixed Alignment) */}
-                        <div className="flex-1 overflow-y-auto custom-scrollbar bg-white" id="printable-report">
-                            <div className="max-w-4xl mx-auto p-12 md:p-24 space-y-16 text-black text-center md:text-left">
-                                {/* Page 1: Cover Style */}
-                                <div className="space-y-12">
-                                    <div className="flex flex-col items-center md:items-start gap-4">
-                                        <div className="w-12 h-12 bg-black text-white rounded-xl flex items-center justify-center font-serif text-2xl italic font-bold">A</div>
-                                        <div className="text-[10px] font-black uppercase tracking-[0.5em]">Aceverse Intel</div>
-                                    </div>
-                                    <div className="h-1 w-24 bg-black mx-auto md:mx-0"></div>
-                                    <h1 className="text-6xl md:text-8xl font-serif-display font-black uppercase tracking-tighter leading-none">DUE<br/>DILIGENCE<br/>DOSSIER</h1>
-                                    <div className="h-4 w-full bg-black"></div>
-                                    <h2 className="text-4xl md:text-6xl font-serif-display font-black uppercase italic tracking-tighter border-b-8 border-black pb-4 inline-block">
-                                        BOLAGSANALYS: {activeReport.reportData.meta.companyName.toUpperCase()}
-                                    </h2>
-                                </div>
-
-                                {/* Page 2: Content */}
-                                <div className="space-y-16 pt-24 text-left">
-                                    <section className="grid md:grid-cols-2 gap-12 border-y-2 border-black py-12">
-                                        <div className="space-y-4">
-                                            <h3 className="font-black uppercase tracking-widest text-[11px] text-gray-400">Grundläggande fakta</h3>
-                                            <ul className="space-y-2 font-bold italic">
-                                                <li>Juridiskt namn: {activeReport.reportData.meta.companyName}</li>
-                                                <li>Webbplats: {activeReport.reportData.meta.website}</li>
-                                                <li>Anställda: {activeReport.reportData.summary?.employees || 'N/A'}</li>
-                                            </ul>
-                                        </div>
-                                        <div className="space-y-4">
-                                            <h3 className="font-black uppercase tracking-widest text-[11px] text-gray-400">Finansiell Översikt</h3>
-                                            <ul className="space-y-2 font-bold italic">
-                                                <li>Omsättning: {activeReport.reportData.summary?.revenue || 'N/A'}</li>
-                                                <li>Soliditet: {activeReport.reportData.summary?.solvency || 'N/A'}</li>
-                                                <li>Trust Score: {activeReport.reportData.summary?.trust_score || '85%'}</li>
-                                            </ul>
-                                        </div>
-                                    </section>
-
-                                    <div className="prose prose-xl max-w-none prose-headings:font-serif-display prose-headings:italic prose-headings:font-black prose-headings:uppercase prose-headings:tracking-tighter">
-                                        {activeReport.reportData.fullMarkdown.split('\n').map((line, i) => {
-                                            const trimmed = line.trim();
-                                            if(!trimmed) return <div key={i} className="h-6"></div>;
-                                            if(trimmed.startsWith('#')) {
-                                                const clean = trimmed.replace(/#/g, '').trim();
-                                                return <h4 key={i} className="text-2xl font-serif-display font-black uppercase italic tracking-tighter mt-16 mb-8 text-black border-l-8 border-black pl-6">{clean}</h4>;
-                                            }
-                                            return <p key={i} className="text-xl leading-[1.8] text-gray-800 font-medium italic mb-8 border-l border-gray-100 pl-8 transition-all hover:border-black">{trimmed}</p>;
-                                        })}
-                                    </div>
-
-                                    {activeReport.reportData.sources && activeReport.reportData.sources.length > 0 && (
-                                        <div className="pt-24 border-t border-gray-100">
-                                            <h3 className="text-4xl font-serif-display font-black uppercase tracking-tighter italic mb-10">VERIFIED SOURCES</h3>
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                {activeReport.reportData.sources.map((source: any, i: number) => (
-                                                    <div key={i} className="bg-gray-50 p-8 border border-gray-200 relative overflow-hidden">
-                                                        <div className="absolute top-0 right-0 w-12 h-12 bg-black text-white flex items-center justify-center font-serif text-lg font-bold italic">{i + 1}</div>
-                                                        <h4 className="text-lg font-black uppercase tracking-tight mb-2 truncate">{source.title}</h4>
-                                                        <p className="text-[10px] font-mono text-gray-400 break-all">{source.url}</p>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             )}
 
+            {/* 6. LÄGG TILL MODAL */}
             {isAddModalOpen && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fadeIn">
-                    <div className="bg-white dark:bg-gray-900 w-full max-w-lg rounded-[2.5rem] shadow-2xl p-10 relative border border-gray-100 dark:border-gray-800">
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fadeIn">
+                    <div className="bg-white dark:bg-gray-950 w-full max-w-lg rounded-[2.5rem] shadow-3xl p-10 relative border border-gray-100 dark:border-gray-800">
                         <button onClick={() => setIsAddModalOpen(false)} className="absolute top-8 right-8 p-3 hover:bg-gray-50 rounded-full text-gray-300 hover:text-black transition-all"><X size={24} /></button>
-                        <h2 className="text-3xl font-serif-display italic font-bold mb-10">Ny Kund</h2>
+                        <h2 className="text-3xl font-serif-display italic font-bold mb-10">Ny Kontakt</h2>
                         <form onSubmit={handleAddLead} className="space-y-6">
-                            <SimpleInput label="Namn" value={newLead.name} onChange={v => setNewLead({...newLead, name: v})} required />
-                            <SimpleInput label="Företag" value={newLead.company} onChange={v => setNewLead({...newLead, company: v})} required />
-                            <button disabled={isSavingLead} className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 shadow-xl hover:scale-[1.02] active:scale-95 transition-all">{isSavingLead ? <Loader2 className="animate-spin" size={20}/> : <Save size={20}/>} Spara</button>
+                            <SimpleInput name="name" label="Fullständigt Namn *" required />
+                            <SimpleInput name="company" label="Företag" />
+                            <SimpleInput name="email" label="E-postadress" type="email" />
+                            <SimpleInput name="value" label="Uppskattat Värde (kr)" type="number" />
+                            <button className="w-full py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black uppercase tracking-widest shadow-xl hover:scale-[1.02] active:scale-95 transition-all mt-6">Lägg till kontakt</button>
                         </form>
-                    </div>
-                </div>
-            )}
-
-            {isDetailOpen && selectedLead && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-fadeIn">
-                    <div className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-[3rem] shadow-2xl flex flex-col h-[80vh] overflow-hidden border border-gray-100 dark:border-gray-800">
-                        <div className="p-10 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50/30">
-                            <div className="flex items-center gap-5">
-                                <div className="w-16 h-16 rounded-[1.5rem] bg-black text-white flex items-center justify-center font-black text-2xl shadow-xl">{selectedLead.name[0]}</div>
-                                <h2 className="text-2xl font-serif-display font-bold italic truncate pr-4">{selectedLead.name}</h2>
-                            </div>
-                            <button onClick={() => setIsDetailOpen(false)} className="p-3 hover:bg-gray-100 rounded-full transition-all text-black dark:text-white"><X size={28}/></button>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar">
-                            <div className="grid grid-cols-2 gap-6">
-                                <DetailBox label="Status" value={selectedLead.status} />
-                                <DetailBox label="Värde" value={`${selectedLead.value.toLocaleString()} kr`} />
-                            </div>
-                            <div className="space-y-3">
-                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-2">Anteckningar</label>
-                                <textarea 
-                                    className="w-full h-40 bg-gray-50 dark:bg-gray-800 p-6 rounded-[2rem] border-none outline-none font-bold italic text-lg resize-none shadow-inner ring-1 ring-transparent focus:ring-black transition-all dark:text-white" 
-                                    defaultValue={selectedLead.notes} 
-                                    onBlur={e => db.updateLead(user.id, selectedLead.id, { notes: e.target.value })} 
-                                    placeholder="..."
-                                />
-                            </div>
-                        </div>
-                        <div className="p-8 border-t border-gray-100 dark:border-gray-800 flex gap-4">
-                            <button onClick={() => { setSelectedMailLeadId(selectedLead.id); setActiveTab('mail'); setIsDetailOpen(false); }} className="flex-1 py-6 bg-black dark:bg-white text-white dark:text-black rounded-[1.5rem] font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3"><Mail size={20}/> Skriv Mail</button>
-                            <button onClick={() => setLeadToDelete(selectedLead)} className="p-6 bg-red-50 text-red-500 rounded-[1.5rem] hover:bg-red-500 hover:text-white transition-all border border-red-100"><Trash2 size={24}/></button>
-                        </div>
                     </div>
                 </div>
             )}
@@ -530,38 +571,53 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     );
 };
 
-const SimpleTab = ({ active, onClick, icon, label }: any) => (
-    <button onClick={onClick} className={`flex items-center gap-2 px-6 md:px-8 py-3.5 rounded-[1.5rem] font-bold text-sm md:text-base transition-all ${active ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg scale-[1.02] z-10' : 'text-gray-400 hover:text-black dark:hover:text-white hover:bg-gray-50'}`}>
-        {icon} <span className="italic whitespace-nowrap">{label}</span>
+const StatCard = ({ label, value, icon, active, onClick }: { label: string, value: string | number, icon: any, active: boolean, onClick: () => void }) => (
+    <button 
+        onClick={onClick}
+        className={`p-8 rounded-[2.5rem] border transition-all text-left flex flex-col justify-between h-44 shadow-sm group ${active ? 'bg-black text-white border-black scale-105 shadow-2xl' : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:shadow-xl'}`}
+    >
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${active ? 'bg-white/10' : 'bg-gray-50 dark:bg-gray-800 text-gray-400 group-hover:bg-black group-hover:text-white'}`}>
+            {icon}
+        </div>
+        <div>
+            <p className={`text-[10px] font-black uppercase tracking-widest mb-1 ${active ? 'text-white/40' : 'text-gray-300'}`}>{label}</p>
+            <p className="text-3xl font-serif-display font-black italic tracking-tighter leading-none">{value}</p>
+        </div>
     </button>
 );
 
-const BigStatCard = ({ label, value, icon, color }: any) => (
-    <div className="p-8 bg-white dark:bg-gray-900 rounded-[2.5rem] border border-gray-100 dark:border-gray-800 shadow-sm hover:shadow-xl transition-all group">
-        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-6 bg-gray-50 dark:bg-gray-800 text-${color}-500 shadow-inner`}>{icon}</div>
-        <p className="text-[10px] font-black text-gray-300 uppercase tracking-widest mb-1.5 truncate">{label}</p>
-        <p className="text-3xl font-serif-display font-black italic tracking-tighter truncate text-gray-900 dark:text-white">{value}</p>
+const ContactItem = ({ icon, label, value }: { icon: any, label: string, value: string }) => (
+    <div className="flex items-center gap-4 group">
+        <div className="w-10 h-10 bg-gray-50 dark:bg-gray-900 rounded-xl flex items-center justify-center text-gray-400 group-hover:text-black transition-all">{icon}</div>
+        <div className="min-w-0">
+            <span className="block text-[8px] font-black text-gray-400 uppercase tracking-widest">{label}</span>
+            <span className="block text-sm font-bold italic truncate text-gray-900 dark:text-white">{value}</span>
+        </div>
     </div>
 );
 
-const SimpleInput = ({ label, value, onChange, type = "text", required = false }: any) => (
-    <div className="space-y-2.5">
-        <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest block ml-2">{label} {required && '*'}</label>
+const SimpleInput = ({ label, name, type = "text", required = false }: { label: string, name: string, type?: string, required?: boolean }) => (
+    <div className="space-y-2">
+        <label className="text-[9px] font-black text-gray-400 uppercase tracking-widest block ml-2">{label}</label>
         <input 
-            type={type} 
-            value={value || ''} 
-            onChange={e => onChange(e.target.value)} 
+            name={name}
+            type={type}
             required={required}
-            className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent p-5 rounded-[1.5rem] focus:bg-white dark:focus:bg-gray-900 focus:border-black outline-none text-lg font-bold italic shadow-inner transition-all dark:text-white"
+            className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent p-5 rounded-[1.5rem] focus:bg-white dark:focus:bg-gray-900 focus:border-black outline-none font-bold italic transition-all dark:text-white"
         />
     </div>
 );
 
-const DetailBox = ({ label, value }: any) => (
-    <div className="p-6 bg-gray-50 dark:bg-gray-800/40 rounded-[1.8rem] border border-transparent transition-all">
-        <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest block mb-2 truncate">{label}</span>
-        <p className="text-lg font-bold italic truncate text-gray-800 dark:text-white">{value}</p>
-    </div>
-);
+const getStatusColor = (status: CRMStatus) => {
+    switch (status) {
+        case 'Ny': return 'bg-blue-50 text-blue-500';
+        case 'Kontaktad': return 'bg-orange-50 text-orange-500';
+        case 'Intresserad': return 'bg-purple-50 text-purple-500';
+        case 'Offert': return 'bg-yellow-50 text-yellow-500';
+        case 'Kund': return 'bg-green-50 text-green-500';
+        case 'Ej aktuell': return 'bg-gray-50 text-gray-500';
+        default: return 'bg-gray-50 text-gray-500';
+    }
+};
 
 export default CRM;

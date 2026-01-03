@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     ArrowUp, Plus, MessageSquare, PanelLeftClose, PanelLeftOpen, 
-    Trash2, ShieldCheck, Loader2, Zap, HelpCircle
+    Trash2, ShieldCheck, Loader2, Zap, HelpCircle, Pencil, Check, X as XIcon
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { User, ChatMessage, ChatSession } from '../../types';
@@ -32,6 +32,10 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [sessionToDelete, setSessionToDelete] = useState<ChatSession | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    // Renaming state
+    const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+    const [editName, setEditName] = useState('');
 
     useEffect(() => { loadSessions(); }, [user.id]);
     
@@ -79,7 +83,8 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
     const handleCreateSession = async () => {
         if (isCreatingSession) return;
         setIsCreatingSession(true);
-        const name = `Konversation ${new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })}`;
+        // Default name until AI renames it or user edits
+        const name = `Ny konversation`;
         try {
             const newS = await db.createChatSession(user.id, name, 'Default');
             setSessions(prev => [newS, ...prev]);
@@ -88,19 +93,73 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
         finally { setIsCreatingSession(false); }
     };
 
+    // Rename Logic
+    const startEditing = (session: ChatSession, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setEditingSessionId(session.id);
+        setEditName(session.name);
+    };
+
+    const saveSessionName = async () => {
+        if (!editingSessionId || !editName.trim()) {
+            setEditingSessionId(null);
+            return;
+        }
+        try {
+            await db.updateChatSession(user.id, editingSessionId, editName.trim());
+            setSessions(prev => prev.map(s => s.id === editingSessionId ? { ...s, name: editName.trim() } : s));
+        } catch (e) {
+            console.error("Failed to rename", e);
+        } finally {
+            setEditingSessionId(null);
+        }
+    };
+
+    const generateSmartTitle = async (firstUserMessage: string, sessionId: string) => {
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            // Use fast model for title generation
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: `Du är en expert på att sammanfatta konversationer. 
+                Baserat på följande första meddelande från en elev, skapa en kort, relevant titel (max 4-5 ord) för chatten på svenska.
+                Titeln ska vara beskrivande (t.ex. "Affärsplan hjälp" eller "Marknadsföringstips").
+                Inga citattecken.
+                
+                Meddelande: "${firstUserMessage}"`,
+            });
+            
+            const newTitle = response.text?.trim();
+            if (newTitle) {
+                await db.updateChatSession(user.id, sessionId, newTitle);
+                setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, name: newTitle } : s));
+            }
+        } catch (e) {
+            console.warn("Could not auto-generate title", e);
+        }
+    };
+
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim() || isLoading) return;
 
         let activeId = currentSessionId;
+        let isNewSession = false;
+
         if (!activeId) {
             setIsLoading(true);
             try {
-                const newS = await db.createChatSession(user.id, input.substring(0, 20) + "...", 'Default');
+                const newS = await db.createChatSession(user.id, 'Ny konversation', 'Default');
                 setSessions(prev => [newS, ...prev]);
                 setCurrentSessionId(newS.id);
                 activeId = newS.id;
+                isNewSession = true;
             } catch (err) { setIsLoading(false); return; }
+        } else {
+            // Check if this existing session has no user messages yet (meaning it's effectively new)
+            // Filter messages for this session, excluding 'init-' messages which are AI greetings
+            const hasUserHistory = messages.some(m => m.role === 'user' && m.session_id === activeId);
+            if (!hasUserHistory) isNewSession = true;
         }
 
         const text = input;
@@ -110,6 +169,11 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
         try {
             const userMsg = await db.addMessage(user.id, { role: 'user', text, session_id: activeId! });
             setMessages(prev => [...prev, userMsg]);
+
+            // Trigger Smart Title Generation in background if it's the start of a conversation
+            if (isNewSession) {
+                generateSmartTitle(text, activeId!);
+            }
 
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const chat = ai.chats.create({
@@ -153,11 +217,40 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                 </div>
                 <div className="overflow-y-auto flex-1 p-4 space-y-2">
                     {sessions.map(s => (
-                        <div key={s.id} onClick={() => setCurrentSessionId(s.id)} className={`p-4 rounded-[1.5rem] cursor-pointer transition-all border group flex flex-col gap-1 ${currentSessionId === s.id ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-xl' : 'border-transparent hover:bg-white/60'}`}>
-                            <div className="flex justify-between items-center gap-2">
-                                <div className={`text-sm font-black truncate flex-1 ${currentSessionId === s.id ? 'text-gray-900 dark:text-white' : 'text-gray-500'}`}>{s.name}</div>
-                                <button onClick={(e) => { e.stopPropagation(); setSessionToDelete(s); }} className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 p-1 transition-opacity"><Trash2 size={14}/></button>
-                            </div>
+                        <div 
+                            key={s.id} 
+                            onClick={() => { if(editingSessionId !== s.id) setCurrentSessionId(s.id); }} 
+                            className={`p-4 rounded-[1.5rem] cursor-pointer transition-all border group flex flex-col gap-1 ${currentSessionId === s.id ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-xl' : 'border-transparent hover:bg-white/60'}`}
+                        >
+                            {editingSessionId === s.id ? (
+                                <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                    <input 
+                                        autoFocus
+                                        value={editName}
+                                        onChange={(e) => setEditName(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') saveSessionName();
+                                            if (e.key === 'Escape') setEditingSessionId(null);
+                                        }}
+                                        onBlur={saveSessionName}
+                                        className="w-full bg-white dark:bg-black border border-gray-300 dark:border-gray-600 rounded px-2 py-1 text-sm outline-none focus:border-black dark:focus:border-white"
+                                    />
+                                    <button onClick={saveSessionName} className="text-green-500 hover:text-green-600 p-1"><Check size={14} /></button>
+                                    <button onClick={() => setEditingSessionId(null)} className="text-gray-400 hover:text-gray-600 p-1"><XIcon size={14} /></button>
+                                </div>
+                            ) : (
+                                <div className="flex justify-between items-center gap-2">
+                                    <div className={`text-sm font-black truncate flex-1 ${currentSessionId === s.id ? 'text-gray-900 dark:text-white' : 'text-gray-500'}`}>{s.name}</div>
+                                    <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity gap-1">
+                                        <button onClick={(e) => startEditing(s, e)} className="text-gray-300 hover:text-black dark:hover:text-white p-1 transition-colors" title="Byt namn">
+                                            <Pencil size={14}/>
+                                        </button>
+                                        <button onClick={(e) => { e.stopPropagation(); setSessionToDelete(s); }} className="text-gray-300 hover:text-red-500 p-1 transition-colors" title="Radera">
+                                            <Trash2 size={14}/>
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>
