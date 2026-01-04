@@ -24,23 +24,124 @@ export interface User {
   companyReport?: CompanyReport;
 }
 
+// --- CORE CRM TYPES ---
+
+export type ContactType = 'PERSON' | 'COMPANY';
+export type DealStage = 'QUALIFY' | 'PROPOSAL' | 'NEGOTIATION' | 'WON' | 'LOST';
+export type ActivityType = 'DM' | 'CALL' | 'MEETING' | 'FOLLOW_UP' | 'NOTE';
+export type UfEventType = 'UF_FAIR' | 'DEADLINE' | 'COMPETITION' | 'OTHER';
+
+export interface Contact {
+  id: string;
+  user_id: string;
+  type: ContactType;
+  name: string;
+  email?: string;
+  phone?: string;
+  role?: string;
+  company?: string; // If type is PERSON, which company they belong to
+  channel?: string;
+  notes?: string;
+  ambassador_potential?: number; // 0-5
+  last_interaction_at?: string;
+  created_at: string;
+}
+
 export interface Lead {
+  // Keeping legacy Lead type for backward compatibility
   id: string;
   user_id: string;
   name: string;
   company: string;
   email?: string;
-  phone?: string;
-  linkedin?: string;
-  website?: string;
-  notes?: string;
-  // Fix: Added 'Ny', 'Kontaktad', 'Intresserad', 'Offert', 'Kund', 'Ej aktuell' to match usage in CRM.tsx
-  status: 'Ny' | 'Kontaktad' | 'Intresserad' | 'Offert' | 'Kund' | 'Ej aktuell' | 'Nya' | 'Kontaktade' | 'Möte bokat' | 'Klart';
-  priority: 'High' | 'Medium' | 'Low';
+  status: string;
+  priority: string;
   value: number;
   lead_score: number;
   created_at: string;
 }
+
+export interface Deal {
+  id: string;
+  user_id: string;
+  contact_id?: string;
+  title: string;
+  value: number;
+  probability: number; // 0-100
+  stage: DealStage;
+  deadline_at?: string;
+  created_at: string;
+  // Joins
+  contact?: Contact;
+}
+
+export interface SalesEvent {
+  id: string;
+  user_id: string;
+  contact_id?: string;
+  channel: string;
+  product_name: string;
+  quantity: number;
+  amount: number;
+  occurred_at: string;
+  created_at: string;
+}
+
+export interface Activity {
+  id: string;
+  user_id: string;
+  type: ActivityType;
+  subject: string;
+  description?: string;
+  related_type?: 'CONTACT' | 'DEAL' | 'LEAD';
+  related_id?: string;
+  occurred_at: string;
+}
+
+export interface SustainabilityLog {
+  id: string;
+  user_id: string;
+  related_type?: string;
+  related_id?: string;
+  category: 'REUSE' | 'LOCAL' | 'SOCIAL' | 'MATERIAL';
+  impact_description: string;
+  saved_co2_approx?: number;
+  created_at: string;
+}
+
+export interface UfEvent {
+  id: string;
+  user_id: string;
+  title: string;
+  date_at: string;
+  type: UfEventType;
+  description?: string;
+}
+
+export interface Badge {
+  id: string;
+  badge_id: string;
+  awarded_at: string;
+}
+
+export interface UserPoint {
+  id: string;
+  points: number;
+  reason: string;
+  created_at: string;
+}
+
+export interface Recommendation {
+  id: string;
+  kind: 'FOLLOW_UP' | 'DEADLINE' | 'STALE_DEAL' | 'UF_EVENT' | 'TODAY_FOCUS';
+  title: string;
+  description: string;
+  priority: number; // 1-100
+  ctaLabel: string;
+  ctaAction: () => void;
+}
+
+// --- EXISTING TYPES ---
 
 export interface ChatSession {
   id: string;
@@ -236,6 +337,14 @@ export interface UserSettings {
 export interface UserData {
   profile: Partial<User>;
   leads: Lead[];
+  contacts: Contact[];
+  deals: Deal[];
+  salesEvents: SalesEvent[];
+  activities: Activity[];
+  sustainabilityLogs: SustainabilityLog[];
+  ufEvents: UfEvent[];
+  points: number;
+  badges: Badge[];
   ideas: Idea[];
   pitches: Pitch[];
   chatHistory: ChatMessage[];
