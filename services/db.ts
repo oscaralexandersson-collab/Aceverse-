@@ -4,8 +4,9 @@ import {
   User, UserData, Lead, ChatMessage, ChatSession, Idea, Pitch, 
   ContactRequest, UserSettings, CompanyReport, CompanyReportEntry,
   BrandDNA, MarketingCampaign, Contact, Deal, SalesEvent, Activity,
-  SustainabilityLog, UfEvent, Recommendation, Badge
+  SustainabilityLog, UfEvent, Recommendation, Badge, MailDraftRequest
 } from '../types';
+import { GoogleGenAI } from "@google/genai";
 
 class DatabaseService {
   // --- CONNECTION HEALTH CHECK ---
@@ -235,6 +236,66 @@ class DatabaseService {
     }
   }
 
+  // --- AI EMAIL GENERATOR ---
+  async generateAiEmail(req: MailDraftRequest): Promise<{subject: string, body: string}> {
+    try {
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        
+        const systemPrompt = `
+            Du är en professionell affärsassistent för ett UF-företag (Ung Företagsamhet) i Sverige.
+            Ditt uppdrag är att skriva ett perfekt formulerat mail till en potentiell kund eller partner.
+            
+            REGLER:
+            1. Språk: Svenska (om inte annat anges).
+            2. Ton: ${req.tone} (Men alltid professionell och respektfull).
+            3. Struktur: Hälsning, Kärnmeddelande (1-2 stycken), Call to Action (CTA), Avslut, Signatur.
+            4. Kontext: Använd all given data. Lämna INGA tomma hakparenteser typ [Datum]. Om data saknas, skriv runt det.
+            5. Längd: Håll det relevant. Inga långa uppsatser.
+            
+            MOTTAGARE:
+            Namn: ${req.recipient.name}
+            Företag: ${req.recipient.company || 'Deras företag'}
+            Källa: ${req.recipient.origin}
+            Senaste interaktion: ${req.recipient.lastInteraction || 'Ingen'}
+            
+            AVSÄNDARE:
+            Namn: ${req.senderName}
+            UF-Företag: ${req.senderCompany}
+            
+            MAILTYP: ${req.template}
+            EXTRA KONTEXT FRÅN ANVÄNDAREN: "${req.extraContext || 'Ingen speciell kontext.'}"
+            RELEVANT DATUM/TID: ${req.meetingTime || 'Ingen specifik tid angiven'}
+
+            SPECIALINSTRUKTIONER FÖR TID:
+            - Om mailtypen är "Boka möte" (BOOK_MEETING) och en tid är angiven ovan: Föreslå denna tid specifikt i mailet.
+            - Om mailtypen är "Tack för möte" (THANK_MEETING) och en tid är angiven ovan: Referera till att ni sågs vid denna tidpunkt/datum.
+            
+            OUTPUT:
+            Returnera ENDAST en JSON-sträng med "subject" och "body". Inget annat prat.
+            Exempel: {"subject": "Hej...", "body": "Hej X..."}
+        `;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: "Generera mailet nu.",
+            config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: 'application/json'
+            }
+        });
+
+        const json = JSON.parse(response.text || '{}');
+        return {
+            subject: json.subject || "Inget ämne",
+            body: json.body || "Kunde inte generera text."
+        };
+
+    } catch (e) {
+        console.error("Mail Gen Error", e);
+        throw new Error("Kunde inte skapa mailet. Försök igen.");
+    }
+  }
+
   // --- CRM: CONTACTS ---
   async addContact(userId: string, contact: Partial<Contact>) {
     const { data, error } = await supabase.from('contacts').insert([{ user_id: userId, ...contact }]).select().single();
@@ -273,6 +334,15 @@ class DatabaseService {
     return data;
   }
 
+  async updateSale(userId: string, id: string, updates: Partial<SalesEvent>) {
+    const { error } = await supabase.from('sales_events').update(updates).eq('id', id).eq('user_id', userId);
+    if (error) throw error;
+  }
+
+  async deleteSale(userId: string, id: string) {
+    await supabase.from('sales_events').delete().eq('id', id).eq('user_id', userId);
+  }
+
   // --- CRM: ACTIVITIES ---
   async logActivity(userId: string, activity: Partial<Activity>) {
     const { data, error } = await supabase.from('activities').insert([{ user_id: userId, ...activity }]).select().single();
@@ -292,6 +362,17 @@ class DatabaseService {
   async addUfEvent(userId: string, event: Partial<UfEvent>) {
     const { data, error } = await supabase.from('uf_events').insert([{ user_id: userId, ...event }]).select().single();
     if (error) throw error;
+    return data;
+  }
+
+  async getNextUfEvent(userId: string): Promise<UfEvent | null> {
+    const { data } = await supabase.from('uf_events')
+      .select('*')
+      .eq('user_id', userId)
+      .gte('date_at', new Date().toISOString())
+      .order('date_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
     return data;
   }
 

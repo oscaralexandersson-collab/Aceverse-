@@ -3,9 +3,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   LayoutDashboard, Lightbulb, Users, Mic, MessageSquare, 
   Settings as SettingsIcon, LogOut, Bell, Search, Menu, X, 
-  Loader2, Wifi, WifiOff, Moon, Sun, Globe, RefreshCw, AlertTriangle
+  Loader2, Wifi, WifiOff, Moon, Sun, Globe, RefreshCw, AlertTriangle, Calendar
 } from 'lucide-react';
-import { DashboardView, User, SearchResult } from '../types';
+import { DashboardView, User, SearchResult, UfEvent } from '../types';
 import { db } from '../services/db';
 import Overview from '../components/dashboard/Overview';
 import IdeaLab from '../components/dashboard/IdeaLab';
@@ -28,6 +28,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [connectionError, setConnectionError] = useState(false);
+  const [nextEvent, setNextEvent] = useState<UfEvent | null>(null);
+  
   const { t, language, setLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
 
@@ -41,6 +43,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
       const isHealthy = await db.checkHealth();
       if (!isHealthy) throw new Error("Connection failed");
       
+      // Fetch next event for sidebar
+      const event = await db.getNextUfEvent(user.id);
+      setNextEvent(event);
+
       // Dispatch event for child components to reload their specific data
       window.dispatchEvent(new CustomEvent('ace_data_refresh'));
       
@@ -51,14 +57,14 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
       // Keep loader visible briefly for UX
       setTimeout(() => setIsSyncing(false), 800);
     }
-  }, []);
+  }, [user.id]);
 
   // Listen to parent sync triggers (app waking up, online event)
   useEffect(() => {
     refreshData();
   }, [syncTrigger, user.id, refreshData]);
 
-  const menuItems: { id: DashboardView | 'marketing'; label: string; icon: any }[] = [
+  const menuItems: { id: DashboardView; label: string; icon: any }[] = [
     { id: 'overview', label: t('dashboard.overview'), icon: LayoutDashboard },
     { id: 'ideas', label: t('dashboard.ideas'), icon: Lightbulb },
     { id: 'advisor', label: t('dashboard.advisor'), icon: MessageSquare },
@@ -66,6 +72,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
     { id: 'crm', label: t('dashboard.crm'), icon: Users },
     { id: 'pitch', label: t('dashboard.pitch'), icon: Mic },
   ];
+
+  const getDaysLeft = (dateStr: string) => {
+      const diff = new Date(dateStr).getTime() - new Date().getTime();
+      return Math.ceil(diff / (1000 * 3600 * 24));
+  };
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-950 overflow-hidden transition-colors duration-300">
@@ -96,6 +107,24 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
         </nav>
 
         <div className="p-4 border-t border-gray-100 dark:border-gray-800 mt-auto">
+          {/* Next Event Pop-up Card */}
+          {nextEvent && (
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-4 mb-4 border border-blue-100 dark:border-blue-800 shadow-sm relative overflow-hidden group">
+                  <div className="flex items-start justify-between mb-1">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-300">Nästa Händelse</span>
+                      <Calendar size={14} className="text-blue-400" />
+                  </div>
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white truncate mb-1">{nextEvent.title}</h4>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{new Date(nextEvent.date_at).toLocaleDateString()}</p>
+                  
+                  <div className="mt-3 flex items-center gap-2">
+                      <span className="bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-300 px-2 py-1 rounded text-[10px] font-bold shadow-sm">
+                          {getDaysLeft(nextEvent.date_at)} dagar kvar
+                      </span>
+                  </div>
+              </div>
+          )}
+
           <button
               onClick={() => setCurrentView('settings')}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all mb-4 ${

@@ -2,7 +2,7 @@
 import React from 'react';
 
 export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'news' | 'careers' | 'login' | 'dashboard' | 'contact' | 'about' | 'onboarding';
-export type DashboardView = 'overview' | 'advisor' | 'crm' | 'ideas' | 'pitch' | 'settings';
+export type DashboardView = 'overview' | 'advisor' | 'crm' | 'ideas' | 'pitch' | 'settings' | 'marketing';
 
 export interface NavItem {
   label: string;
@@ -31,6 +31,30 @@ export type DealStage = 'QUALIFY' | 'PROPOSAL' | 'NEGOTIATION' | 'WON' | 'LOST';
 export type ActivityType = 'DM' | 'CALL' | 'MEETING' | 'FOLLOW_UP' | 'NOTE';
 export type UfEventType = 'UF_FAIR' | 'DEADLINE' | 'COMPETITION' | 'OTHER';
 
+// NEW: Mail Types
+export type MailTemplateType = 'COLD_INTRO' | 'THANK_MEETING' | 'PARTNERSHIP_REQUEST' | 'FOLLOW_UP' | 'BOOK_MEETING';
+export type MailTone = 'FORMAL' | 'FRIENDLY' | 'ENTHUSIASTIC' | 'SHORT';
+
+export interface MailRecipient {
+  id: string;
+  origin: 'CONTACT' | 'DEAL';
+  name: string;
+  email?: string;
+  company?: string;
+  lastInteraction?: string;
+  context?: string; // e.g., Deal stage or Contact notes
+}
+
+export interface MailDraftRequest {
+  recipient: MailRecipient;
+  template: MailTemplateType;
+  tone: MailTone;
+  extraContext?: string;
+  meetingTime?: string; // New field for specific dates
+  senderName: string;
+  senderCompany: string;
+}
+
 export interface Contact {
   id: string;
   user_id: string;
@@ -38,6 +62,8 @@ export interface Contact {
   name: string;
   email?: string;
   phone?: string;
+  website?: string;
+  linkedin?: string;
   role?: string;
   company?: string; // If type is PERSON, which company they belong to
   channel?: string;
@@ -66,6 +92,7 @@ export interface Deal {
   user_id: string;
   contact_id?: string;
   title: string;
+  company?: string;
   value: number;
   probability: number; // 0-100
   stage: DealStage;

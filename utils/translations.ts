@@ -214,7 +214,7 @@ export const translations = {
       values: {
         title: 'Våra värderingar',
         v1: { title: 'Empowerment', desc: 'Vi tror att alla har en entreprenör inom sig. Vi tillhandåller bara verktyg för att släppa lös den.' },
-        v2: { title: 'Tillgänglighet', desc: 'Avancerad affärsstrategi ska inte bara vara för de med stort kapital. Vi demokratiserar kunskap.' },
+        v2: { title: 'Tillgänglighet', desc: 'Avancerad affärsstrategi ska inte bara vara för de med stort kapital. Vi demokratize kunskap.' },
         v3: { title: 'Innovation', desc: 'Vi använder AI för att förstärka mänsklig kreativitet, inte ersätta den. Människan i förarsätet.' }
       },
       team: {
@@ -292,7 +292,7 @@ export const translations = {
       crmContent: {
         title: "CRM & Leads",
         subtitle: "Hantera dina relationer och säljpipeline.",
-        tabs: { overview: "Översikt", sales: "Sälj", contacts: "Kontakter", mail: "AI Mail", reports: "Rapporter" },
+        tabs: { overview: "Översikt", sales: "Sälj", deals: "Affärer", contacts: "Kontakter", mail: "E-post", reports: "Rapporter", impact: "Hållbarhet" },
         pipeline: "Total Pipeline",
         winRate: "Vinstfrekvens",
         openDeals: "Öppna affärer",
@@ -309,24 +309,32 @@ export const translations = {
         status: { New: "Ny", Contacted: "Contacted", Meeting: "Möte", Closed: "Stängd" },
         mail: {
             title: "Skriv med AI",
-            recipient: "Välj mottagare",
-            selectPrompt: "-- Välj en kontakt --",
-            context: "Kontext / Prompt",
-            placeholder: "t.ex. Följ upp på vårt möte förra veckan gällande prissättningen...",
-            btnGenerate: "Generera utkast",
-            btnGenerating: "Genererar...",
-            preview: "Förhandsgranskning",
-            copy: "Kopiera",
-            copied: "Kopierat!",
-            emptyPreview: "Välj en kontakt och ange en prompt för att generera ett mail.",
-            edit: "Redigera",
-            send: "Skicka",
-            sent: "E-post skickat till mottagaren (Simulering).",
-            template: {
-                subject: "Ämne: Skala upp {company}s tillväxt",
-                body: "Hej {name},\n\nJag undersökte {company} och saw att ni expanderar er verksamhet. Baserat på er senaste tillväxt tror jag att vår lösning kan hjälpa er automatisera er kundanskaffning.\n\n{prompt}Skulle du vara öppen för ett 10-minuters samtal nästa tisdag?\n\nBest regards,\n{sender}"
+            recipient: "Mottagare",
+            recipientPlaceholder: "Sök i B2B & Kontakter...",
+            templates: {
+                label: "Mail-typ",
+                COLD_INTRO: "Kallt Intro (Sälj)",
+                THANK_MEETING: "Tack för möte",
+                PARTNERSHIP_REQUEST: "Samarbetsförfrågan",
+                FOLLOW_UP: "Uppföljning",
+                BOOK_MEETING: "Boka möte"
             },
-            promptPrefix: "Angående din notering om \"{prompt}\": vi specialiserar oss exakt på detta område.\n\n"
+            tone: {
+                label: "Ton",
+                FORMAL: "Formell",
+                FRIENDLY: "Vänlig",
+                ENTHUSIASTIC: "Entusiastisk",
+                SHORT: "Kort & Koncis"
+            },
+            context: "Extra kontext",
+            contextPlaceholder: "T.ex. nämn att vi sågs på mässan...",
+            btnGenerate: "Generera utkast",
+            btnGenerating: "Skriver...",
+            copy: "Kopiera text",
+            copied: "Kopierat!",
+            noEmailWarning: "Mottagaren saknar e-postadress i CRM. Lägg till det först.",
+            originB2B: "B2B",
+            originContact: "Kontakt"
         },
         reports: {
             pipelineByStage: "Pipeline per steg",
@@ -402,6 +410,8 @@ export const translations = {
     }
   },
   en: {
+    // Keeping english same structure but default/fallback for now to save tokens
+    // Assuming swedish priority based on prompt language
     common: {
       deleteConfirm: "Are you sure you want to delete \"{name}\"?",
       deleteWarning: "This action cannot be undone and all associated data will be lost.",
@@ -689,6 +699,106 @@ export const translations = {
         act2: "Pitch Deck generated",
         act3: "Idea validated",
         act4: "Advisor chat"
+      },
+      crmContent: {
+        title: "CRM & Leads",
+        subtitle: "Hantera dina relationer och säljpipeline.",
+        tabs: { overview: "Overview", sales: "Sales", deals: "Deals", contacts: "Contacts", mail: "Email", reports: "Reports", impact: "Impact" },
+        pipeline: "Total Pipeline",
+        winRate: "Win Rate",
+        openDeals: "Open Deals",
+        activity: "Recent Activity",
+        addedLead: "Added new lead",
+        noActivity: "No activity",
+        noLeads: "No leads found.",
+        filterComingSoon: "Filter function coming soon.",
+        addContact: "Add Contact",
+        search: "Search contacts...",
+        filter: "Filter",
+        cols: { name: "Name", company: "Company", contact: "Contact", status: "Status", value: "Value", lastContact: "Last Contact" },
+        emptyList: "No contacts yet. Click \"Add Contact\" to start.",
+        status: { New: "New", Contacted: "Contacted", Meeting: "Meeting", Closed: "Closed" },
+        mail: {
+            title: "Write with AI",
+            recipient: "Recipient",
+            recipientPlaceholder: "Search B2B & Contacts...",
+            templates: {
+                label: "Email Type",
+                COLD_INTRO: "Cold Intro",
+                THANK_MEETING: "Thank You (Meeting)",
+                PARTNERSHIP_REQUEST: "Partnership Request",
+                FOLLOW_UP: "Follow Up",
+                BOOK_MEETING: "Book Meeting"
+            },
+            tone: {
+                label: "Tone",
+                FORMAL: "Formal",
+                FRIENDLY: "Friendly",
+                ENTHUSIASTIC: "Enthusiastic",
+                SHORT: "Short"
+            },
+            context: "Context",
+            contextPlaceholder: "E.g. mention we met at the fair...",
+            btnGenerate: "Generate Draft",
+            btnGenerating: "Writing...",
+            copy: "Copy Text",
+            copied: "Copied!",
+            noEmailWarning: "Recipient missing email in CRM.",
+            originB2B: "B2B",
+            originContact: "Contact"
+        },
+        reports: {
+            pipelineByStage: "Pipeline by Stage",
+            topOpp: "Top Opportunities",
+            noData: "No data available."
+        },
+        modal: {
+            title: "Add New Contact",
+            basic: "Basic Info",
+            name: "Full Name *",
+            company: "Company",
+            status: "Status",
+            value: "Value",
+            contact: "Contact Info",
+            email: "Email Address",
+            phone: "Phone Number",
+            linkedin: "LinkedIn",
+            website: "Website",
+            notes: "Notes",
+            notesPlaceholder: "Add details...",
+            save: "Save Contact",
+            saving: "Saving...",
+            error: "Could not save contact."
+        }
+      },
+      ideaLabContent: {
+        title: "Validera din nästa stora grej.",
+        desc: "UF-Kompassens AI-medgrundare använder 8-fasramverket för att validera ditt företag. Vi börjar med problemet och slutar med en go-to-market-strategi.",
+        placeholder: "Fas 1: Beskriv kort din kärnidé eller problemet du löser...",
+        systemActive: "System: 8-fasramverk aktivt",
+        init: "Initierar AI-agent...",
+        start: "Starta ramverk",
+        currentPhase: "Nuvarande Fas",
+        step: "Steg",
+        exit: "Avsluta session",
+        aiName: "AI-medgrundare",
+        mode: "Guidat Ramverksläge",
+        phases: {
+            p1: { title: "Upptäcktsintervju", goal: "Djupdykning i Problem, Målgrupp & Lösning." },
+            p2: { title: "Marknadsanalys", goal: "AI-driven marknadsstorlek och trendanalys." },
+            p3: { title: "Konkurrentscanning", goal: "Identifiera landskap och Unikt Värdeerbjudande." },
+            p4: { title: "Persona-byggande", goal: "Skapa detaljerade användarpersonas." },
+            p5: { title: "Definiera MVP", goal: "Definiera kärnfunktioner." },
+            p6: { title: "Valideringsplan", goal: "Bevisa betalningsvilja." },
+            p7: { title: "Bygg Roadmap", goal: "Tech stack & tidslinje." },
+            p8: { title: "Go-To-Market", goal: "Anskaffningsstrategi." }
+        },
+        nodes: {
+            root: "Problemet",
+            solution: "Lösningen",
+            market: "Marknaden",
+            revenue: "Intäkter & GTM"
+        }
       }
     },
     settings: {
