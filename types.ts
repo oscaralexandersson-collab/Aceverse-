@@ -24,6 +24,55 @@ export interface User {
   companyReport?: CompanyReport;
 }
 
+// --- PITCH ENGINE TYPES ---
+
+export type PitchFormat = 'SCEN' | 'MONTER' | 'INVESTERARE' | 'KUND';
+
+export interface PitchProject {
+  id: string;
+  user_id: string;
+  title: string;
+  target_audience: string;
+  format: PitchFormat;
+  time_limit_seconds: number;
+  created_at: string;
+  // Join
+  versions?: PitchVersion[];
+}
+
+export interface PitchVersion {
+  id: string;
+  project_id: string;
+  version_number: number;
+  transcript: string;
+  analysis_data?: PitchAnalysis;
+  created_at: string;
+}
+
+export interface PitchAnalysis {
+  jury_simulation: {
+    understanding: string;
+    doubts: string;
+    memorable: string;
+    risk: string;
+  };
+  structure_check: {
+    hook: { score: number, feedback: string };
+    problem: { score: number, feedback: string };
+    solution: { score: number, feedback: string };
+    value: { score: number, feedback: string };
+    proof: { score: number, feedback: string };
+    team: { score: number, feedback: string };
+    closing: { score: number, feedback: string };
+  };
+  improvements: {
+    original_text: string;
+    improved_text: string;
+    reason: string;
+    priority: number;
+  }[];
+}
+
 // --- CORE CRM TYPES ---
 
 export type ContactType = 'PERSON' | 'COMPANY';
@@ -239,6 +288,7 @@ export interface IdeaNode {
   details: any;
 }
 
+// Deprecated Pitch interface (keeping for type safety during migration)
 export interface Pitch {
   id: string;
   user_id: string;
@@ -373,7 +423,8 @@ export interface UserData {
   points: number;
   badges: Badge[];
   ideas: Idea[];
-  pitches: Pitch[];
+  pitches: Pitch[]; // Keeping for legacy
+  pitchProjects?: PitchProject[]; // NEW
   chatHistory: ChatMessage[];
   sessions: ChatSession[];
   settings?: UserSettings;
@@ -388,6 +439,7 @@ export interface ContactRequest { name: string; email: string; subject: string; 
 export interface NavProps { currentPage: Page; onNavigate: (page: Page) => void; user?: User | null; }
 export interface PageProps { onNavigate: (page: Page) => void; }
 
+// Old DeckSpec for backwards compat
 export interface DeckSpec {
   deck_title: string;
   language: string;

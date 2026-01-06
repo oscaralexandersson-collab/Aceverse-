@@ -4,7 +4,8 @@ import {
   User, UserData, Lead, ChatMessage, ChatSession, Idea, Pitch, 
   ContactRequest, UserSettings, CompanyReport, CompanyReportEntry,
   BrandDNA, MarketingCampaign, Contact, Deal, SalesEvent, Activity,
-  SustainabilityLog, UfEvent, Recommendation, Badge, MailDraftRequest
+  SustainabilityLog, UfEvent, Recommendation, Badge, MailDraftRequest,
+  PitchProject, PitchVersion
 } from '../types';
 import { GoogleGenAI } from "@google/genai";
 
@@ -21,65 +22,74 @@ class DatabaseService {
 
   async getCurrentUser(): Promise<User | null> {
     try {
+      // 1. Check Auth Session
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !session?.user) return null;
 
+      // 2. Try to fetch existing profile
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .maybeSingle();
 
-      if (!profile && session.user) {
-        // Auto-provisioning flow
-        const firstName = session.user.user_metadata?.first_name || 'Entreprenör';
-        const lastName = session.user.user_metadata?.last_name || '';
-
-        const { data: newProfile } = await supabase
-          .from('profiles')
-          .insert([{ 
-            id: session.user.id, 
-            first_name: firstName,
-            last_name: lastName,
-            email: session.user.email,
-            onboarding_completed: false
-          }])
-          .select()
-          .maybeSingle();
-        
-        await supabase.from('user_settings').insert([{ id: session.user.id }]).maybeSingle();
-        
+      // 3. If profile exists, map and return it
+      if (profile) {
         return {
-          id: session.user.id,
-          email: session.user.email!,
-          firstName: firstName,
-          lastName: lastName,
-          company: '',
-          onboardingCompleted: false,
-          plan: 'free',
-          createdAt: session.user.created_at
+          id: profile.id,
+          email: profile.email || session.user.email!,
+          firstName: profile.first_name || '',
+          lastName: profile.last_name || '',
+          company: profile.company || '',
+          bio: profile.bio || '',
+          onboardingCompleted: profile.onboarding_completed || false,
+          plan: profile.plan || 'free',
+          createdAt: session.user.created_at,
+          avatar: profile.avatar,
+          companyReport: profile.company_report
         };
       }
 
-      if (!profile) return null;
+      // 4. FALLBACK
+      const meta = session.user.user_metadata || {};
+      const firstName = meta.first_name || 'Entreprenör';
+      const lastName = meta.last_name || '';
+
+      this.healingInsert(session.user.id, session.user.email!, firstName, lastName);
 
       return {
-        id: profile.id,
-        email: profile.email || session.user.email!,
-        firstName: profile.first_name || '',
-        lastName: profile.last_name || '',
-        company: profile.company || '',
-        bio: profile.bio || '',
-        onboardingCompleted: profile.onboarding_completed || false,
-        plan: profile.plan || 'free',
-        createdAt: session.user.created_at,
-        avatar: profile.avatar,
-        companyReport: profile.company_report
+        id: session.user.id,
+        email: session.user.email!,
+        firstName: firstName,
+        lastName: lastName,
+        company: '',
+        onboardingCompleted: false, 
+        plan: 'free',
+        createdAt: session.user.created_at
       };
+
     } catch (e) {
       console.error("Critical error in getCurrentUser", e);
       return null;
     }
+  }
+
+  private async healingInsert(id: string, email: string, firstName: string, lastName: string) {
+      try {
+          const { error } = await supabase.from('profiles').insert([{ 
+            id, 
+            first_name: firstName,
+            last_name: lastName,
+            email,
+            onboarding_completed: false
+          }]);
+          
+          if (!error) {
+              await supabase.from('user_settings').insert([{ id }]).maybeSingle();
+          }
+      } catch (err) {
+          console.warn("Healing insert skipped/failed", err);
+      }
   }
 
   async login(email: string, pass: string, rememberMe = true): Promise<User> {
@@ -92,7 +102,7 @@ class DatabaseService {
     }
     if (!data.user) throw new Error("Inloggning misslyckades.");
     const user = await this.getCurrentUser();
-    if (!user) throw new Error("Kunde inte hämta profil.");
+    if (!user) throw new Error("Kunde inte verifiera användarsession.");
     return user;
   }
 
@@ -120,8 +130,22 @@ class DatabaseService {
     if (data.user && data.session === null) {
       throw new Error('CONFIRM_EMAIL');
     }
+    
+    await new Promise(r => setTimeout(r, 1000));
+
     const user = await this.getCurrentUser();
-    if (!user) throw new Error("Registrering lyckades men profil kunde inte initieras.");
+    if (!user) {
+        return {
+            id: data.user!.id,
+            email: email,
+            firstName: firstName,
+            lastName: lastName,
+            company: '',
+            onboardingCompleted: false,
+            plan: 'free',
+            createdAt: new Date().toISOString()
+        };
+    }
     return user;
   }
 
@@ -138,11 +162,12 @@ class DatabaseService {
   async completeOnboarding(userId: string, data: any) {
     const { error } = await supabase
       .from('profiles')
-      .update({ 
+      .upsert({ 
+        id: userId,
         company: data.company, 
-        onboarding_completed: true 
-      })
-      .eq('id', userId);
+        onboarding_completed: true,
+        updated_at: new Date().toISOString()
+      });
     
     if (error) throw error;
     return await this.getCurrentUser();
@@ -177,6 +202,7 @@ class DatabaseService {
   // --- MAIN DATA FETCH ---
   async getUserData(userId: string): Promise<UserData> {
     try {
+      // Execute fetch in parallel
       const [
         leads, contacts, deals, sales, activities, logs, events,
         ideas, pitches, messages, sessions, settings, profile, 
@@ -204,6 +230,36 @@ class DatabaseService {
 
       const totalPoints = (points.data || []).reduce((acc, curr) => acc + (curr.points || 0), 0);
 
+      // --- Pitch Engine Data Handling ---
+      // We fetch this separately to be safe against relationship errors
+      let pitchProjectsData: any[] = [];
+      try {
+          const { data, error } = await supabase
+            .from('pitch_projects')
+            .select('*, versions:pitch_versions(*)')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+            
+          if (!error && data) {
+              pitchProjectsData = data;
+          } else {
+              // Fallback: Fetch without versions if relation fails
+              const { data: fallbackData } = await supabase
+                .from('pitch_projects')
+                .select('*')
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false });
+              pitchProjectsData = fallbackData || [];
+          }
+      } catch (err) {
+          console.warn("Pitch project fetch warning", err);
+      }
+
+      const mappedPitchProjects: PitchProject[] = pitchProjectsData.map((p: any) => ({
+          ...p,
+          versions: (p.versions || []).sort((a: any, b: any) => b.version_number - a.version_number)
+      }));
+
       return {
         profile: profile?.data || {},
         leads: leads.data || [],
@@ -216,7 +272,8 @@ class DatabaseService {
         points: totalPoints,
         badges: badges.data || [],
         ideas: ideas.data || [],
-        pitches: pitches.data || [],
+        pitches: pitches.data || [], // Legacy
+        pitchProjects: mappedPitchProjects, // NEW
         chatHistory: messages.data || [],
         sessions: sessions.data || [],
         settings: settings.data || undefined,
@@ -234,6 +291,41 @@ class DatabaseService {
       console.error("Error fetching all user data", e);
       throw e; 
     }
+  }
+
+  // --- PITCH ENGINE 2.0 METHODS ---
+  
+  async createPitchProject(userId: string, data: Partial<PitchProject>) {
+      const { data: project, error } = await supabase.from('pitch_projects').insert([{
+          user_id: userId,
+          title: data.title,
+          target_audience: data.target_audience,
+          format: data.format,
+          time_limit_seconds: data.time_limit_seconds
+      }]).select().single();
+      if (error) throw error;
+      return project;
+  }
+
+  async savePitchVersion(projectId: string, versionNumber: number, transcript: string, analysisData: any) {
+      const { data, error } = await supabase.from('pitch_versions').insert([{
+          project_id: projectId,
+          version_number: versionNumber,
+          transcript: transcript,
+          analysis_data: analysisData
+      }]).select().single();
+      if (error) throw error;
+      return data;
+  }
+
+  async deletePitchProject(userId: string, projectId: string) {
+      const { error } = await supabase.from('pitch_projects').delete().eq('id', projectId).eq('user_id', userId);
+      if (error) throw error;
+  }
+
+  async updatePitchProject(userId: string, projectId: string, updates: Partial<PitchProject>) {
+      const { error } = await supabase.from('pitch_projects').update(updates).eq('id', projectId).eq('user_id', userId);
+      if (error) throw error;
   }
 
   // --- AI EMAIL GENERATOR ---
@@ -296,75 +388,56 @@ class DatabaseService {
     }
   }
 
-  // --- CRM: CONTACTS ---
+  // --- CRM & GAMIFICATION ---
   async addContact(userId: string, contact: Partial<Contact>) {
     const { data, error } = await supabase.from('contacts').insert([{ user_id: userId, ...contact }]).select().single();
     if (error) throw error;
     await this.processGamification(userId, 'CREATE_CONTACT');
     return data;
   }
-
   async updateContact(userId: string, id: string, updates: Partial<Contact>) {
-    const { error } = await supabase.from('contacts').update(updates).eq('id', id).eq('user_id', userId);
-    if (error) throw error;
+    await supabase.from('contacts').update(updates).eq('id', id).eq('user_id', userId);
   }
-
   async deleteContact(userId: string, id: string) {
     await supabase.from('contacts').delete().eq('id', id).eq('user_id', userId);
   }
-
-  // --- CRM: DEALS ---
   async addDeal(userId: string, deal: Partial<Deal>) {
     const { data, error } = await supabase.from('deals').insert([{ user_id: userId, ...deal }]).select().single();
     if (error) throw error;
     await this.processGamification(userId, 'CREATE_DEAL');
     return data;
   }
-
   async updateDeal(userId: string, id: string, updates: Partial<Deal>) {
-    const { error } = await supabase.from('deals').update(updates).eq('id', id).eq('user_id', userId);
-    if (error) throw error;
+    await supabase.from('deals').update(updates).eq('id', id).eq('user_id', userId);
   }
-
-  // --- CRM: SALES ---
   async logSale(userId: string, sale: Partial<SalesEvent>) {
     const { data, error } = await supabase.from('sales_events').insert([{ user_id: userId, ...sale }]).select().single();
     if (error) throw error;
     await this.processGamification(userId, 'LOG_SALE');
     return data;
   }
-
   async updateSale(userId: string, id: string, updates: Partial<SalesEvent>) {
-    const { error } = await supabase.from('sales_events').update(updates).eq('id', id).eq('user_id', userId);
-    if (error) throw error;
+    await supabase.from('sales_events').update(updates).eq('id', id).eq('user_id', userId);
   }
-
   async deleteSale(userId: string, id: string) {
     await supabase.from('sales_events').delete().eq('id', id).eq('user_id', userId);
   }
-
-  // --- CRM: ACTIVITIES ---
   async logActivity(userId: string, activity: Partial<Activity>) {
     const { data, error } = await supabase.from('activities').insert([{ user_id: userId, ...activity }]).select().single();
     if (error) throw error;
     return data;
   }
-
-  // --- CRM: SUSTAINABILITY ---
   async logSustainability(userId: string, log: Partial<SustainabilityLog>) {
     const { data, error } = await supabase.from('sustainability_logs').insert([{ user_id: userId, ...log }]).select().single();
     if (error) throw error;
     await this.processGamification(userId, 'ADD_SUSTAINABILITY');
     return data;
   }
-
-  // --- CRM: UF EVENTS ---
   async addUfEvent(userId: string, event: Partial<UfEvent>) {
     const { data, error } = await supabase.from('uf_events').insert([{ user_id: userId, ...event }]).select().single();
     if (error) throw error;
     return data;
   }
-
   async getNextUfEvent(userId: string): Promise<UfEvent | null> {
     const { data } = await supabase.from('uf_events')
       .select('*')
@@ -376,9 +449,7 @@ class DatabaseService {
     return data;
   }
 
-  // --- GAMIFICATION ENGINE ---
   async processGamification(userId: string, actionType: string) {
-    // 1. Award Points
     let points = 0;
     let reason = '';
     switch(actionType) {
@@ -391,35 +462,26 @@ class DatabaseService {
     if (points > 0) {
         await supabase.from('user_points').insert([{ user_id: userId, points, reason }]);
     }
-
-    // 2. Check Badges (Simplified Logic)
     const { count: saleCount } = await supabase.from('sales_events').select('*', { count: 'exact', head: true }).eq('user_id', userId);
     const { count: sustCount } = await supabase.from('sustainability_logs').select('*', { count: 'exact', head: true }).eq('user_id', userId);
-
     if ((saleCount || 0) >= 1) await this.awardBadge(userId, 'FIRST_SALE');
     if ((saleCount || 0) >= 10) await this.awardBadge(userId, 'SALES_MASTER');
     if ((sustCount || 0) >= 3) await this.awardBadge(userId, 'IMPACT_MAKER');
   }
 
   async awardBadge(userId: string, badgeId: string) {
-    // Check if exists
     const { data } = await supabase.from('user_badges').select('id').eq('user_id', userId).eq('badge_id', badgeId).maybeSingle();
     if (!data) {
         await supabase.from('user_badges').insert([{ user_id: userId, badge_id: badgeId }]);
     }
   }
 
-  // --- RECOMMENDATION ENGINE (Simulated Backend) ---
   async getRecommendations(userId: string): Promise<Recommendation[]> {
     const recs: Recommendation[] = [];
     const now = new Date();
-
-    // 1. Fetch relevant data
     const { data: deals } = await supabase.from('deals').select('*').eq('user_id', userId).neq('stage', 'WON').neq('stage', 'LOST');
     const { data: ufEvents } = await supabase.from('uf_events').select('*').eq('user_id', userId).gte('date_at', now.toISOString());
-    const { data: contacts } = await supabase.from('contacts').select('*').eq('user_id', userId);
 
-    // Rule 1: Stale Deals
     deals?.forEach(deal => {
         const created = new Date(deal.created_at);
         const daysOld = (now.getTime() - created.getTime()) / (1000 * 3600 * 24);
@@ -436,7 +498,6 @@ class DatabaseService {
         }
     });
 
-    // Rule 2: UF Deadlines
     ufEvents?.forEach(evt => {
         const evtDate = new Date(evt.date_at);
         const daysLeft = Math.ceil((evtDate.getTime() - now.getTime()) / (1000 * 3600 * 24));
@@ -453,7 +514,6 @@ class DatabaseService {
         }
     });
 
-    // Rule 3: Today Focus (Fallback)
     if (recs.length === 0) {
         recs.push({
             id: 'focus-gen',
@@ -465,32 +525,21 @@ class DatabaseService {
             ctaAction: () => {}
         });
     }
-
     return recs.sort((a, b) => b.priority - a.priority);
   }
 
-  // --- STORYTELLING GENERATOR ---
   async generateUfStory(userId: string): Promise<string> {
     const { data: logs } = await supabase.from('sustainability_logs').select('*').eq('user_id', userId);
     const { data: sales } = await supabase.from('sales_events').select('*').eq('user_id', userId);
-    
     if (!logs?.length && !sales?.length) return "För lite data för att generera en berättelse.";
-
     const totalCo2 = logs?.reduce((acc, l) => acc + (l.saved_co2_approx || 0), 0).toFixed(1);
     const totalSales = sales?.reduce((acc, s) => acc + (s.amount || 0), 0);
     const impactCount = logs?.length || 0;
-
-    return `
-      VÅR UF-RESA I SIFFROR:
-      Vi har genomfört ${sales?.length} försäljningar vilket genererat ${totalSales} kr i omsättning.
-      Men viktigast av allt: Vi har gjort ${impactCount} aktiva hållbarhetsval som sparat ca ${totalCo2} kg CO2.
-      Ett konkret exempel: "${logs?.[0]?.impact_description || 'Vi väljer lokalt.'}"
-    `;
+    return `VÅR UF-RESA I SIFFROR:\nVi har genomfört ${sales?.length} försäljningar vilket genererat ${totalSales} kr i omsättning.\nMen viktigast av allt: Vi har gjort ${impactCount} aktiva hållbarhetsval som sparat ca ${totalCo2} kg CO2.\nEtt konkret exempel: "${logs?.[0]?.impact_description || 'Vi väljer lokalt.'}"`;
   }
 
-  // --- LEGACY LEAD SUPPORT ---
+  // --- LEGACY ---
   async addLead(userId: string, lead: Partial<Lead>) {
-    // Map legacy lead to Contact + Deal if needed, keeping simple for now
     const { data, error } = await supabase.from('leads').insert([{ user_id: userId, ...lead }]).select().single();
     if (error) throw error;
     await this.processGamification(userId, 'CREATE_LEAD');
@@ -502,8 +551,6 @@ class DatabaseService {
   async deleteLead(userId: string, leadId: string) {
     await supabase.from('leads').delete().eq('id', leadId).eq('user_id', userId);
   }
-
-  // --- OTHER ---
   async saveSettings(userId: string, settings: UserSettings) {
     await supabase.from('user_settings').upsert([{ id: userId, ...settings }]);
   }
@@ -513,8 +560,6 @@ class DatabaseService {
   async createDemoUser(): Promise<User> {
     return this.login('test@aceverse.se', 'password');
   }
-
-  // Standard Chat/Pitch methods...
   async createChatSession(userId: string, name: string, group = 'Default'): Promise<ChatSession> {
     const { data, error } = await supabase.from('chat_sessions').insert([{ user_id: userId, name, session_group: group }]).select().single();
     if (error) throw error; return data;

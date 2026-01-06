@@ -1,10 +1,11 @@
 
 import React, { useState, useRef } from 'react';
-import { Mail, Phone, MapPin, Send, Loader2, CheckCircle, ArrowRight, Copy } from 'lucide-react';
+import { Mail, Phone, MapPin, Send, Loader2, CheckCircle, ArrowRight } from 'lucide-react';
 import { db } from '../services/db';
 import { useLanguage } from '../contexts/LanguageContext';
 import RevealOnScroll from '../components/RevealOnScroll';
 
+// Destination email
 const CONTACT_EMAIL = 'info.aceverse@gmail.com';
 
 const Contact: React.FC = () => {
@@ -17,21 +18,26 @@ const Contact: React.FC = () => {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSent, setIsSent] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const formRef = useRef<HTMLDivElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    setErrorMsg('');
 
     try {
-        await db.submitContactRequest({
+        // 1. Logga till databasen (Backup - osynlig för användaren)
+        db.submitContactRequest({
             name: formData.name,
             email: formData.email,
             subject: formData.subject,
             message: formData.message
-        });
+        }).catch(err => console.error("Database log failed:", err));
 
-        const response = await fetch(`https://formsubmit.co/ajax/${CONTACT_EMAIL}`, {
+        // 2. Skicka via FormSubmit (AJAX)
+        // Vi använder en unik URL med slumpmässig query string för att undvika caching-problem
+        const response = await fetch(`https://formsubmit.co/ajax/${CONTACT_EMAIL}?_=${Date.now()}`, {
             method: "POST",
             headers: { 
                 'Content-Type': 'application/json',
@@ -40,24 +46,25 @@ const Contact: React.FC = () => {
             body: JSON.stringify({
                 name: formData.name,
                 email: formData.email,
-                _subject: `${t('contact.form.newMsg')}: ${formData.subject || 'No subject'}`, 
+                _subject: `Aceverse: ${formData.subject || 'Ny kontaktförfrågan'}`, 
                 message: formData.message,
-                _template: 'table', 
-                _captcha: 'false'
+                _template: 'table', // Snygg tabell-layout i mailet
+                _captcha: 'false',  // Inaktivera captcha för smidigare UX
+                _honey: ''          // Spam-fälla (ska vara tom)
             })
         });
 
         if (!response.ok) {
-            console.warn("Email sending via FormSubmit failed, but saved to DB.");
+            throw new Error(`Server error: ${response.status}`);
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        
+        // 3. Success State
         setIsSent(true);
         setFormData({ name: '', email: '', subject: '', message: '' });
+
     } catch (error) {
         console.error("Submission failed", error);
-        alert("Error occurred. Please try again.");
+        setErrorMsg("Ett tekniskt fel uppstod. Vänligen prova igen om en stund eller ring oss direkt.");
     } finally {
         setIsSubmitting(false);
     }
@@ -161,6 +168,17 @@ const Contact: React.FC = () => {
                      </div>
                    ) : (
                       <form onSubmit={handleSubmit} className="space-y-8 animate-[fadeIn_0.5s_ease-out]">
+                        
+                        {/* Hidden Inputs for FormSubmit Configuration */}
+                        <input type="text" name="_honey" style={{display: 'none'}} />
+                        <input type="hidden" name="_captcha" value="false" />
+
+                        {errorMsg && (
+                            <div className="p-4 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-300 rounded-lg text-sm font-medium border border-red-100 dark:border-red-900 animate-shake">
+                                {errorMsg}
+                            </div>
+                        )}
+
                         <div className="grid md:grid-cols-2 gap-8">
                           <div className="group">
                             <label className="block text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2 group-focus-within:text-black dark:group-focus-within:text-gray-300">{t('contact.form.name')}</label>
@@ -221,7 +239,7 @@ const Contact: React.FC = () => {
                           <button 
                             type="submit" 
                             disabled={isSubmitting}
-                            className="bg-black dark:bg-white text-white dark:text-black px-10 py-5 rounded-full font-medium text-lg hover:bg-gray-800 dark:hover:bg-gray-200 transition-all flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group shadow-lg shadow-black/10 dark:shadow-white/10"
+                            className="w-full md:w-auto bg-black dark:bg-white text-white dark:text-black px-10 py-5 rounded-full font-medium text-lg hover:bg-gray-800 dark:hover:bg-gray-200 transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed group shadow-lg shadow-black/10 dark:shadow-white/10"
                           >
                             {isSubmitting ? (
                               <><Loader2 className="animate-spin" size={20} /> {t('contact.form.sending')}</>

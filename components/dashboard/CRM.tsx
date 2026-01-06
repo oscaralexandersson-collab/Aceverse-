@@ -508,7 +508,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* 4. CONTACTS */}
+                {/* 4. CONTACTS - EDITED TO FIX EDIT BUTTON POSITION */}
                 {activeTab === 'contacts' && (
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
@@ -522,7 +522,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                         </div>
                         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                             {contacts.map(c => (
-                                <div key={c.id} className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-gray-800 hover:shadow-md transition-shadow group relative">
+                                <div key={c.id} className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-gray-800 hover:shadow-md transition-shadow group relative flex flex-col">
                                     <div className="flex items-start justify-between mb-4">
                                         <div className="w-10 h-10 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center text-lg font-bold font-serif">{c.name[0]}</div>
                                         <span className="text-[10px] font-black uppercase tracking-widest bg-gray-50 dark:bg-gray-800 px-2 py-1 rounded">{c.type}</span>
@@ -530,13 +530,13 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                     <h4 className="font-bold text-lg mb-1">{c.name}</h4>
                                     <p className="text-xs text-gray-500 mb-4">{c.company || 'Privatperson'}</p>
                                     
-                                    <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400 mb-4">
-                                        {c.email && <div className="flex items-center gap-2"><Mail size={14}/> {c.email}</div>}
-                                        {c.phone && <div className="flex items-center gap-2"><Phone size={14}/> {c.phone}</div>}
+                                    <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400 mb-6 flex-1">
+                                        {c.email && <div className="flex items-center gap-2 truncate"><Mail size={14}/> {c.email}</div>}
+                                        {c.phone && <div className="flex items-center gap-2 truncate"><Phone size={14}/> {c.phone}</div>}
                                     </div>
 
-                                    {/* Action Links */}
-                                    <div className="flex gap-2 pt-2 border-t border-gray-50 dark:border-gray-800">
+                                    {/* Action Links - Edit button moved here */}
+                                    <div className="flex gap-2 pt-3 border-t border-gray-50 dark:border-gray-800 items-center">
                                         {c.website && (
                                             <a href={c.website.startsWith('http') ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer" className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-black dark:hover:text-white transition-colors" title="Webbplats">
                                                 <Globe size={14} />
@@ -547,14 +547,16 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                                 <Linkedin size={14} />
                                             </a>
                                         )}
+                                        
+                                        {/* Edit Button moved to footer to prevent overlap */}
+                                        <button 
+                                            onClick={() => openEditContact(c)}
+                                            className="ml-auto p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-400 hover:text-black dark:hover:text-white transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
+                                            title="Redigera kontakt"
+                                        >
+                                            <Edit2 size={14} />
+                                        </button>
                                     </div>
-
-                                    <button 
-                                        onClick={() => openEditContact(c)}
-                                        className="absolute top-6 right-6 opacity-0 group-hover:opacity-100 transition-opacity p-2 text-gray-400 hover:text-black dark:hover:text-white"
-                                    >
-                                        <Edit2 size={16} />
-                                    </button>
                                 </div>
                             ))}
                         </div>

@@ -30,6 +30,9 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
   const [connectionError, setConnectionError] = useState(false);
   const [nextEvent, setNextEvent] = useState<UfEvent | null>(null);
   
+  // New state to pass context to Advisor
+  const [advisorStartPrompt, setAdvisorStartPrompt] = useState<string | null>(null);
+  
   const { t, language, setLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
 
@@ -64,6 +67,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
     refreshData();
   }, [syncTrigger, user.id, refreshData]);
 
+  // Listen for internal triggers (e.g. creating an event in CRM)
+  useEffect(() => {
+    const handleTrigger = () => refreshData();
+    window.addEventListener('trigger_dashboard_refresh', handleTrigger);
+    return () => window.removeEventListener('trigger_dashboard_refresh', handleTrigger);
+  }, [refreshData]);
+
+  const handlePlanEvent = (prompt: string) => {
+      setAdvisorStartPrompt(prompt);
+      setCurrentView('advisor');
+  };
+
   const menuItems: { id: DashboardView; label: string; icon: any }[] = [
     { id: 'overview', label: t('dashboard.overview'), icon: LayoutDashboard },
     { id: 'ideas', label: t('dashboard.ideas'), icon: Lightbulb },
@@ -75,7 +90,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
 
   const getDaysLeft = (dateStr: string) => {
       const diff = new Date(dateStr).getTime() - new Date().getTime();
-      return Math.ceil(diff / (1000 * 3600 * 24));
+      const days = Math.ceil(diff / (1000 * 3600 * 24));
+      return days < 0 ? 0 : days; // Don't show negative days
   };
 
   return (
@@ -109,7 +125,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
         <div className="p-4 border-t border-gray-100 dark:border-gray-800 mt-auto">
           {/* Next Event Pop-up Card */}
           {nextEvent && (
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-4 mb-4 border border-blue-100 dark:border-blue-800 shadow-sm relative overflow-hidden group">
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl p-4 mb-4 border border-blue-100 dark:border-blue-800 shadow-sm relative overflow-hidden group animate-fadeIn">
                   <div className="flex items-start justify-between mb-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-300">Nästa Händelse</span>
                       <Calendar size={14} className="text-blue-400" />
@@ -119,7 +135,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
                   
                   <div className="mt-3 flex items-center gap-2">
                       <span className="bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-300 px-2 py-1 rounded text-[10px] font-bold shadow-sm">
-                          {getDaysLeft(nextEvent.date_at)} dagar kvar
+                          {getDaysLeft(nextEvent.date_at) === 0 ? "Idag" : `${getDaysLeft(nextEvent.date_at)} dagar kvar`}
                       </span>
                   </div>
               </div>
@@ -203,9 +219,21 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
 
         <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-8 custom-scrollbar relative">
           <div className="max-w-6xl mx-auto h-full">
-            {currentView === 'overview' && <Overview user={user} setView={setCurrentView} />}
+            {currentView === 'overview' && (
+                <Overview 
+                    user={user} 
+                    setView={setCurrentView} 
+                    onPlanEvent={handlePlanEvent} 
+                />
+            )}
             {currentView === 'ideas' && <IdeaLab user={user} />}
-            {currentView === 'advisor' && <Advisor user={user} />}
+            {currentView === 'advisor' && (
+                <Advisor 
+                    user={user} 
+                    initialPrompt={advisorStartPrompt}
+                    onClearPrompt={() => setAdvisorStartPrompt(null)}
+                />
+            )}
             {currentView === 'marketing' && <MarketingEngine user={user} />}
             {currentView === 'crm' && <CRM user={user} />}
             {currentView === 'pitch' && <PitchStudio user={user} />}

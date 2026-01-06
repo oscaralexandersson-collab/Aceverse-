@@ -20,9 +20,11 @@ Använd svenska i ditt svar.
 
 interface AdvisorProps {
     user: User;
+    initialPrompt?: string | null;
+    onClearPrompt?: () => void;
 }
 
-const Advisor: React.FC<AdvisorProps> = ({ user }) => {
+const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt }) => {
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -32,6 +34,9 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [sessionToDelete, setSessionToDelete] = useState<ChatSession | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+    
+    // Prevent double-execution of auto-start
+    const hasHandledPrompt = useRef(false);
 
     // Renaming state
     const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -39,12 +44,70 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
 
     useEffect(() => { loadSessions(); }, [user.id]);
     
+    // Load messages when ID changes
     useEffect(() => { 
-        if (currentSessionId) loadMessages(currentSessionId);
-        else setMessages([]);
+        if (currentSessionId) {
+            loadMessages(currentSessionId);
+        } else {
+            setMessages([]);
+        }
     }, [currentSessionId]);
 
     useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
+
+    // --- AUTO-START FROM PROMPT ---
+    useEffect(() => {
+        if (initialPrompt && !hasHandledPrompt.current) {
+            hasHandledPrompt.current = true;
+            handleAutoStartSession(initialPrompt);
+            if (onClearPrompt) onClearPrompt();
+        }
+    }, [initialPrompt]);
+
+    const handleAutoStartSession = async (promptText: string) => {
+        setIsLoading(true);
+        try {
+            // 1. Create specific session first
+            const newS = await db.createChatSession(user.id, 'Planering: ' + promptText.substring(0, 20) + '...', 'Default');
+            
+            // 2. IMPORTANT: Save the user message to DB *BEFORE* setting the session ID.
+            // This prevents the 'loadMessages' effect from fetching an empty list and wiping the UI.
+            await db.addMessage(user.id, { role: 'user', text: promptText, session_id: newS.id });
+            
+            // 3. Update Session List
+            setSessions(prev => [newS, ...prev]);
+            
+            // 4. Set Current Session (This triggers loadMessages, which will now find the message we just saved)
+            setCurrentSessionId(newS.id);
+
+            // 5. Generate Smart Title (in background)
+            generateSmartTitle(promptText, newS.id);
+
+            // 6. Trigger AI Response
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const chat = ai.chats.create({
+                model: 'gemini-3-pro-preview',
+                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.5 },
+                history: [{ role: 'user', parts: [{ text: promptText }] }]
+            });
+
+            const result = await chat.sendMessage({ message: promptText });
+            const aiText = result.text || "Jag hjälper dig gärna planera. Vad är första steget?";
+            
+            // 7. Save AI Message
+            const aiMsg = await db.addMessage(user.id, { role: 'ai', text: aiText, session_id: newS.id });
+            
+            // 8. Update UI with AI response
+            setMessages(prev => [...prev, aiMsg]);
+
+        } catch (e) {
+            console.error("Auto-start failed", e);
+        } finally {
+            setIsLoading(false);
+            // Reset the ref after a delay to allow future auto-starts if needed (though usually one per nav)
+            setTimeout(() => { hasHandledPrompt.current = false; }, 2000);
+        }
+    };
 
     const loadSessions = async () => {
         try {
@@ -53,7 +116,11 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                 .filter(s => s.session_group !== 'System')
                 .sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0));
             setSessions(chatSessions);
-            if (!currentSessionId && chatSessions.length > 0) setCurrentSessionId(chatSessions[0].id);
+            
+            // Only set default session if we are NOT in the middle of an auto-start sequence
+            if (!currentSessionId && chatSessions.length > 0 && !hasHandledPrompt.current) {
+                setCurrentSessionId(chatSessions[0].id);
+            }
         } catch (err) { console.error(err); }
     };
 
@@ -65,6 +132,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                 .sort((a, b) => a.timestamp - b.timestamp);
             
             if (msgs.length === 0) {
+                // Only show greeting if truly empty (no user messages either)
                 setMessages([{
                     id: 'init-' + sid,
                     role: 'ai',
@@ -308,7 +376,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user }) => {
                             <button 
                                 type="submit" 
                                 disabled={!input.trim() || isLoading} 
-                                className="h-14 w-14 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center shadow-2xl hover:scale-105 active:scale-90 transition-all disabled:opacity-20 shrink-0 mb-1 mr-1"
+                                className="h-14 w-14 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 transition-all disabled:opacity-20 shrink-0 mb-1 mr-1"
                             >
                                 <ArrowUp size={24} strokeWidth={2.5} />
                             </button>

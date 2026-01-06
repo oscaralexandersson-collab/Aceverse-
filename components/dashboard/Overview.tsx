@@ -8,6 +8,7 @@ import { useLanguage } from '../../contexts/LanguageContext';
 interface OverviewProps {
     user: User;
     setView: (view: DashboardView) => void;
+    onPlanEvent?: (prompt: string) => void;
 }
 
 interface ActivityItem {
@@ -17,7 +18,7 @@ interface ActivityItem {
     timestamp: number;
 }
 
-const Overview: React.FC<OverviewProps> = ({ user, setView }) => {
+const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
   const [stats, setStats] = useState({ leadsCount: 0, pitchCount: 0, ideaCount: 0 });
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -71,6 +72,16 @@ const Overview: React.FC<OverviewProps> = ({ user, setView }) => {
     loadData();
   }, [user.id, t]);
 
+  const handleRecommendationClick = (rec: Recommendation) => {
+      if (rec.kind === 'UF_EVENT' && onPlanEvent) {
+          // Trigger special planning flow for UF events
+          onPlanEvent(`Hjälp mig planera inför ${rec.title}. ${rec.description}`);
+      } else {
+          // Default behavior
+          setView('crm');
+      }
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-gray-400" /></div>;
 
   return (
@@ -91,14 +102,17 @@ const Overview: React.FC<OverviewProps> = ({ user, setView }) => {
                 <div key={rec.id} className="bg-gradient-to-r from-blue-50 to-white dark:from-blue-900/20 dark:to-gray-900 p-6 rounded-2xl border border-blue-100 dark:border-blue-900/50 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                     <div className="flex items-start gap-4">
                         <div className="w-10 h-10 bg-blue-100 dark:bg-blue-800 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-200 shrink-0">
-                            {rec.kind === 'DEADLINE' ? <Clock size={20}/> : <Target size={20}/>}
+                            {rec.kind === 'UF_EVENT' || rec.kind === 'DEADLINE' ? <Clock size={20}/> : <Target size={20}/>}
                         </div>
                         <div>
                             <h4 className="font-bold text-gray-900 dark:text-white">{rec.title}</h4>
                             <p className="text-sm text-gray-600 dark:text-gray-300">{rec.description}</p>
                         </div>
                     </div>
-                    <button onClick={() => setView('crm')} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase tracking-wide hover:bg-blue-700 transition-all shrink-0">
+                    <button 
+                        onClick={() => handleRecommendationClick(rec)} 
+                        className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase tracking-wide hover:bg-blue-700 transition-all shrink-0"
+                    >
                         {rec.ctaLabel}
                     </button>
                 </div>
