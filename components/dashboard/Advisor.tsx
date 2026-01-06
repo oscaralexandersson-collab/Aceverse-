@@ -2,12 +2,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     ArrowUp, Plus, MessageSquare, PanelLeftClose, PanelLeftOpen, 
-    Trash2, ShieldCheck, Loader2, Zap, HelpCircle, Pencil, Check, X as XIcon
+    Trash2, ShieldCheck, Loader2, Zap, HelpCircle, Pencil, Check, X as XIcon,
+    Users, Lock
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { User, ChatMessage, ChatSession } from '../../types';
 import { db } from '../../services/db';
 import DeleteConfirmModal from './DeleteConfirmModal';
+import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 export const UF_KNOWLEDGE_BASE = `
 # 🔒 UF-läraren - PREMIUM RÅDGIVARE & KVALITETSGRANSKARE
@@ -25,6 +27,9 @@ interface AdvisorProps {
 }
 
 const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt }) => {
+    // Access global scope from context instead of local state tabs
+    const { activeWorkspace, viewScope } = useWorkspace();
+    
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -33,18 +38,20 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const [isCreatingSession, setIsCreatingSession] = useState(false);
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [sessionToDelete, setSessionToDelete] = useState<ChatSession | null>(null);
-    const scrollRef = useRef<HTMLDivElement>(null);
     
-    // Prevent double-execution of auto-start
+    const scrollRef = useRef<HTMLDivElement>(null);
     const hasHandledPrompt = useRef(false);
 
     // Renaming state
     const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
     const [editName, setEditName] = useState('');
 
-    useEffect(() => { loadSessions(); }, [user.id]);
+    // Reload sessions when user changes scope (Personal <-> Team)
+    useEffect(() => { 
+        loadSessions(); 
+        setCurrentSessionId(null); 
+    }, [user.id, activeWorkspace?.id, viewScope]);
     
-    // Load messages when ID changes
     useEffect(() => { 
         if (currentSessionId) {
             loadMessages(currentSessionId);
@@ -67,23 +74,17 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const handleAutoStartSession = async (promptText: string) => {
         setIsLoading(true);
         try {
-            // 1. Create specific session first
-            const newS = await db.createChatSession(user.id, 'Planering: ' + promptText.substring(0, 20) + '...', 'Default');
-            
-            // 2. IMPORTANT: Save the user message to DB *BEFORE* setting the session ID.
-            // This prevents the 'loadMessages' effect from fetching an empty list and wiping the UI.
-            await db.addMessage(user.id, { role: 'user', text: promptText, session_id: newS.id });
-            
-            // 3. Update Session List
-            setSessions(prev => [newS, ...prev]);
-            
-            // 4. Set Current Session (This triggers loadMessages, which will now find the message we just saved)
-            setCurrentSessionId(newS.id);
+            // Determine visibility based on global scope
+            const visibility = viewScope === 'workspace' ? 'shared' : 'private';
+            const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
 
-            // 5. Generate Smart Title (in background)
+            const newS = await db.createChatSession(user.id, 'Planering: ' + promptText.substring(0, 20) + '...', 'Default', workspaceId, visibility);
+            
+            await db.addMessage(user.id, { role: 'user', text: promptText, session_id: newS.id });
+            setSessions(prev => [newS, ...prev]);
+            setCurrentSessionId(newS.id);
             generateSmartTitle(promptText, newS.id);
 
-            // 6. Trigger AI Response
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const chat = ai.chats.create({
                 model: 'gemini-3-pro-preview',
@@ -94,17 +95,13 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const result = await chat.sendMessage({ message: promptText });
             const aiText = result.text || "Jag hjälper dig gärna planera. Vad är första steget?";
             
-            // 7. Save AI Message
             const aiMsg = await db.addMessage(user.id, { role: 'ai', text: aiText, session_id: newS.id });
-            
-            // 8. Update UI with AI response
             setMessages(prev => [...prev, aiMsg]);
 
         } catch (e) {
             console.error("Auto-start failed", e);
         } finally {
             setIsLoading(false);
-            // Reset the ref after a delay to allow future auto-starts if needed (though usually one per nav)
             setTimeout(() => { hasHandledPrompt.current = false; }, 2000);
         }
     };
@@ -112,15 +109,26 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const loadSessions = async () => {
         try {
             const data = await db.getUserData(user.id);
-            const chatSessions = (data.sessions || [])
-                .filter(s => s.session_group !== 'System')
-                .sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0));
-            setSessions(chatSessions);
+            // FETCH logic in db.ts gets *everything* accessible.
+            // We must filter here based on viewScope.
             
-            // Only set default session if we are NOT in the middle of an auto-start sequence
-            if (!currentSessionId && chatSessions.length > 0 && !hasHandledPrompt.current) {
-                setCurrentSessionId(chatSessions[0].id);
-            }
+            const allSessions = (data.sessions || [])
+                .filter(s => s.session_group !== 'System');
+
+            // --- FILTERING LOGIC ---
+            const filtered = allSessions.filter(s => {
+                if (viewScope === 'personal') {
+                    // Personal: WorkspaceID IS NULL (or strictly private if previously set)
+                    // The SQL fix ensures older chats are null.
+                    return !s.workspace_id; 
+                } else {
+                    // Team: Must match active workspace
+                    return s.workspace_id === activeWorkspace?.id;
+                }
+            });
+
+            setSessions(filtered.sort((a, b) => (b.last_message_at || 0) - (a.last_message_at || 0)));
+            
         } catch (err) { console.error(err); }
     };
 
@@ -132,11 +140,10 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                 .sort((a, b) => a.timestamp - b.timestamp);
             
             if (msgs.length === 0) {
-                // Only show greeting if truly empty (no user messages either)
                 setMessages([{
                     id: 'init-' + sid,
                     role: 'ai',
-                    text: `Hej ${user.firstName}! Jag är redo att hjälpa dig med ditt UF-företag. Vad funderar du på idag?`,
+                    text: `Hej ${user.firstName}! Jag är redo att hjälpa dig ${viewScope === 'workspace' ? 'och teamet' : ''}. Vad funderar du på idag?`,
                     timestamp: Date.now(),
                     session_id: sid,
                     user_id: user.id,
@@ -151,10 +158,13 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const handleCreateSession = async () => {
         if (isCreatingSession) return;
         setIsCreatingSession(true);
-        // Default name until AI renames it or user edits
-        const name = `Ny konversation`;
+        
+        const visibility = viewScope === 'workspace' ? 'shared' : 'private';
+        const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
+        const name = viewScope === 'workspace' ? 'Ny Team-Chatt' : 'Ny Privat Chatt';
+
         try {
-            const newS = await db.createChatSession(user.id, name, 'Default');
+            const newS = await db.createChatSession(user.id, name, 'Default', workspaceId, visibility);
             setSessions(prev => [newS, ...prev]);
             setCurrentSessionId(newS.id);
         } catch (err: any) { alert("Fel: " + err.message); } 
@@ -186,7 +196,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const generateSmartTitle = async (firstUserMessage: string, sessionId: string) => {
         try {
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-            // Use fast model for title generation
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
                 contents: `Du är en expert på att sammanfatta konversationer. 
@@ -217,15 +226,16 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
         if (!activeId) {
             setIsLoading(true);
             try {
-                const newS = await db.createChatSession(user.id, 'Ny konversation', 'Default');
+                const visibility = viewScope === 'workspace' ? 'shared' : 'private';
+                const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
+                const newS = await db.createChatSession(user.id, 'Ny konversation', 'Default', workspaceId, visibility);
+                
                 setSessions(prev => [newS, ...prev]);
                 setCurrentSessionId(newS.id);
                 activeId = newS.id;
                 isNewSession = true;
             } catch (err) { setIsLoading(false); return; }
         } else {
-            // Check if this existing session has no user messages yet (meaning it's effectively new)
-            // Filter messages for this session, excluding 'init-' messages which are AI greetings
             const hasUserHistory = messages.some(m => m.role === 'user' && m.session_id === activeId);
             if (!hasUserHistory) isNewSession = true;
         }
@@ -238,7 +248,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const userMsg = await db.addMessage(user.id, { role: 'user', text, session_id: activeId! });
             setMessages(prev => [...prev, userMsg]);
 
-            // Trigger Smart Title Generation in background if it's the start of a conversation
             if (isNewSession) {
                 generateSmartTitle(text, activeId!);
             }
@@ -277,18 +286,31 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             <DeleteConfirmModal isOpen={!!sessionToDelete} onClose={() => setSessionToDelete(null)} onConfirm={handleDeleteSession} itemName={sessionToDelete?.name || ''} />
 
             <div className={`bg-gray-50/50 dark:bg-black/40 border-r border-gray-200 dark:border-gray-800 transition-all duration-500 flex flex-col ${isSidebarOpen ? 'w-80' : 'w-0 overflow-hidden opacity-0'}`}>
-                <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
-                    <h2 className="font-serif-display text-xl font-bold uppercase italic tracking-tight">Mina Chattar</h2>
-                    <button onClick={handleCreateSession} disabled={isCreatingSession} className="p-2.5 bg-black text-white rounded-2xl hover:opacity-80 active:scale-95 transition-all">
-                        {isCreatingSession ? <Loader2 size={18} className="animate-spin" /> : <Plus size={18} />}
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800">
+                    <h2 className="font-serif-display text-xl font-bold uppercase italic tracking-tight mb-4">UF-läraren</h2>
+                    
+                    {/* Status Badge */}
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className={`w-2 h-2 rounded-full ${viewScope === 'workspace' ? 'bg-blue-500' : 'bg-gray-400'}`}></div>
+                        <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
+                            {viewScope === 'workspace' ? `Team: ${activeWorkspace?.name}` : 'Din privata bok'}
+                        </span>
+                    </div>
+                </div>
+
+                <div className="p-4">
+                    <button onClick={handleCreateSession} disabled={isCreatingSession} className="w-full py-3 bg-black dark:bg-white text-white dark:text-black rounded-xl font-bold text-xs uppercase tracking-widest hover:opacity-80 active:scale-95 transition-all flex items-center justify-center gap-2">
+                        {isCreatingSession ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+                        Ny Chatt
                     </button>
                 </div>
+
                 <div className="overflow-y-auto flex-1 p-4 space-y-2">
                     {sessions.map(s => (
                         <div 
                             key={s.id} 
                             onClick={() => { if(editingSessionId !== s.id) setCurrentSessionId(s.id); }} 
-                            className={`p-4 rounded-[1.5rem] cursor-pointer transition-all border group flex flex-col gap-1 ${currentSessionId === s.id ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-xl' : 'border-transparent hover:bg-white/60'}`}
+                            className={`p-4 rounded-[1.5rem] cursor-pointer transition-all border group flex flex-col gap-1 ${currentSessionId === s.id ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-xl' : 'border-transparent hover:bg-white/60 dark:hover:bg-gray-800/30'}`}
                         >
                             {editingSessionId === s.id ? (
                                 <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -321,6 +343,11 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                             )}
                         </div>
                     ))}
+                    {sessions.length === 0 && (
+                        <div className="text-center py-10 opacity-40 text-xs font-bold uppercase tracking-widest">
+                            Inga chattar här än.
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -330,12 +357,12 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                         {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
                     </button>
                     <div className="flex items-center gap-3 px-5 py-2 bg-gray-50 dark:bg-gray-800 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] italic">
-                        <ShieldCheck size={14} className="text-green-500" /> UF-läraren Online
+                        <ShieldCheck size={14} className="text-green-500" /> {viewScope === 'workspace' ? 'Konferensrum (Delat)' : 'Privat Rum'}
                     </div>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-10 custom-scrollbar">
-                    {messages.length === 0 && !isLoading && (
+                    {!currentSessionId && (
                         <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
                             <MessageSquare size={48} className="mb-4" />
                             <p className="font-black uppercase tracking-[0.4em]">Välj en chatt för att börja</p>
@@ -369,13 +396,14 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                                 value={input} 
                                 onChange={(e) => setInput(e.target.value)} 
                                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} 
-                                placeholder="Fråga om ditt UF-företag..." 
+                                placeholder={currentSessionId ? "Skriv ett meddelande..." : "Välj en chatt först..."}
+                                disabled={!currentSessionId}
                                 className="flex-1 bg-transparent border-none focus:ring-0 resize-none py-4 px-6 text-base font-bold italic text-gray-900 dark:text-white placeholder:text-gray-400 outline-none rounded-[2rem]" 
                                 rows={1} 
                             />
                             <button 
                                 type="submit" 
-                                disabled={!input.trim() || isLoading} 
+                                disabled={!input.trim() || isLoading || !currentSessionId} 
                                 className="h-14 w-14 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 transition-all disabled:opacity-20 shrink-0 mb-1 mr-1"
                             >
                                 <ArrowUp size={24} strokeWidth={2.5} />

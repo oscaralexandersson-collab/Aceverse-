@@ -5,7 +5,7 @@ import {
   ContactRequest, UserSettings, CompanyReport, CompanyReportEntry,
   BrandDNA, MarketingCampaign, Contact, Deal, SalesEvent, Activity,
   SustainabilityLog, UfEvent, Recommendation, Badge, MailDraftRequest,
-  PitchProject, PitchVersion
+  PitchProject, PitchVersion, Workspace, WorkspaceMember
 } from '../types';
 import { GoogleGenAI } from "@google/genai";
 
@@ -199,31 +199,203 @@ class DatabaseService {
     return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   }
 
+  // --- WORKSPACE MANAGEMENT (NEW) ---
+
+  async createWorkspace(userId: string, name: string): Promise<Workspace> {
+      console.log("Creating workspace...", { userId, name });
+      
+      // 1. Create Workspace
+      const { data: wsData, error: wsError } = await supabase
+          .from('workspaces')
+          .insert([{ name: name, owner_id: userId }])
+          .select('*')
+          .single();
+      
+      if (wsError) {
+          console.error("Workspace creation error:", wsError);
+          const errorMsg = wsError.message || wsError.details || JSON.stringify(wsError);
+          throw new Error(`Kunde inte skapa arbetsyta: ${errorMsg}`);
+      }
+
+      console.log("Workspace created:", wsData);
+
+      // 2. Add Owner as Admin Member
+      const { error: memberError } = await supabase
+          .from('workspace_members')
+          .insert([{ workspace_id: wsData.id, user_id: userId, role: 'admin' }]);
+
+      if (memberError) {
+          console.error("Failed to add owner to workspace, cleaning up...", memberError);
+          const errorMsg = memberError.message || memberError.details || JSON.stringify(memberError);
+          
+          // Attempt rollback
+          await supabase.from('workspaces').delete().eq('id', wsData.id);
+          throw new Error(`Kunde inte lägga till dig i teamet: ${errorMsg}`);
+      }
+
+      return wsData;
+  }
+
+  async deleteWorkspace(workspaceId: string) {
+      console.log("Starting workspace deletion sequence...", workspaceId);
+      
+      // 1. Special case: Pitch Versions often depend on Pitch Projects.
+      const { data: projects } = await supabase
+          .from('pitch_projects')
+          .select('id')
+          .eq('workspace_id', workspaceId);
+      
+      if (projects && projects.length > 0) {
+          const projectIds = projects.map(p => p.id);
+          await supabase.from('pitch_versions').delete().in('project_id', projectIds);
+      }
+
+      // 2. Standard cleanup of direct dependents
+      const tables = [
+          'contacts', 
+          'deals', 
+          'leads', 
+          'ideas', 
+          'sales_events', 
+          'uf_events', 
+          'chat_sessions', 
+          'pitch_projects', 
+          'brand_dnas', 
+          'marketing_campaigns',
+          'workspace_members' // Members must be last of the dependents
+      ];
+
+      for (const table of tables) {
+          try {
+              const { error } = await supabase
+                  .from(table)
+                  .delete()
+                  .eq('workspace_id', workspaceId);
+              
+              if (error) {
+                  console.warn(`Warning during cleanup of ${table}:`, error.message);
+              } else {
+                  console.log(`Cleaned up ${table}`);
+              }
+          } catch (e) {
+              console.warn(`Exception during cleanup of ${table}`, e);
+          }
+      }
+
+      // 3. Finally, delete the workspace itself
+      const { error } = await supabase
+          .from('workspaces')
+          .delete()
+          .eq('id', workspaceId);
+
+      if (error) {
+          console.error("Delete workspace error:", error);
+          throw new Error(`Kunde inte radera teamet. Databasfel: ${error.message}.`);
+      }
+      
+      console.log("Workspace deleted successfully.");
+  }
+
+  async inviteMemberByEmail(workspaceId: string, email: string): Promise<void> {
+      // 1. Find user by email using Secure RPC (Bypasses RLS)
+      const { data, error } = await supabase.rpc('get_user_id_by_email', { email_input: email });
+      
+      if (error) {
+          console.error("RPC Error:", error);
+          throw new Error("Kunde inte söka efter användare.");
+      }
+
+      // RPC returns an array of objects even for single return in some setups, or just the data.
+      // Based on the SQL definition `RETURNS TABLE (id uuid)`, it returns [{ id: ... }]
+      if (!data || data.length === 0) {
+          throw new Error("Användaren hittades inte. Be personen skapa ett Aceverse-konto först.");
+      }
+
+      const targetUserId = data[0].id;
+
+      // 2. Check if already member
+      const { data: existing } = await supabase
+          .from('workspace_members')
+          .select('id')
+          .eq('workspace_id', workspaceId)
+          .eq('user_id', targetUserId)
+          .maybeSingle();
+
+      if (existing) throw new Error("Användaren är redan med i teamet.");
+
+      // 3. Add to workspace
+      const { error: insertError } = await supabase
+          .from('workspace_members')
+          .insert([{ workspace_id: workspaceId, user_id: targetUserId, role: 'member' }]);
+
+      if (insertError) throw insertError;
+  }
+
+  async getWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]> {
+      const { data, error } = await supabase
+          .from('workspace_members')
+          .select('*, user:profiles(*)')
+          .eq('workspace_id', workspaceId);
+      
+      if (error) throw error;
+      return data || [];
+  }
+
+  // --- DATA RECOVERY / REPAIR ---
+  async rescueDataToPersonal(userId: string) {
+      console.log("Starting data rescue for user:", userId);
+      // Set workspace_id to NULL for all items owned by user
+      const tables = [
+          'contacts', 'deals', 'leads', 'ideas', 
+          'sales_events', 'uf_events', 'chat_sessions', 
+          'pitch_projects', 'brand_dnas', 'marketing_campaigns'
+      ];
+      
+      for (const table of tables) {
+          try {
+              const { error } = await supabase
+                  .from(table)
+                  .update({ workspace_id: null })
+                  .eq('user_id', userId);
+              
+              if (error) {
+                  console.error(`Failed to rescue table ${table}:`, error);
+              } else {
+                  console.log(`Rescued table ${table}`);
+              }
+          } catch (e) {
+              console.error(`Exception rescuing table ${table}:`, e);
+          }
+      }
+  }
+
   // --- MAIN DATA FETCH ---
   async getUserData(userId: string): Promise<UserData> {
     try {
-      // Execute fetch in parallel
+      // NOTE: RLS handles security. We fetch ALL items the user has access to.
+      // The frontend handles filtering between "Personal" and "Team" views.
+      
       const [
         leads, contacts, deals, sales, activities, logs, events,
         ideas, pitches, messages, sessions, settings, profile, 
         reports, brandDNAs, campaigns, points, badges
       ] = await Promise.all([
-        supabase.from('leads').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('contacts').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('deals').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('sales_events').select('*').eq('user_id', userId).order('occurred_at', { ascending: false }),
-        supabase.from('activities').select('*').eq('user_id', userId).order('occurred_at', { ascending: false }),
-        supabase.from('sustainability_logs').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('uf_events').select('*').eq('user_id', userId).order('date_at', { ascending: true }),
-        supabase.from('ideas').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('pitches').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('chat_messages').select('*').eq('user_id', userId),
-        supabase.from('chat_sessions').select('*').eq('user_id', userId),
+        supabase.from('leads').select('*').order('created_at', { ascending: false }),
+        supabase.from('contacts').select('*').order('created_at', { ascending: false }),
+        supabase.from('deals').select('*').order('created_at', { ascending: false }),
+        supabase.from('sales_events').select('*').order('occurred_at', { ascending: false }),
+        supabase.from('activities').select('*').order('occurred_at', { ascending: false }),
+        supabase.from('sustainability_logs').select('*').order('created_at', { ascending: false }),
+        supabase.from('uf_events').select('*').order('date_at', { ascending: true }),
+        supabase.from('ideas').select('*').order('created_at', { ascending: false }),
+        supabase.from('pitches').select('*').order('created_at', { ascending: false }),
+        supabase.from('chat_messages').select('*'), 
+        supabase.from('chat_sessions').select('*'),
         supabase.from('user_settings').select('*').eq('id', userId).maybeSingle(),
         supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
-        supabase.from('company_reports').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
-        supabase.from('brand_dnas').select('*').eq('user_id', userId),
-        supabase.from('marketing_campaigns').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+        supabase.from('company_reports').select('*').order('created_at', { ascending: false }),
+        supabase.from('brand_dnas').select('*'),
+        supabase.from('marketing_campaigns').select('*').order('created_at', { ascending: false }),
         supabase.from('user_points').select('points').eq('user_id', userId),
         supabase.from('user_badges').select('*').eq('user_id', userId)
       ]);
@@ -231,25 +403,15 @@ class DatabaseService {
       const totalPoints = (points.data || []).reduce((acc, curr) => acc + (curr.points || 0), 0);
 
       // --- Pitch Engine Data Handling ---
-      // We fetch this separately to be safe against relationship errors
       let pitchProjectsData: any[] = [];
       try {
           const { data, error } = await supabase
             .from('pitch_projects')
             .select('*, versions:pitch_versions(*)')
-            .eq('user_id', userId)
-            .order('created_at', { ascending: false });
+            .order('created_at', { ascending: false }); 
             
           if (!error && data) {
               pitchProjectsData = data;
-          } else {
-              // Fallback: Fetch without versions if relation fails
-              const { data: fallbackData } = await supabase
-                .from('pitch_projects')
-                .select('*')
-                .eq('user_id', userId)
-                .order('created_at', { ascending: false });
-              pitchProjectsData = fallbackData || [];
           }
       } catch (err) {
           console.warn("Pitch project fetch warning", err);
@@ -272,8 +434,8 @@ class DatabaseService {
         points: totalPoints,
         badges: badges.data || [],
         ideas: ideas.data || [],
-        pitches: pitches.data || [], // Legacy
-        pitchProjects: mappedPitchProjects, // NEW
+        pitches: pitches.data || [],
+        pitchProjects: mappedPitchProjects,
         chatHistory: messages.data || [],
         sessions: sessions.data || [],
         settings: settings.data || undefined,
@@ -293,16 +455,141 @@ class DatabaseService {
     }
   }
 
-  // --- PITCH ENGINE 2.0 METHODS ---
+  // --- UPDATED CREATE CHAT SESSION WITH WORKSPACE & VISIBILITY ---
+  async createChatSession(userId: string, name: string, group = 'Default', workspaceId?: string | null, visibility: 'private' | 'shared' = 'private'): Promise<ChatSession> {
+    const payload: any = { user_id: userId, name, session_group: group, visibility };
+    
+    // Explicitly handle null for personal workspace
+    if (workspaceId) {
+        payload.workspace_id = workspaceId;
+    } else {
+        payload.workspace_id = null;
+    }
+    
+    const { data, error } = await supabase.from('chat_sessions').insert([payload]).select().single();
+    if (error) throw error; 
+    return data;
+  }
+
+  async updateChatSession(userId: string, sessionId: string, name: string) {
+    await supabase.from('chat_sessions').update({ name }).eq('id', sessionId);
+  }
+  async deleteChatSession(userId: string, sessionId: string) {
+    await supabase.from('chat_sessions').delete().eq('id', sessionId);
+  }
+  async addMessage(userId: string, msg: Partial<ChatMessage>) {
+    const { data, error } = await supabase.from('chat_messages').insert([{ user_id: userId, session_id: msg.session_id, role: msg.role, text: msg.text, timestamp: Date.now() }]).select().single();
+    if (error) throw error;
+    await supabase.from('chat_sessions').update({ last_message_at: Date.now() }).eq('id', msg.session_id);
+    return data;
+  }
+  async ensureSystemSession(userId: string): Promise<ChatSession> {
+    const { data } = await supabase.from('chat_sessions').select('*').eq('user_id', userId).eq('session_group', 'System').maybeSingle();
+    if (data) return data;
+    // Default system session is private
+    return this.createChatSession(userId, 'UF-läraren', 'System', null, 'private');
+  }
   
+  // --- IDEA LAB ---
+  async addIdea(userId: string, idea: Partial<Idea>) {
+    const payload = { user_id: userId, ...idea };
+    // ensure workspace_id is explicitly set or null
+    if (!payload.workspace_id) payload.workspace_id = null; 
+    
+    const { data, error } = await supabase.from('ideas').insert([payload]).select().single();
+    if (error) throw error; return data;
+  }
+  async updateIdeaState(userId: string, ideaId: string, updates: Partial<Idea>) {
+    await supabase.from('ideas').update(updates).eq('id', ideaId);
+  }
+  async deleteIdea(userId: string, ideaId: string) {
+    await supabase.from('ideas').delete().eq('id', ideaId);
+  }
+
+  // --- LEGACY PITCH (Deprecated but kept for types) ---
+  async addPitch(userId: string, pitch: Partial<Pitch>) {
+    const { data, error } = await supabase.from('pitches').insert([{ user_id: userId, ...pitch }]).select().single();
+    if (error) throw error; return data;
+  }
+  async deletePitch(userId: string, pitchId: string) {
+    await supabase.from('pitches').delete().eq('id', pitchId);
+  }
+
+  // --- REPORTS ---
+  async addReportToHistory(userId: string, reportData: CompanyReport): Promise<CompanyReportEntry> {
+    const { data, error } = await supabase.from('company_reports').insert([{ user_id: userId, title: reportData.meta.companyName, report_data: reportData }]).select().single();
+    if (error) throw error; return { id: data.id, user_id: data.user_id, title: data.title, reportData: data.report_data, created_at: data.created_at };
+  }
+
+  // --- MARKETING ENGINE ---
+  async addBrandDNA(userId: string, dna: BrandDNA) {
+    const payload = { 
+        id: dna.id, 
+        user_id: userId, 
+        brand_name: dna.meta.brandName, 
+        site_url: dna.meta.siteUrl, 
+        dna_data: dna, 
+        generated_at: dna.meta.generatedAt, 
+        workspace_id: dna.workspace_id || null // Add workspace support
+    };
+    await supabase.from('brand_dnas').insert([payload]);
+  }
+  async deleteBrandDNA(userId: string, dnaId: string) {
+    await supabase.from('brand_dnas').delete().eq('id', dnaId);
+  }
+  async addMarketingCampaign(userId: string, campaign: MarketingCampaign) {
+    const payload = { 
+        id: campaign.id, 
+        user_id: userId, 
+        brand_dna_id: campaign.brandDnaId, 
+        name: campaign.name, 
+        campaign_data: campaign, 
+        created_at: campaign.dateCreated,
+        workspace_id: campaign.workspace_id || null // Add workspace support
+    };
+    await supabase.from('marketing_campaigns').insert([payload]);
+  }
+  async deleteMarketingCampaign(userId: string, campaignId: string) {
+    await supabase.from('marketing_campaigns').delete().eq('id', campaignId);
+  }
+
+  // --- CRM / SALES ---
+  async addLead(userId: string, lead: Partial<Lead>) {
+    // Legacy lead support
+    const payload = { user_id: userId, ...lead };
+    if (!payload.workspace_id) payload.workspace_id = null;
+    const { data, error } = await supabase.from('leads').insert([payload]).select().single();
+    if (error) throw error;
+    await this.processGamification(userId, 'CREATE_LEAD');
+    return data;
+  }
+  async updateLead(userId: string, leadId: string, updates: Partial<Lead>) {
+    await supabase.from('leads').update(updates).eq('id', leadId);
+  }
+  async deleteLead(userId: string, leadId: string) {
+    await supabase.from('leads').delete().eq('id', leadId);
+  }
+  async saveSettings(userId: string, settings: UserSettings) {
+    await supabase.from('user_settings').upsert([{ id: userId, ...settings }]);
+  }
+  async submitContactRequest(req: ContactRequest) {
+    await supabase.from('contact_requests').insert([req]);
+  }
+  async createDemoUser(): Promise<User> {
+    return this.login('test@aceverse.se', 'password');
+  }
+
+  // --- PITCH ENGINE 2.0 METHODS ---
   async createPitchProject(userId: string, data: Partial<PitchProject>) {
-      const { data: project, error } = await supabase.from('pitch_projects').insert([{
+      const payload = {
           user_id: userId,
           title: data.title,
           target_audience: data.target_audience,
           format: data.format,
-          time_limit_seconds: data.time_limit_seconds
-      }]).select().single();
+          time_limit_seconds: data.time_limit_seconds,
+          workspace_id: data.workspace_id || null // Critical fix
+      };
+      const { data: project, error } = await supabase.from('pitch_projects').insert([payload]).select().single();
       if (error) throw error;
       return project;
   }
@@ -319,13 +606,177 @@ class DatabaseService {
   }
 
   async deletePitchProject(userId: string, projectId: string) {
-      const { error } = await supabase.from('pitch_projects').delete().eq('id', projectId).eq('user_id', userId);
+      const { error } = await supabase.from('pitch_projects').delete().eq('id', projectId);
       if (error) throw error;
   }
 
   async updatePitchProject(userId: string, projectId: string, updates: Partial<PitchProject>) {
-      const { error } = await supabase.from('pitch_projects').update(updates).eq('id', projectId).eq('user_id', userId);
+      const { error } = await supabase.from('pitch_projects').update(updates).eq('id', projectId);
       if (error) throw error;
+  }
+
+  // --- CRM & DASHBOARD ---
+
+  async getNextUfEvent(userId: string, workspaceId?: string | null): Promise<UfEvent | null> {
+    const now = new Date().toISOString();
+    
+    // Base query
+    let query = supabase
+      .from('uf_events')
+      .select('*')
+      .gte('date_at', now)
+      .order('date_at', { ascending: true })
+      .limit(1);
+
+    // Strict Scope Filtering
+    if (workspaceId) {
+        query = query.eq('workspace_id', workspaceId);
+    } else {
+        // Personal: Fetch where workspace_id is NULL
+        query = query.is('workspace_id', null);
+        // Note: We also check user_id for double safety, though RLS handles it
+        query = query.eq('user_id', userId); 
+    }
+
+    const { data } = await query.maybeSingle();
+    return data;
+  }
+
+  async getRecommendations(userId: string, workspaceId?: string | null): Promise<Recommendation[]> {
+    const recs: Recommendation[] = [];
+    const event = await this.getNextUfEvent(userId, workspaceId);
+    
+    if (event) {
+        recs.push({
+            id: `rec-evt-${event.id}`,
+            kind: 'UF_EVENT',
+            title: `Förberedelse: ${event.title}`,
+            description: `Det är snart dags för ${event.title}. Har ni koll på allt?`,
+            priority: 90,
+            ctaLabel: 'Planera',
+            ctaAction: () => {} 
+        });
+    }
+
+    // Filter deals based on scope
+    let dealsQuery = supabase.from('deals').select('*');
+    
+    if (workspaceId) {
+        dealsQuery = dealsQuery.eq('workspace_id', workspaceId);
+    } else {
+        dealsQuery = dealsQuery.is('workspace_id', null).eq('user_id', userId);
+    }
+
+    const { data: deals } = await dealsQuery.in('stage', ['QUALIFY', 'PROPOSAL', 'NEGOTIATION']).limit(1);
+
+    if (deals && deals.length > 0) {
+        recs.push({
+            id: `rec-deal-${deals[0].id}`,
+            kind: 'STALE_DEAL',
+            title: 'Stäng affären',
+            description: `Ni har en öppen möjlighet med ${deals[0].company || 'en kund'}. Följ upp idag.`,
+            priority: 85,
+            ctaLabel: 'Visa Affär',
+            ctaAction: () => {}
+        });
+    }
+    if (recs.length === 0) {
+        recs.push({
+            id: 'rec-default',
+            kind: 'TODAY_FOCUS',
+            title: 'Hitta nya kunder',
+            description: 'Använd CRM-verktyget för att bygga er pipeline.',
+            priority: 50,
+            ctaLabel: 'Gå till CRM',
+            ctaAction: () => {}
+        });
+    }
+    return recs;
+  }
+
+  async addContact(userId: string, contactData: Partial<Contact>) {
+    const payload = { user_id: userId, ...contactData };
+    if (!payload.workspace_id) payload.workspace_id = null;
+    const { error } = await supabase.from('contacts').insert([payload]);
+    if (error) throw error;
+    await this.processGamification(userId, 'ADD_CONTACT');
+  }
+
+  async updateContact(userId: string, contactId: string, contactData: Partial<Contact>) {
+    const { error } = await supabase.from('contacts').update(contactData).eq('id', contactId);
+    if (error) throw error;
+  }
+
+  async addDeal(userId: string, dealData: Partial<Deal>) {
+    const payload = { user_id: userId, ...dealData };
+    if (!payload.workspace_id) payload.workspace_id = null;
+    const { error } = await supabase.from('deals').insert([payload]);
+    if (error) throw error;
+    await this.processGamification(userId, 'CREATE_DEAL');
+  }
+
+  async updateDeal(userId: string, dealId: string, dealData: Partial<Deal>) {
+    const { error } = await supabase.from('deals').update(dealData).eq('id', dealId);
+    if (error) throw error;
+  }
+
+  async logSale(userId: string, saleData: Partial<SalesEvent>) {
+    const payload = { user_id: userId, ...saleData, occurred_at: new Date().toISOString() };
+    if (!payload.workspace_id) payload.workspace_id = null;
+    const { error } = await supabase.from('sales_events').insert([payload]);
+    if (error) throw error;
+    await this.processGamification(userId, 'LOG_SALE');
+  }
+
+  async updateSale(userId: string, saleId: string, saleData: Partial<SalesEvent>) {
+    const { error } = await supabase.from('sales_events').update(saleData).eq('id', saleId);
+    if (error) throw error;
+  }
+
+  async addUfEvent(userId: string, eventData: Partial<UfEvent>) {
+    const payload = { user_id: userId, ...eventData };
+    if (!payload.workspace_id) payload.workspace_id = null;
+    const { error } = await supabase.from('uf_events').insert([payload]);
+    if (error) throw error;
+  }
+
+  async generateUfStory(userId: string): Promise<string> {
+    try {
+      const { data: logs } = await supabase.from('sustainability_logs').select('*').eq('user_id', userId);
+      
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const prompt = `Skriv en kort, övertygande paragraf för en UF-årsredovisning om företagets hållbarhetsarbete.
+      
+      Aktiviteter:
+      ${(logs || []).map(l => `- ${l.impact_description} (${l.category})`).join('\n')}
+      
+      Om inga aktiviteter finns, skriv en generell vision om hållbarhet.
+      `;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: prompt
+      });
+
+      return response.text || "Kunde inte generera text.";
+    } catch (e) {
+      console.error(e);
+      return "Kunde inte generera text just nu.";
+    }
+  }
+
+  async processGamification(userId: string, action: string) {
+    const pointsMap: Record<string, number> = {
+      'CREATE_LEAD': 10,
+      'ADD_CONTACT': 10,
+      'CREATE_DEAL': 20,
+      'LOG_SALE': 50,
+      'COMPLETE_ONBOARDING': 50
+    };
+    const points = pointsMap[action] || 5;
+    
+    // Optimistic log, assume user_points table exists as per getUserData
+    await supabase.from('user_points').insert([{ user_id: userId, points, reason: action, created_at: new Date().toISOString() }]);
   }
 
   // --- AI EMAIL GENERATOR ---
@@ -386,233 +837,6 @@ class DatabaseService {
         console.error("Mail Gen Error", e);
         throw new Error("Kunde inte skapa mailet. Försök igen.");
     }
-  }
-
-  // --- CRM & GAMIFICATION ---
-  async addContact(userId: string, contact: Partial<Contact>) {
-    const { data, error } = await supabase.from('contacts').insert([{ user_id: userId, ...contact }]).select().single();
-    if (error) throw error;
-    await this.processGamification(userId, 'CREATE_CONTACT');
-    return data;
-  }
-  async updateContact(userId: string, id: string, updates: Partial<Contact>) {
-    await supabase.from('contacts').update(updates).eq('id', id).eq('user_id', userId);
-  }
-  async deleteContact(userId: string, id: string) {
-    await supabase.from('contacts').delete().eq('id', id).eq('user_id', userId);
-  }
-  async addDeal(userId: string, deal: Partial<Deal>) {
-    const { data, error } = await supabase.from('deals').insert([{ user_id: userId, ...deal }]).select().single();
-    if (error) throw error;
-    await this.processGamification(userId, 'CREATE_DEAL');
-    return data;
-  }
-  async updateDeal(userId: string, id: string, updates: Partial<Deal>) {
-    await supabase.from('deals').update(updates).eq('id', id).eq('user_id', userId);
-  }
-  async logSale(userId: string, sale: Partial<SalesEvent>) {
-    const { data, error } = await supabase.from('sales_events').insert([{ user_id: userId, ...sale }]).select().single();
-    if (error) throw error;
-    await this.processGamification(userId, 'LOG_SALE');
-    return data;
-  }
-  async updateSale(userId: string, id: string, updates: Partial<SalesEvent>) {
-    await supabase.from('sales_events').update(updates).eq('id', id).eq('user_id', userId);
-  }
-  async deleteSale(userId: string, id: string) {
-    await supabase.from('sales_events').delete().eq('id', id).eq('user_id', userId);
-  }
-  async logActivity(userId: string, activity: Partial<Activity>) {
-    const { data, error } = await supabase.from('activities').insert([{ user_id: userId, ...activity }]).select().single();
-    if (error) throw error;
-    return data;
-  }
-  async logSustainability(userId: string, log: Partial<SustainabilityLog>) {
-    const { data, error } = await supabase.from('sustainability_logs').insert([{ user_id: userId, ...log }]).select().single();
-    if (error) throw error;
-    await this.processGamification(userId, 'ADD_SUSTAINABILITY');
-    return data;
-  }
-  async addUfEvent(userId: string, event: Partial<UfEvent>) {
-    const { data, error } = await supabase.from('uf_events').insert([{ user_id: userId, ...event }]).select().single();
-    if (error) throw error;
-    return data;
-  }
-  async getNextUfEvent(userId: string): Promise<UfEvent | null> {
-    const { data } = await supabase.from('uf_events')
-      .select('*')
-      .eq('user_id', userId)
-      .gte('date_at', new Date().toISOString())
-      .order('date_at', { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    return data;
-  }
-
-  async processGamification(userId: string, actionType: string) {
-    let points = 0;
-    let reason = '';
-    switch(actionType) {
-        case 'CREATE_CONTACT': points = 2; reason = 'Ny kontakt'; break;
-        case 'CREATE_LEAD': points = 5; reason = 'Nytt lead'; break;
-        case 'LOG_SALE': points = 10; reason = 'Sälj loggat'; break;
-        case 'CREATE_DEAL': points = 5; reason = 'Ny affärsmöjlighet'; break;
-        case 'ADD_SUSTAINABILITY': points = 8; reason = 'Hållbart val'; break;
-    }
-    if (points > 0) {
-        await supabase.from('user_points').insert([{ user_id: userId, points, reason }]);
-    }
-    const { count: saleCount } = await supabase.from('sales_events').select('*', { count: 'exact', head: true }).eq('user_id', userId);
-    const { count: sustCount } = await supabase.from('sustainability_logs').select('*', { count: 'exact', head: true }).eq('user_id', userId);
-    if ((saleCount || 0) >= 1) await this.awardBadge(userId, 'FIRST_SALE');
-    if ((saleCount || 0) >= 10) await this.awardBadge(userId, 'SALES_MASTER');
-    if ((sustCount || 0) >= 3) await this.awardBadge(userId, 'IMPACT_MAKER');
-  }
-
-  async awardBadge(userId: string, badgeId: string) {
-    const { data } = await supabase.from('user_badges').select('id').eq('user_id', userId).eq('badge_id', badgeId).maybeSingle();
-    if (!data) {
-        await supabase.from('user_badges').insert([{ user_id: userId, badge_id: badgeId }]);
-    }
-  }
-
-  async getRecommendations(userId: string): Promise<Recommendation[]> {
-    const recs: Recommendation[] = [];
-    const now = new Date();
-    const { data: deals } = await supabase.from('deals').select('*').eq('user_id', userId).neq('stage', 'WON').neq('stage', 'LOST');
-    const { data: ufEvents } = await supabase.from('uf_events').select('*').eq('user_id', userId).gte('date_at', now.toISOString());
-
-    deals?.forEach(deal => {
-        const created = new Date(deal.created_at);
-        const daysOld = (now.getTime() - created.getTime()) / (1000 * 3600 * 24);
-        if (daysOld > 7) {
-            recs.push({
-                id: `stale-${deal.id}`,
-                kind: 'STALE_DEAL',
-                title: `Följ upp affären: ${deal.title}`,
-                description: 'Det har gått mer än 7 dagar sedan den skapades.',
-                priority: 80,
-                ctaLabel: 'Öppna affär',
-                ctaAction: () => {} 
-            });
-        }
-    });
-
-    ufEvents?.forEach(evt => {
-        const evtDate = new Date(evt.date_at);
-        const daysLeft = Math.ceil((evtDate.getTime() - now.getTime()) / (1000 * 3600 * 24));
-        if (daysLeft <= 14 && daysLeft >= 0) {
-            recs.push({
-                id: `evt-${evt.id}`,
-                kind: 'UF_EVENT',
-                title: `Kommande: ${evt.title}`,
-                description: `${daysLeft} dagar kvar. Har ni förberett allt?`,
-                priority: 95,
-                ctaLabel: 'Planera nu',
-                ctaAction: () => {}
-            });
-        }
-    });
-
-    if (recs.length === 0) {
-        recs.push({
-            id: 'focus-gen',
-            kind: 'TODAY_FOCUS',
-            title: 'Hitta nya kunder',
-            description: 'Ni har inga akuta ärenden. Passa på att kontakta 3 nya prospekt idag.',
-            priority: 50,
-            ctaLabel: 'Gå till Kontakter',
-            ctaAction: () => {}
-        });
-    }
-    return recs.sort((a, b) => b.priority - a.priority);
-  }
-
-  async generateUfStory(userId: string): Promise<string> {
-    const { data: logs } = await supabase.from('sustainability_logs').select('*').eq('user_id', userId);
-    const { data: sales } = await supabase.from('sales_events').select('*').eq('user_id', userId);
-    if (!logs?.length && !sales?.length) return "För lite data för att generera en berättelse.";
-    const totalCo2 = logs?.reduce((acc, l) => acc + (l.saved_co2_approx || 0), 0).toFixed(1);
-    const totalSales = sales?.reduce((acc, s) => acc + (s.amount || 0), 0);
-    const impactCount = logs?.length || 0;
-    return `VÅR UF-RESA I SIFFROR:\nVi har genomfört ${sales?.length} försäljningar vilket genererat ${totalSales} kr i omsättning.\nMen viktigast av allt: Vi har gjort ${impactCount} aktiva hållbarhetsval som sparat ca ${totalCo2} kg CO2.\nEtt konkret exempel: "${logs?.[0]?.impact_description || 'Vi väljer lokalt.'}"`;
-  }
-
-  // --- LEGACY ---
-  async addLead(userId: string, lead: Partial<Lead>) {
-    const { data, error } = await supabase.from('leads').insert([{ user_id: userId, ...lead }]).select().single();
-    if (error) throw error;
-    await this.processGamification(userId, 'CREATE_LEAD');
-    return data;
-  }
-  async updateLead(userId: string, leadId: string, updates: Partial<Lead>) {
-    await supabase.from('leads').update(updates).eq('id', leadId).eq('user_id', userId);
-  }
-  async deleteLead(userId: string, leadId: string) {
-    await supabase.from('leads').delete().eq('id', leadId).eq('user_id', userId);
-  }
-  async saveSettings(userId: string, settings: UserSettings) {
-    await supabase.from('user_settings').upsert([{ id: userId, ...settings }]);
-  }
-  async submitContactRequest(req: ContactRequest) {
-    await supabase.from('contact_requests').insert([req]);
-  }
-  async createDemoUser(): Promise<User> {
-    return this.login('test@aceverse.se', 'password');
-  }
-  async createChatSession(userId: string, name: string, group = 'Default'): Promise<ChatSession> {
-    const { data, error } = await supabase.from('chat_sessions').insert([{ user_id: userId, name, session_group: group }]).select().single();
-    if (error) throw error; return data;
-  }
-  async updateChatSession(userId: string, sessionId: string, name: string) {
-    await supabase.from('chat_sessions').update({ name }).eq('id', sessionId).eq('user_id', userId);
-  }
-  async deleteChatSession(userId: string, sessionId: string) {
-    await supabase.from('chat_sessions').delete().eq('id', sessionId).eq('user_id', userId);
-  }
-  async addMessage(userId: string, msg: Partial<ChatMessage>) {
-    const { data, error } = await supabase.from('chat_messages').insert([{ user_id: userId, session_id: msg.session_id, role: msg.role, text: msg.text, timestamp: Date.now() }]).select().single();
-    if (error) throw error;
-    await supabase.from('chat_sessions').update({ last_message_at: Date.now() }).eq('id', msg.session_id);
-    return data;
-  }
-  async ensureSystemSession(userId: string): Promise<ChatSession> {
-    const { data } = await supabase.from('chat_sessions').select('*').eq('user_id', userId).eq('session_group', 'System').maybeSingle();
-    if (data) return data;
-    return this.createChatSession(userId, 'UF-läraren', 'System');
-  }
-  async addIdea(userId: string, idea: Partial<Idea>) {
-    const { data, error } = await supabase.from('ideas').insert([{ user_id: userId, ...idea }]).select().single();
-    if (error) throw error; return data;
-  }
-  async updateIdeaState(userId: string, ideaId: string, updates: Partial<Idea>) {
-    await supabase.from('ideas').update(updates).eq('id', ideaId).eq('user_id', userId);
-  }
-  async deleteIdea(userId: string, ideaId: string) {
-    await supabase.from('ideas').delete().eq('id', ideaId).eq('user_id', userId);
-  }
-  async addPitch(userId: string, pitch: Partial<Pitch>) {
-    const { data, error } = await supabase.from('pitches').insert([{ user_id: userId, ...pitch }]).select().single();
-    if (error) throw error; return data;
-  }
-  async deletePitch(userId: string, pitchId: string) {
-    await supabase.from('pitches').delete().eq('id', pitchId).eq('user_id', userId);
-  }
-  async addReportToHistory(userId: string, reportData: CompanyReport): Promise<CompanyReportEntry> {
-    const { data, error } = await supabase.from('company_reports').insert([{ user_id: userId, title: reportData.meta.companyName, report_data: reportData }]).select().single();
-    if (error) throw error; return { id: data.id, user_id: data.user_id, title: data.title, reportData: data.report_data, created_at: data.created_at };
-  }
-  async addBrandDNA(userId: string, dna: BrandDNA) {
-    await supabase.from('brand_dnas').insert([{ id: dna.id, user_id: userId, brand_name: dna.meta.brandName, site_url: dna.meta.siteUrl, dna_data: dna, generated_at: dna.meta.generatedAt }]);
-  }
-  async deleteBrandDNA(userId: string, dnaId: string) {
-    await supabase.from('brand_dnas').delete().eq('id', dnaId).eq('user_id', userId);
-  }
-  async addMarketingCampaign(userId: string, campaign: MarketingCampaign) {
-    await supabase.from('marketing_campaigns').insert([{ id: campaign.id, user_id: userId, brand_dna_id: campaign.brandDnaId, name: campaign.name, campaign_data: campaign, created_at: campaign.dateCreated }]);
-  }
-  async deleteMarketingCampaign(userId: string, campaignId: string) {
-    await supabase.from('marketing_campaigns').delete().eq('id', campaignId).eq('user_id', userId);
   }
 }
 

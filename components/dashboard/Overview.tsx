@@ -4,6 +4,7 @@ import { ArrowUpRight, TrendingUp, Users, Mic, Clock, Loader2, Target, CheckCirc
 import { DashboardView, User, Recommendation } from '../../types';
 import { db } from '../../services/db';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 interface OverviewProps {
     user: User;
@@ -19,6 +20,7 @@ interface ActivityItem {
 }
 
 const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
+  const { activeWorkspace, viewScope } = useWorkspace(); // Workspace Context
   const [stats, setStats] = useState({ leadsCount: 0, pitchCount: 0, ideaCount: 0 });
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
@@ -44,21 +46,42 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
     const loadData = async () => {
         try {
             const data = await db.getUserData(user.id);
-            const recs = await db.getRecommendations(user.id);
             
+            // Pass correct scope to getRecommendations
+            const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
+            const recs = await db.getRecommendations(user.id, workspaceId);
+            
+            // --- STRICT SCOPE FILTERING ---
+            const filterScope = (item: any) => {
+                const itemId = item.workspace_id;
+                
+                if (viewScope === 'personal') {
+                    // Show items that have NO workspace ID (null, undefined, or empty string)
+                    return itemId === null || itemId === undefined || itemId === '';
+                } else {
+                    // Show items ONLY if they match the active workspace ID
+                    return activeWorkspace?.id && itemId === activeWorkspace.id;
+                }
+            };
+
+            const filteredContacts = data.contacts.filter(filterScope);
+            const filteredIdeas = data.ideas.filter(filterScope);
+            const filteredSales = data.salesEvents.filter(filterScope);
+            const filteredProjects = (data.pitchProjects || []).filter(filterScope);
+
             setStats({
-                leadsCount: (data.contacts || []).length,
-                pitchCount: (data.pitches || []).length,
-                ideaCount: (data.ideas || []).length
+                leadsCount: filteredContacts.length,
+                pitchCount: filteredProjects.length, 
+                ideaCount: filteredIdeas.length
             });
             setRecommendations(recs.slice(0, 2)); // Top 2 important actions
 
             // Activity Aggregation
             const rawActivities: ActivityItem[] = [
-                ...(data.salesEvents || []).map(s => ({ action: "Ny försäljning", target: `${s.amount} kr`, time: formatRelativeTime(s.occurred_at), timestamp: new Date(s.occurred_at).getTime() })),
-                ...(data.contacts || []).map(l => ({ action: t('dashboard.overviewContent.act1'), target: l.name, time: formatRelativeTime(l.created_at), timestamp: new Date(l.created_at).getTime() })),
-                ...(data.pitches || []).map(p => ({ action: t('dashboard.overviewContent.act2'), target: p.name, time: formatRelativeTime(p.created_at), timestamp: new Date(p.created_at).getTime() })),
-                ...(data.ideas || []).map(i => ({ action: t('dashboard.overviewContent.act3'), target: i.title, time: formatRelativeTime(i.created_at), timestamp: new Date(i.created_at).getTime() }))
+                ...filteredSales.map(s => ({ action: "Ny försäljning", target: `${s.amount} kr`, time: formatRelativeTime(s.occurred_at), timestamp: new Date(s.occurred_at).getTime() })),
+                ...filteredContacts.map(l => ({ action: t('dashboard.overviewContent.act1'), target: l.name, time: formatRelativeTime(l.created_at), timestamp: new Date(l.created_at).getTime() })),
+                ...filteredProjects.map(p => ({ action: t('dashboard.overviewContent.act2'), target: p.title, time: formatRelativeTime(p.created_at), timestamp: new Date(p.created_at).getTime() })),
+                ...filteredIdeas.map(i => ({ action: t('dashboard.overviewContent.act3'), target: i.title, time: formatRelativeTime(i.created_at), timestamp: new Date(i.created_at).getTime() }))
             ];
 
             setActivities(rawActivities.sort((a, b) => b.timestamp - a.timestamp).slice(0, 5));
@@ -70,7 +93,7 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
         }
     };
     loadData();
-  }, [user.id, t]);
+  }, [user.id, t, activeWorkspace?.id, viewScope]);
 
   const handleRecommendationClick = (rec: Recommendation) => {
       if (rec.kind === 'UF_EVENT' && onPlanEvent) {

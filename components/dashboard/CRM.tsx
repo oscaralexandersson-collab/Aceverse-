@@ -10,6 +10,7 @@ import {
 import { User, Contact, Deal, SalesEvent, SustainabilityLog, UfEvent, Recommendation, Badge, DealStage, MailRecipient, MailTemplateType, MailTone } from '../../types';
 import { db } from '../../services/db';
 import { useLanguage } from '../../contexts/LanguageContext';
+import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 type Tab = 'dashboard' | 'sales' | 'deals' | 'contacts' | 'mail' | 'impact';
 
@@ -19,6 +20,7 @@ interface CRMProps {
 
 const CRM: React.FC<CRMProps> = ({ user }) => {
     const { t } = useLanguage();
+    const { activeWorkspace, viewScope } = useWorkspace(); 
     const [activeTab, setActiveTab] = useState<Tab>('dashboard');
     const [isLoading, setIsLoading] = useState(true);
     
@@ -52,7 +54,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const [mailTemplate, setMailTemplate] = useState<MailTemplateType>('COLD_INTRO');
     const [mailTone, setMailTone] = useState<MailTone>('FORMAL');
     const [mailContext, setMailContext] = useState('');
-    const [meetingTime, setMeetingTime] = useState(''); // New state for date picker
+    const [meetingTime, setMeetingTime] = useState(''); 
     const [generatedSubject, setGeneratedSubject] = useState('');
     const [generatedBody, setGeneratedBody] = useState('');
     const [isGeneratingMail, setIsGeneratingMail] = useState(false);
@@ -60,23 +62,43 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
     useEffect(() => {
         loadData();
-    }, [user.id]);
+    }, [user.id, activeWorkspace?.id, viewScope]);
 
     const loadData = async () => {
         setIsLoading(true);
         try {
             const data = await db.getUserData(user.id);
-            setContacts(data.contacts);
-            setDeals(data.deals);
-            setSales(data.salesEvents);
-            setLogs(data.sustainabilityLogs);
-            setUfEvents(data.ufEvents);
+            
+            // --- ROBUST SCOPE FILTERING ---
+            const filterScope = (item: any) => {
+                const itemId = item.workspace_id;
+                
+                if (viewScope === 'personal') {
+                    // Show items that have NO workspace ID (null, undefined, or empty string)
+                    return itemId === null || itemId === undefined || itemId === '';
+                } else {
+                    // Show items ONLY if they match the active workspace ID
+                    return activeWorkspace?.id && itemId === activeWorkspace.id;
+                }
+            };
+
+            const filteredContacts = data.contacts.filter(filterScope);
+            const filteredDeals = data.deals.filter(filterScope);
+            const filteredSales = data.salesEvents.filter(filterScope);
+            const filteredLogs = data.sustainabilityLogs.filter(filterScope);
+            const filteredEvents = data.ufEvents.filter(filterScope);
+
+            setContacts(filteredContacts);
+            setDeals(filteredDeals);
+            setSales(filteredSales);
+            setLogs(filteredLogs);
+            setUfEvents(filteredEvents);
             setPoints(data.points);
             setBadges(data.badges);
             
-            // Map recipients for mail tab
+            // Map recipients
             const mailRecipients: MailRecipient[] = [
-                ...data.contacts.map(c => ({
+                ...filteredContacts.map(c => ({
                     id: c.id,
                     origin: 'CONTACT' as const,
                     name: c.name,
@@ -84,18 +106,16 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                     company: c.company,
                     lastInteraction: c.last_interaction_at ? new Date(c.last_interaction_at).toLocaleDateString() : undefined
                 })),
-                ...data.deals.map(d => ({
+                ...filteredDeals.map(d => ({
                     id: d.id,
                     origin: 'DEAL' as const,
-                    name: d.title, // In Deals, title is often the project/deal name, but we treat it as recipient context
+                    name: d.title,
                     company: d.company,
                     context: `Deal Stage: ${d.stage}, Value: ${d.value}`,
-                    // Deals might not have explicit emails in current schema, UI will handle this
                 }))
             ];
             setRecipients(mailRecipients);
 
-            // Generate dynamic recommendations
             const newRecs = await db.getRecommendations(user.id);
             setRecs(newRecs);
         } catch (e) {
@@ -105,12 +125,14 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         }
     };
 
+    // ... (rest of the component actions remain exactly the same)
+    // Keep all handlers (handleDragStart, handleDrop, handleSaveSale, etc.) exactly as previously implemented
+    
     // --- DRAG AND DROP HANDLERS ---
     const handleDragStart = (e: React.DragEvent, id: string) => {
         setDraggedDealId(id);
         e.dataTransfer.setData('dealId', id);
         e.dataTransfer.effectAllowed = 'move';
-        // Transparent ghost image fix
         e.currentTarget.classList.add('opacity-50');
     };
 
@@ -120,27 +142,23 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     };
 
     const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault(); // Necessary to allow dropping
+        e.preventDefault(); 
     };
 
     const handleDrop = async (e: React.DragEvent, newStage: DealStage) => {
         e.preventDefault();
         const dealId = e.dataTransfer.getData('dealId');
-        
         if (!dealId) return;
 
-        // 1. Optimistic UI Update (Immediate feedback)
         setDeals(prevDeals => prevDeals.map(deal => 
             deal.id === dealId ? { ...deal, stage: newStage } : deal
         ));
         setDraggedDealId(null);
 
-        // 2. Server Update
         try {
             await db.updateDeal(user.id, dealId, { stage: newStage });
         } catch (err) {
             console.error("Failed to move deal", err);
-            // Revert on error
             loadData();
         }
     };
@@ -156,7 +174,8 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             product_name: formData.get('product') as string,
             quantity: Number(formData.get('qty')),
             amount: amount,
-            channel: formData.get('channel') as string
+            channel: formData.get('channel') as string,
+            workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null
         };
 
         try {
@@ -165,7 +184,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             } else {
                 await db.logSale(user.id, saleData);
             }
-            
             setShowSaleModal(false);
             setEditingSale(null);
             loadData();
@@ -185,6 +203,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             company: formData.get('company') as string,
             value: Number(formData.get('value')),
             stage: formData.get('stage') as any,
+            workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null
         };
 
         try {
@@ -193,13 +212,12 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             } else {
                 await db.addDeal(user.id, dealData);
             }
-
             setShowDealModal(false);
             setEditingDeal(null);
             loadData();
         } catch (error) {
             console.error("Save deal error:", error);
-            alert("Kunde inte spara affären. Kontrollera att du kört SQL-uppdateringen för 'company' kolumnen.");
+            alert("Kunde inte spara affären.");
         }
     };
 
@@ -212,7 +230,8 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             await db.addUfEvent(user.id, {
                 title: formData.get('title') as string,
                 date_at: new Date(formData.get('date') as string).toISOString(),
-                type: formData.get('type') as any
+                type: formData.get('type') as any,
+                workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null
             });
             setShowEventModal(false);
             loadData();
@@ -235,6 +254,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             phone: formData.get('phone') as string,
             website: formData.get('website') as string,
             linkedin: formData.get('linkedin') as string,
+            workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null
         };
 
         try {
@@ -243,7 +263,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             } else {
                 await db.addContact(user.id, contactData);
             }
-
             setShowContactModal(false);
             setEditingContact(null);
             loadData();
@@ -262,7 +281,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 template: mailTemplate,
                 tone: mailTone,
                 extraContext: mailContext,
-                meetingTime: meetingTime, // Pass the time to AI
+                meetingTime: meetingTime,
                 senderName: `${user.firstName} ${user.lastName}`,
                 senderCompany: user.company || 'Vårt UF-företag'
             });
@@ -299,7 +318,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         setShowContactModal(true);
     };
 
-    // Determine main button action based on tab
     const getMainAction = () => {
         if (activeTab === 'deals') {
             return { label: 'Ny Affär (B2B)', action: () => { setEditingDeal(null); setShowDealModal(true); }, icon: <Briefcase size={16}/> };
@@ -309,7 +327,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
     const mainAction = getMainAction();
 
-    // B2B Stats Calculation
     const getB2BStats = () => {
         const wonDeals = deals.filter(d => d.stage === 'WON');
         const activeDeals = deals.filter(d => d.stage !== 'WON' && d.stage !== 'LOST');
@@ -325,8 +342,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
     return (
         <div className="flex flex-col h-full gap-6 animate-fadeIn pb-20">
-            
-            {/* TOP HEADER & NAV */}
+            {/* ... Render logic remains exactly same as existing file ... */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 border-b border-gray-100 dark:border-gray-800 pb-6">
                 <div>
                     <h1 className="font-serif-display text-4xl text-gray-900 dark:text-white mb-2">CRM & Sälj</h1>
@@ -350,13 +366,9 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 </div>
             </div>
 
-            {/* TAB CONTENT */}
             <div className="flex-1 overflow-y-auto custom-scrollbar pr-2">
-                
-                {/* 1. DASHBOARD / FOKUS */}
                 {activeTab === 'dashboard' && (
                     <div className="space-y-8">
-                        {/* Recommendations */}
                         <section>
                             <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Viktigast just nu</h3>
                             <div className="grid gap-4">
@@ -377,8 +389,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                 )}
                             </div>
                         </section>
-
-                        {/* UF Calendar Snippet */}
                         <section>
                             <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Kommande UF-Händelser</h3>
                             <div className="grid md:grid-cols-3 gap-4">
@@ -401,7 +411,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* 2. SALES (B2C) */}
                 {activeTab === 'sales' && (
                     <div className="space-y-8">
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -410,7 +419,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                             <StatBox label="Antal köp" value={sales.length.toString()} />
                             <StatBox label="Snittorder" value={`${Math.round(sales.length ? sales.reduce((acc,s) => acc+s.amount, 0)/sales.length : 0)} kr`} />
                         </div>
-
                         <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 overflow-hidden">
                             <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
                                 <h3 className="font-bold text-lg">Säljhierarki</h3>
@@ -446,55 +454,36 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* 3. DEALS (B2B) - DRAG & DROP ENABLED */}
                 {activeTab === 'deals' && (
                     <div className="h-full flex flex-col">
-                        
-                        {/* B2B ECONOMY / STATS */}
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                             <StatBox label="Total Pipeline" value={`${getB2BStats().pipelineValue} kr`} />
                             <StatBox label="Vunna Affärer" value={`${getB2BStats().wonRevenue} kr`} />
                             <StatBox label="Aktiva Affärer" value={getB2BStats().activeCount.toString()} />
                             <StatBox label="Vinstfrekvens" value={`${getB2BStats().winRate}%`} />
                         </div>
-
                         <div className="flex justify-between mb-6">
                             <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Säljpipeline</h3>
                             <button onClick={() => { setEditingDeal(null); setShowDealModal(true); }} className="flex items-center gap-2 text-xs font-bold uppercase hover:underline"><Plus size={14}/> Ny affär</button>
                         </div>
                         <div className="flex gap-4 overflow-x-auto pb-4 h-full">
                             {(['QUALIFY', 'PROPOSAL', 'NEGOTIATION', 'WON'] as DealStage[]).map(stage => (
-                                <div 
-                                    key={stage} 
-                                    onDragOver={handleDragOver}
-                                    onDrop={(e) => handleDrop(e, stage)}
-                                    className="min-w-[280px] bg-gray-50 dark:bg-gray-900/50 rounded-2xl p-4 flex flex-col transition-colors border border-transparent hover:border-gray-200 dark:hover:border-gray-800"
-                                >
+                                <div key={stage} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, stage)} className="min-w-[280px] bg-gray-50 dark:bg-gray-900/50 rounded-2xl p-4 flex flex-col transition-colors border border-transparent hover:border-gray-200 dark:hover:border-gray-800">
                                     <div className="mb-4 flex justify-between items-center">
                                         <span className="text-[10px] font-black uppercase tracking-widest text-gray-500">{stage}</span>
                                         <span className="bg-white dark:bg-gray-800 px-2 rounded-full text-xs font-bold">{deals.filter(d => d.stage === stage).length}</span>
                                     </div>
                                     <div className="space-y-3 overflow-y-auto flex-1">
                                         {deals.filter(d => d.stage === stage).map(d => (
-                                            <div 
-                                                key={d.id} 
-                                                draggable
-                                                onDragStart={(e) => handleDragStart(e, d.id)}
-                                                onDragEnd={handleDragEnd}
-                                                onClick={() => openEditDeal(d)}
-                                                className={`bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 cursor-grab active:cursor-grabbing hover:border-black dark:hover:border-white transition-all group ${draggedDealId === d.id ? 'opacity-50 border-black dark:border-white' : ''}`}
-                                            >
+                                            <div key={d.id} draggable onDragStart={(e) => handleDragStart(e, d.id)} onDragEnd={handleDragEnd} onClick={() => openEditDeal(d)} className={`bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 cursor-grab active:cursor-grabbing hover:border-black dark:hover:border-white transition-all group ${draggedDealId === d.id ? 'opacity-50 border-black dark:border-white' : ''}`}>
                                                 <div className="flex justify-between items-start mb-1">
                                                     <h4 className="font-bold text-sm">{d.title}</h4>
                                                     <GripVertical size={14} className="text-gray-300 opacity-0 group-hover:opacity-100" />
                                                 </div>
-                                                
-                                                {/* Company Label - Clearly Visible */}
                                                 <div className="flex items-center gap-1.5 mb-2 text-xs text-gray-500 dark:text-gray-400">
                                                     <Building2 size={12} />
                                                     <span className="truncate font-medium">{d.company || 'Företag saknas'}</span>
                                                 </div>
-
                                                 <div className="flex justify-between items-center text-xs text-gray-500 border-t border-gray-50 dark:border-gray-800 pt-2 mt-2">
                                                     <span className="font-mono font-bold text-gray-900 dark:text-white">{d.value} kr</span>
                                                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${d.probability > 70 ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{d.probability}%</span>
@@ -508,7 +497,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* 4. CONTACTS - EDITED TO FIX EDIT BUTTON POSITION */}
                 {activeTab === 'contacts' && (
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
@@ -529,33 +517,14 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                     </div>
                                     <h4 className="font-bold text-lg mb-1">{c.name}</h4>
                                     <p className="text-xs text-gray-500 mb-4">{c.company || 'Privatperson'}</p>
-                                    
                                     <div className="space-y-2 text-sm text-gray-600 dark:text-gray-400 mb-6 flex-1">
                                         {c.email && <div className="flex items-center gap-2 truncate"><Mail size={14}/> {c.email}</div>}
                                         {c.phone && <div className="flex items-center gap-2 truncate"><Phone size={14}/> {c.phone}</div>}
                                     </div>
-
-                                    {/* Action Links - Edit button moved here */}
                                     <div className="flex gap-2 pt-3 border-t border-gray-50 dark:border-gray-800 items-center">
-                                        {c.website && (
-                                            <a href={c.website.startsWith('http') ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer" className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-black dark:hover:text-white transition-colors" title="Webbplats">
-                                                <Globe size={14} />
-                                            </a>
-                                        )}
-                                        {c.linkedin && (
-                                            <a href={c.linkedin.startsWith('http') ? c.linkedin : `https://${c.linkedin}`} target="_blank" rel="noreferrer" className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-[#0077b5] transition-colors" title="LinkedIn">
-                                                <Linkedin size={14} />
-                                            </a>
-                                        )}
-                                        
-                                        {/* Edit Button moved to footer to prevent overlap */}
-                                        <button 
-                                            onClick={() => openEditContact(c)}
-                                            className="ml-auto p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-400 hover:text-black dark:hover:text-white transition-colors hover:bg-gray-100 dark:hover:bg-gray-700"
-                                            title="Redigera kontakt"
-                                        >
-                                            <Edit2 size={14} />
-                                        </button>
+                                        {c.website && <a href={c.website.startsWith('http') ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer" className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-black dark:hover:text-white transition-colors" title="Webbplats"><Globe size={14} /></a>}
+                                        {c.linkedin && <a href={c.linkedin.startsWith('http') ? c.linkedin : `https://${c.linkedin}`} target="_blank" rel="noreferrer" className="p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-500 hover:text-[#0077b5] transition-colors" title="LinkedIn"><Linkedin size={14} /></a>}
+                                        <button onClick={() => openEditContact(c)} className="ml-auto p-2 bg-gray-50 dark:bg-gray-800 rounded-full text-gray-400 hover:text-black dark:hover:text-white transition-colors hover:bg-gray-100 dark:hover:bg-gray-700" title="Redigera kontakt"><Edit2 size={14} /></button>
                                     </div>
                                 </div>
                             ))}
@@ -563,77 +532,41 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* NEW: MAIL TAB */}
                 {activeTab === 'mail' && (
                     <div className="grid lg:grid-cols-2 gap-8 h-full">
-                        {/* LEFT: SETTINGS */}
+                        {/* Mail content preserved */}
                         <div className="space-y-6 overflow-y-auto pr-2">
                             <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-gray-800">
                                 <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-6">{t('dashboard.crmContent.mail.recipient')}</h3>
-                                
                                 <div className="relative mb-6">
                                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18}/>
-                                    <input 
-                                        type="text" 
-                                        placeholder={t('dashboard.crmContent.mail.recipientPlaceholder')}
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full bg-gray-50 dark:bg-gray-800 pl-12 pr-4 py-3 rounded-xl border border-transparent focus:border-black dark:focus:border-white focus:bg-white dark:focus:bg-gray-900 outline-none transition-all text-sm"
-                                    />
+                                    <input type="text" placeholder={t('dashboard.crmContent.mail.recipientPlaceholder')} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 pl-12 pr-4 py-3 rounded-xl border border-transparent focus:border-black dark:focus:border-white focus:bg-white dark:focus:bg-gray-900 outline-none transition-all text-sm"/>
                                 </div>
-
                                 <div className="max-h-60 overflow-y-auto space-y-2 mb-6 custom-scrollbar border border-gray-100 dark:border-gray-800 rounded-xl p-2 bg-gray-50/50 dark:bg-gray-900/50">
                                     {filteredRecipients.map(r => (
-                                        <button 
-                                            key={r.id} 
-                                            onClick={() => setSelectedRecipient(r)}
-                                            className={`w-full text-left p-3 rounded-lg flex items-center justify-between group transition-all ${selectedRecipient?.id === r.id ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-white dark:hover:bg-gray-800'}`}
-                                        >
+                                        <button key={r.id} onClick={() => setSelectedRecipient(r)} className={`w-full text-left p-3 rounded-lg flex items-center justify-between group transition-all ${selectedRecipient?.id === r.id ? 'bg-black text-white dark:bg-white dark:text-black' : 'hover:bg-white dark:hover:bg-gray-800'}`}>
                                             <div>
                                                 <div className="font-bold text-sm">{r.name}</div>
-                                                <div className={`text-xs ${selectedRecipient?.id === r.id ? 'text-gray-300 dark:text-gray-600' : 'text-gray-500'}`}>
-                                                    {r.company || 'Okänt företag'}
-                                                </div>
+                                                <div className={`text-xs ${selectedRecipient?.id === r.id ? 'text-gray-300 dark:text-gray-600' : 'text-gray-500'}`}>{r.company || 'Okänt företag'}</div>
                                             </div>
-                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded ${
-                                                selectedRecipient?.id === r.id ? 'bg-white/20 text-white dark:text-black' : 
-                                                r.origin === 'DEAL' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300'
-                                            }`}>
-                                                {r.origin === 'DEAL' ? t('dashboard.crmContent.mail.originB2B') : t('dashboard.crmContent.mail.originContact')}
-                                            </span>
+                                            <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded ${selectedRecipient?.id === r.id ? 'bg-white/20 text-white dark:text-black' : r.origin === 'DEAL' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300' : 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300'}`}>{r.origin === 'DEAL' ? t('dashboard.crmContent.mail.originB2B') : t('dashboard.crmContent.mail.originContact')}</span>
                                         </button>
                                     ))}
                                 </div>
-
                                 {selectedRecipient && !selectedRecipient.email && (
                                     <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-xl flex items-start gap-3 mb-6 border border-red-100 dark:border-red-900">
                                         <AlertCircle size={18} className="text-red-500 mt-0.5" />
                                         <div>
                                             <p className="text-sm font-bold text-red-700 dark:text-red-300">{t('dashboard.crmContent.mail.noEmailWarning')}</p>
-                                            <button onClick={() => { 
-                                                // Find the entity and open edit
-                                                if (selectedRecipient.origin === 'CONTACT') {
-                                                    const c = contacts.find(x => x.id === selectedRecipient.id);
-                                                    if (c) openEditContact(c);
-                                                } else {
-                                                    // Deals often don't have direct email field in this schema, so this is tricky.
-                                                    // For now, we just suggest checking the deal.
-                                                    const d = deals.find(x => x.id === selectedRecipient.id);
-                                                    if (d) openEditDeal(d);
-                                                }
-                                            }} className="text-xs underline text-red-600 dark:text-red-400 mt-1">Lägg till nu</button>
+                                            <button onClick={() => { if (selectedRecipient.origin === 'CONTACT') { const c = contacts.find(x => x.id === selectedRecipient.id); if (c) openEditContact(c); } else { const d = deals.find(x => x.id === selectedRecipient.id); if (d) openEditDeal(d); } }} className="text-xs underline text-red-600 dark:text-red-400 mt-1">Lägg till nu</button>
                                         </div>
                                     </div>
                                 )}
-
+                                {/* Other mail inputs */}
                                 <div className="grid grid-cols-2 gap-4 mb-4">
                                     <div>
                                         <label className="text-xs font-bold text-gray-500 mb-2 block uppercase">{t('dashboard.crmContent.mail.templates.label')}</label>
-                                        <select 
-                                            value={mailTemplate} 
-                                            onChange={(e) => setMailTemplate(e.target.value as MailTemplateType)}
-                                            className="w-full bg-gray-50 dark:bg-gray-800 p-3 rounded-xl text-sm outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:text-white"
-                                        >
+                                        <select value={mailTemplate} onChange={(e) => setMailTemplate(e.target.value as MailTemplateType)} className="w-full bg-gray-50 dark:bg-gray-800 p-3 rounded-xl text-sm outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:text-white">
                                             <option value="COLD_INTRO">{t('dashboard.crmContent.mail.templates.COLD_INTRO')}</option>
                                             <option value="THANK_MEETING">{t('dashboard.crmContent.mail.templates.THANK_MEETING')}</option>
                                             <option value="PARTNERSHIP_REQUEST">{t('dashboard.crmContent.mail.templates.PARTNERSHIP_REQUEST')}</option>
@@ -643,11 +576,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                     </div>
                                     <div>
                                         <label className="text-xs font-bold text-gray-500 mb-2 block uppercase">{t('dashboard.crmContent.mail.tone.label')}</label>
-                                        <select 
-                                            value={mailTone} 
-                                            onChange={(e) => setMailTone(e.target.value as MailTone)}
-                                            className="w-full bg-gray-50 dark:bg-gray-800 p-3 rounded-xl text-sm outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:text-white"
-                                        >
+                                        <select value={mailTone} onChange={(e) => setMailTone(e.target.value as MailTone)} className="w-full bg-gray-50 dark:bg-gray-800 p-3 rounded-xl text-sm outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:text-white">
                                             <option value="FORMAL">{t('dashboard.crmContent.mail.tone.FORMAL')}</option>
                                             <option value="FRIENDLY">{t('dashboard.crmContent.mail.tone.FRIENDLY')}</option>
                                             <option value="ENTHUSIASTIC">{t('dashboard.crmContent.mail.tone.ENTHUSIASTIC')}</option>
@@ -655,88 +584,38 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                         </select>
                                     </div>
                                 </div>
-
-                                {/* Dynamic Date Picker based on template */}
                                 {(mailTemplate === 'BOOK_MEETING' || mailTemplate === 'THANK_MEETING') && (
                                     <div className="mb-4">
-                                        <label className="text-xs font-bold text-gray-500 mb-2 block uppercase flex items-center gap-2">
-                                            <Clock size={12} />
-                                            {mailTemplate === 'BOOK_MEETING' ? 'Förslag på tid' : 'När sågs vi?'}
-                                        </label>
-                                        <input 
-                                            type="datetime-local" 
-                                            value={meetingTime}
-                                            onChange={(e) => setMeetingTime(e.target.value)}
-                                            className="w-full bg-gray-50 dark:bg-gray-800 p-3 rounded-xl text-sm outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:text-white"
-                                        />
+                                        <label className="text-xs font-bold text-gray-500 mb-2 block uppercase flex items-center gap-2"><Clock size={12} /> {mailTemplate === 'BOOK_MEETING' ? 'Förslag på tid' : 'När sågs vi?'}</label>
+                                        <input type="datetime-local" value={meetingTime} onChange={(e) => setMeetingTime(e.target.value)} className="w-full bg-gray-50 dark:bg-gray-800 p-3 rounded-xl text-sm outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:text-white"/>
                                     </div>
                                 )}
-
                                 <div className="mb-6">
                                     <label className="text-xs font-bold text-gray-500 mb-2 block uppercase">{t('dashboard.crmContent.mail.context')}</label>
-                                    <textarea 
-                                        value={mailContext}
-                                        onChange={(e) => setMailContext(e.target.value)}
-                                        placeholder={t('dashboard.crmContent.mail.contextPlaceholder')}
-                                        className="w-full bg-gray-50 dark:bg-gray-800 p-3 rounded-xl text-sm h-24 resize-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:text-white"
-                                    />
+                                    <textarea value={mailContext} onChange={(e) => setMailContext(e.target.value)} placeholder={t('dashboard.crmContent.mail.contextPlaceholder')} className="w-full bg-gray-50 dark:bg-gray-800 p-3 rounded-xl text-sm h-24 resize-none outline-none focus:ring-1 focus:ring-black dark:focus:ring-white dark:text-white"/>
                                 </div>
-
-                                <button 
-                                    onClick={handleGenerateMail}
-                                    disabled={!selectedRecipient || isGeneratingMail}
-                                    className="w-full bg-black dark:bg-white text-white dark:text-black py-4 rounded-xl font-bold text-sm uppercase tracking-wider flex items-center justify-center gap-2 hover:opacity-90 transition-all disabled:opacity-50"
-                                >
+                                <button onClick={handleGenerateMail} disabled={!selectedRecipient || isGeneratingMail} className="w-full bg-black dark:bg-white text-white dark:text-black py-4 rounded-xl font-bold text-sm uppercase tracking-wider flex items-center justify-center gap-2 hover:opacity-90 transition-all disabled:opacity-50">
                                     {isGeneratingMail ? <Loader2 className="animate-spin" /> : <Sparkles size={16} />}
                                     {isGeneratingMail ? t('dashboard.crmContent.mail.btnGenerating') : t('dashboard.crmContent.mail.btnGenerate')}
                                 </button>
                             </div>
                         </div>
-
-                        {/* RIGHT: PREVIEW */}
                         <div className="flex flex-col h-full bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden shadow-sm">
                             <div className="p-6 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
-                                <input 
-                                    value={generatedSubject} 
-                                    onChange={(e) => setGeneratedSubject(e.target.value)}
-                                    placeholder="Ämne..."
-                                    className="w-full bg-transparent text-lg font-bold outline-none placeholder:text-gray-400 dark:text-white"
-                                />
+                                <input value={generatedSubject} onChange={(e) => setGeneratedSubject(e.target.value)} placeholder="Ämne..." className="w-full bg-transparent text-lg font-bold outline-none placeholder:text-gray-400 dark:text-white"/>
                             </div>
-                            <textarea 
-                                value={generatedBody}
-                                onChange={(e) => setGeneratedBody(e.target.value)}
-                                placeholder="Ditt mail visas här..."
-                                className="flex-1 w-full p-6 bg-transparent resize-none outline-none text-sm leading-relaxed text-gray-700 dark:text-gray-300 font-medium"
-                            />
+                            <textarea value={generatedBody} onChange={(e) => setGeneratedBody(e.target.value)} placeholder="Ditt mail visas här..." className="flex-1 w-full p-6 bg-transparent resize-none outline-none text-sm leading-relaxed text-gray-700 dark:text-gray-300 font-medium"/>
                             <div className="p-4 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center bg-gray-50/50 dark:bg-gray-800/30">
-                                <div className="text-xs text-gray-400">
-                                    {generatedBody.length > 0 ? `${generatedBody.length} tecken` : ''}
-                                </div>
+                                <div className="text-xs text-gray-400">{generatedBody.length > 0 ? `${generatedBody.length} tecken` : ''}</div>
                                 <div className="flex gap-2">
-                                    <button 
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(`${generatedSubject}\n\n${generatedBody}`);
-                                            alert(t('dashboard.crmContent.mail.copied'));
-                                        }}
-                                        disabled={!generatedBody}
-                                        className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-gray-50 dark:hover:bg-gray-700 transition-all flex items-center gap-2 disabled:opacity-50"
-                                    >
-                                        <Copy size={14} /> {t('dashboard.crmContent.mail.copy')}
-                                    </button>
-                                    <a 
-                                        href={selectedRecipient?.email ? `mailto:${selectedRecipient.email}?subject=${encodeURIComponent(generatedSubject)}&body=${encodeURIComponent(generatedBody)}` : '#'}
-                                        className={`px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-bold uppercase tracking-wide hover:opacity-80 transition-all flex items-center gap-2 ${!selectedRecipient?.email || !generatedBody ? 'opacity-50 pointer-events-none' : ''}`}
-                                    >
-                                        <Send size={14} /> Maila
-                                    </a>
+                                    <button onClick={() => { navigator.clipboard.writeText(`${generatedSubject}\n\n${generatedBody}`); alert(t('dashboard.crmContent.mail.copied')); }} disabled={!generatedBody} className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-gray-50 dark:hover:bg-gray-700 transition-all flex items-center gap-2 disabled:opacity-50"><Copy size={14} /> {t('dashboard.crmContent.mail.copy')}</button>
+                                    <a href={selectedRecipient?.email ? `mailto:${selectedRecipient.email}?subject=${encodeURIComponent(generatedSubject)}&body=${encodeURIComponent(generatedBody)}` : '#'} className={`px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-bold uppercase tracking-wide hover:opacity-80 transition-all flex items-center gap-2 ${!selectedRecipient?.email || !generatedBody ? 'opacity-50 pointer-events-none' : ''}`}><Send size={14} /> Maila</a>
                                 </div>
                             </div>
                         </div>
                     </div>
                 )}
 
-                {/* 5. IMPACT / SUSTAINABILITY */}
                 {activeTab === 'impact' && (
                     <div className="space-y-8">
                         <div className="bg-green-50 dark:bg-green-900/10 p-8 rounded-[3rem] border border-green-100 dark:border-green-800 relative overflow-hidden">
@@ -744,16 +623,9 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                             <div className="relative z-10">
                                 <h3 className="text-sm font-black uppercase tracking-widest text-green-700 dark:text-green-400 mb-2">Vår Hållbarhetsimpact</h3>
                                 <p className="text-3xl font-serif-display text-gray-900 dark:text-white mb-6">Ni har gjort <span className="text-green-600">{logs.length}</span> aktiva val för miljön.</p>
-                                <button onClick={async () => {
-                                    const story = await db.generateUfStory(user.id);
-                                    navigator.clipboard.writeText(story);
-                                    alert("Rapporttext kopierad till urklipp!");
-                                }} className="bg-green-600 text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg hover:bg-green-700 transition-colors">
-                                    Generera Rapporttext
-                                </button>
+                                <button onClick={async () => { const story = await db.generateUfStory(user.id); navigator.clipboard.writeText(story); alert("Rapporttext kopierad till urklipp!"); }} className="bg-green-600 text-white px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest shadow-lg hover:bg-green-700 transition-colors">Generera Rapporttext</button>
                             </div>
                         </div>
-
                         <div>
                             <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Loggade Insatser</h3>
                             <div className="space-y-4">
@@ -772,9 +644,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 )}
             </div>
 
-            {/* --- MODALS --- */}
-            
-            {/* SALE MODAL (B2C) */}
+            {/* Modals are kept unchanged */}
             {showSaleModal && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
                     <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-3xl p-8 animate-slideUp relative">
@@ -792,15 +662,11 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                 <option value="INSTAGRAM">Instagram</option>
                                 <option value="OTHER">Annat</option>
                             </select>
-                            <button className="w-full py-4 bg-black text-white dark:bg-white dark:text-black rounded-xl font-black uppercase tracking-widest mt-4">
-                                {editingSale ? 'Spara ändringar' : 'Spara Sälj'}
-                            </button>
+                            <button className="w-full py-4 bg-black text-white dark:bg-white dark:text-black rounded-xl font-black uppercase tracking-widest mt-4">{editingSale ? 'Spara ändringar' : 'Spara Sälj'}</button>
                         </form>
                     </div>
                 </div>
             )}
-
-            {/* DEAL MODAL (B2B) */}
             {showDealModal && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
                     <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-3xl p-8 animate-slideUp relative">
@@ -816,15 +682,11 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                 <option value="NEGOTIATION">Förhandling</option>
                                 <option value="WON">Vunnen</option>
                             </select>
-                            <button className="w-full py-4 bg-black text-white dark:bg-white dark:text-black rounded-xl font-black uppercase tracking-widest mt-4">
-                                {editingDeal ? 'Uppdatera Affär' : 'Skapa Affär'}
-                            </button>
+                            <button className="w-full py-4 bg-black text-white dark:bg-white dark:text-black rounded-xl font-black uppercase tracking-widest mt-4">{editingDeal ? 'Uppdatera Affär' : 'Skapa Affär'}</button>
                         </form>
                     </div>
                 </div>
             )}
-
-            {/* EVENT MODAL */}
             {showEventModal && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
                     <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-3xl p-8 animate-slideUp relative">
@@ -844,7 +706,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                     </div>
                 </div>
             )}
-
             {showContactModal && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
                     <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-3xl p-8 relative animate-slideUp overflow-y-auto max-h-[90vh]">
@@ -858,22 +719,16 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                             <input name="name" defaultValue={editingContact?.name} placeholder="Namn" required className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
                             <input name="company" defaultValue={editingContact?.company} placeholder="Företag / Organisation" className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
                             <input name="email" defaultValue={editingContact?.email} type="email" placeholder="E-post" className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
-                            
-                            {/* New Fields */}
                             <input name="phone" defaultValue={editingContact?.phone} type="tel" placeholder="Telefon" className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
                             <div className="grid grid-cols-2 gap-4">
                                 <input name="website" defaultValue={editingContact?.website} placeholder="Webbplats" className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
                                 <input name="linkedin" defaultValue={editingContact?.linkedin} placeholder="LinkedIn URL" className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
                             </div>
-
-                            <button className="w-full py-4 bg-black text-white rounded-xl font-black uppercase tracking-widest mt-2">
-                                {editingContact ? 'Spara ändringar' : 'Spara'}
-                            </button>
+                            <button className="w-full py-4 bg-black text-white rounded-xl font-black uppercase tracking-widest mt-2">{editingContact ? 'Spara ändringar' : 'Spara'}</button>
                         </form>
                     </div>
                 </div>
             )}
-
         </div>
     );
 };
@@ -886,12 +741,7 @@ const StatBox = ({ label, value }: { label: string, value: string }) => (
 );
 
 const TabButton = ({ id, label, icon, active, onClick }: { id: Tab, label: string, icon: any, active: boolean, onClick: (t: Tab) => void }) => (
-    <button 
-        onClick={() => onClick(id)}
-        className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wide transition-all whitespace-nowrap ${active ? 'bg-black text-white dark:bg-white dark:text-black shadow-md' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-    >
-        {icon} {label}
-    </button>
+    <button onClick={() => onClick(id)} className={`flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wide transition-all whitespace-nowrap ${active ? 'bg-black text-white dark:bg-white dark:text-black shadow-md' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'}`}>{icon} {label}</button>
 );
 
 export default CRM;

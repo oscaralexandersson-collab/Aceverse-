@@ -7,7 +7,7 @@ import {
     Globe, User as UserIcon, Bell, Shield, CreditCard, Check, 
     Download, Trash2, Mail, Smartphone, AlertTriangle, FileText,
     Star, ArrowRight, Loader2, Calendar, MapPin, Briefcase,
-    PauseCircle, Lock, Upload, XCircle
+    PauseCircle, Lock, Upload, XCircle, RefreshCw
 } from 'lucide-react';
 
 interface SettingsProps {

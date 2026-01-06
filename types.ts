@@ -24,6 +24,25 @@ export interface User {
   companyReport?: CompanyReport;
 }
 
+// --- WORKSPACE TYPES (NEW) ---
+
+export interface Workspace {
+  id: string;
+  name: string;
+  owner_id: string;
+  created_at: string;
+  role?: 'admin' | 'member' | 'viewer'; // Augmented on fetch
+  memberCount?: number; // NEW: Count of members
+}
+
+export interface WorkspaceMember {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  role: 'admin' | 'member' | 'viewer';
+  user?: User; // Join
+}
+
 // --- PITCH ENGINE TYPES ---
 
 export type PitchFormat = 'SCEN' | 'MONTER' | 'INVESTERARE' | 'KUND';
@@ -31,6 +50,7 @@ export type PitchFormat = 'SCEN' | 'MONTER' | 'INVESTERARE' | 'KUND';
 export interface PitchProject {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   title: string;
   target_audience: string;
   format: PitchFormat;
@@ -107,6 +127,7 @@ export interface MailDraftRequest {
 export interface Contact {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   type: ContactType;
   name: string;
   email?: string;
@@ -134,11 +155,13 @@ export interface Lead {
   value: number;
   lead_score: number;
   created_at: string;
+  workspace_id?: string; // NEW
 }
 
 export interface Deal {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   contact_id?: string;
   title: string;
   company?: string;
@@ -154,6 +177,7 @@ export interface Deal {
 export interface SalesEvent {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   contact_id?: string;
   channel: string;
   product_name: string;
@@ -166,6 +190,7 @@ export interface SalesEvent {
 export interface Activity {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   type: ActivityType;
   subject: string;
   description?: string;
@@ -177,6 +202,7 @@ export interface Activity {
 export interface SustainabilityLog {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   related_type?: string;
   related_id?: string;
   category: 'REUSE' | 'LOCAL' | 'SOCIAL' | 'MATERIAL';
@@ -188,6 +214,7 @@ export interface SustainabilityLog {
 export interface UfEvent {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   title: string;
   date_at: string;
   type: UfEventType;
@@ -222,6 +249,8 @@ export interface Recommendation {
 export interface ChatSession {
   id: string;
   user_id: string;
+  workspace_id?: string | null; // NEW: Null means private
+  visibility?: 'private' | 'shared'; // NEW
   name: string;
   session_group: string;
   last_message_at: number;
@@ -242,6 +271,7 @@ export interface ChatMessage {
 export interface Idea {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   title: string;
   description?: string;
   score: number;
@@ -292,6 +322,7 @@ export interface IdeaNode {
 export interface Pitch {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   name: string;
   pitch_type: 'deck' | 'speech' | 'email';
   content: string;
@@ -321,6 +352,7 @@ export interface CompanyReport {
 export interface CompanyReportEntry {
   id: string;
   user_id: string;
+  workspace_id?: string; // NEW
   title: string;
   reportData: CompanyReport;
   created_at: string;
@@ -343,6 +375,8 @@ export interface Invoice {
 
 export interface BrandDNA {
   id: string;
+  user_id?: string;
+  workspace_id?: string; // NEW
   meta: {
     brandName: string;
     siteUrl: string;
@@ -393,6 +427,8 @@ export interface CampaignAsset {
 
 export interface MarketingCampaign {
   id: string;
+  user_id?: string;
+  workspace_id?: string; // NEW
   brandDnaId?: string;
   name: string;
   brief: {
@@ -413,6 +449,7 @@ export interface UserSettings {
 
 export interface UserData {
   profile: Partial<User>;
+  workspaces?: Workspace[]; // NEW
   leads: Lead[];
   contacts: Contact[];
   deals: Deal[];

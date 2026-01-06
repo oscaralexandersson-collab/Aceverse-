@@ -10,6 +10,7 @@ import { User, Idea, ChatMessage, UFScore } from '../../types';
 import { db } from '../../services/db';
 import { GoogleGenAI } from "@google/genai";
 import DeleteConfirmModal from './DeleteConfirmModal';
+import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 const SYSTEM_PROMPT_V2 = `
 # SYSTEMPROMPT – UF-Kompassen v2 (Aceverse)
@@ -278,6 +279,7 @@ type LabView = 'landing' | 'dialog' | 'decision';
 type LabMode = 'A' | 'B' | 'C' | null;
 
 const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
+    const { activeWorkspace, viewScope } = useWorkspace(); // Workspace Context
     const [view, setView] = useState<LabView>('landing');
     const [mode, setMode] = useState<LabMode>(null);
     const [activeIdea, setActiveIdea] = useState<Idea | null>(null);
@@ -288,24 +290,36 @@ const IdeaLab: React.FC<{ user: User }> = ({ user }) => {
     const [ideaToDelete, setIdeaToDelete] = useState<Idea | null>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
 
-    useEffect(() => { loadIdeas(); }, [user.id]);
+    useEffect(() => { loadIdeas(); }, [user.id, activeWorkspace?.id, viewScope]);
     useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isThinking]);
 
     const loadIdeas = async () => {
         const data = await db.getUserData(user.id);
-        setIdeas(data.ideas || []);
+        const filtered = data.ideas.filter(i => {
+            const itemId = i.workspace_id;
+            if (viewScope === 'personal') {
+                return itemId === null || itemId === undefined || itemId === '';
+            } else {
+                return activeWorkspace?.id && itemId === activeWorkspace.id;
+            }
+        });
+        setIdeas(filtered);
     };
 
     const startMode = async (selectedMode: LabMode) => {
         setMode(selectedMode);
         setView('dialog');
-        const session = await db.createChatSession(user.id, `UF-Kompassen - Situation ${selectedMode}`);
+        const visibility = viewScope === 'workspace' ? 'shared' : 'private';
+        const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
+
+        const session = await db.createChatSession(user.id, `UF-Kompassen - Situation ${selectedMode}`, 'IdeaLab', workspaceId, visibility);
         
         const initialIdea = await db.addIdea(user.id, {
             title: 'Nytt UF-koncept',
             chat_session_id: session.id,
             current_phase: selectedMode || 'A',
-            snapshot: { problem_statement: '', icp: '', solution_hypothesis: '', uvp: '', one_pager: '', persona_summary: '', pricing_hypothesis: '', mvp_definition: '', open_questions: [], next_step: '' }
+            snapshot: { problem_statement: '', icp: '', solution_hypothesis: '', uvp: '', one_pager: '', persona_summary: '', pricing_hypothesis: '', mvp_definition: '', open_questions: [], next_step: '' },
+            workspace_id: workspaceId // IMPORTANT
         });
         
         setActiveIdea(initialIdea);

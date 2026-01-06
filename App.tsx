@@ -20,6 +20,7 @@ import { db } from './services/db';
 import { supabase } from './services/supabase';
 import { LanguageProvider } from './contexts/LanguageContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { WorkspaceProvider } from './contexts/WorkspaceContext';
 
 function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('home');
@@ -228,7 +229,9 @@ export default function App() {
   return (
     <ThemeProvider>
       <LanguageProvider>
-        <AppContent />
+        <WorkspaceProvider>
+          <AppContent />
+        </WorkspaceProvider>
       </LanguageProvider>
     </ThemeProvider>
   );
