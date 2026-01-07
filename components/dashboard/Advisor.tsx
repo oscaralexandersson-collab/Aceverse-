@@ -3,11 +3,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
     ArrowUp, Plus, MessageSquare, PanelLeftClose, PanelLeftOpen, 
     Trash2, ShieldCheck, Loader2, Zap, HelpCircle, Pencil, Check, X as XIcon,
-    Users, Lock
+    Users, Lock, User as UserIcon
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import { User, ChatMessage, ChatSession } from '../../types';
 import { db } from '../../services/db';
+import { supabase } from '../../services/supabase';
 import DeleteConfirmModal from './DeleteConfirmModal';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 
@@ -27,8 +28,8 @@ interface AdvisorProps {
 }
 
 const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt }) => {
-    // Access global scope from context instead of local state tabs
-    const { activeWorkspace, viewScope } = useWorkspace();
+    // Access global scope and members for name resolution
+    const { activeWorkspace, viewScope, members } = useWorkspace();
     
     const [sessions, setSessions] = useState<ChatSession[]>([]);
     const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -46,12 +47,13 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
     const [editName, setEditName] = useState('');
 
-    // Reload sessions when user changes scope (Personal <-> Team)
+    // 1. Load Sessions on scope change
     useEffect(() => { 
         loadSessions(); 
         setCurrentSessionId(null); 
     }, [user.id, activeWorkspace?.id, viewScope]);
     
+    // 2. Load Messages on session change
     useEffect(() => { 
         if (currentSessionId) {
             loadMessages(currentSessionId);
@@ -60,7 +62,55 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
         }
     }, [currentSessionId]);
 
+    // 3. Real-time Subscription for Syncing
+    useEffect(() => {
+        if (!currentSessionId) return;
+
+        const channel = supabase
+            .channel(`session-${currentSessionId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'chat_messages',
+                    filter: `session_id=eq.${currentSessionId}`
+                },
+                (payload) => {
+                    const newMsg = payload.new as ChatMessage;
+                    // Check if we already have this message (to avoid duplicates from optimistic updates)
+                    setMessages((prev) => {
+                        if (prev.some(m => m.id === newMsg.id)) return prev;
+                        // Determine if we need to scroll
+                        setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+                        return [...prev, newMsg];
+                    });
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [currentSessionId]);
+
     useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
+
+    // --- HELPER: Identify Teammates ---
+    const getSenderInfo = (msgUserId: string) => {
+        if (msgUserId === user.id) return { name: 'Du', isMe: true };
+        
+        // Find in workspace members
+        const member = members.find(m => m.user_id === msgUserId);
+        if (member?.user) {
+            return { 
+                name: `${member.user.firstName} ${member.user.lastName?.[0] || ''}.`, 
+                isMe: false,
+                initial: member.user.firstName?.[0] || '?'
+            };
+        }
+        return { name: 'Team', isMe: false, initial: 'T' };
+    };
 
     // --- AUTO-START FROM PROMPT ---
     useEffect(() => {
@@ -74,13 +124,14 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const handleAutoStartSession = async (promptText: string) => {
         setIsLoading(true);
         try {
-            // Determine visibility based on global scope
             const visibility = viewScope === 'workspace' ? 'shared' : 'private';
             const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
 
             const newS = await db.createChatSession(user.id, 'Planering: ' + promptText.substring(0, 20) + '...', 'Default', workspaceId, visibility);
             
+            // Add initial user message (triggers Realtime for others)
             await db.addMessage(user.id, { role: 'user', text: promptText, session_id: newS.id });
+            
             setSessions(prev => [newS, ...prev]);
             setCurrentSessionId(newS.id);
             generateSmartTitle(promptText, newS.id);
@@ -95,8 +146,11 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const result = await chat.sendMessage({ message: promptText });
             const aiText = result.text || "Jag hjälper dig gärna planera. Vad är första steget?";
             
-            const aiMsg = await db.addMessage(user.id, { role: 'ai', text: aiText, session_id: newS.id });
-            setMessages(prev => [...prev, aiMsg]);
+            // Add AI response (triggers Realtime)
+            await db.addMessage(user.id, { role: 'ai', text: aiText, session_id: newS.id });
+            
+            // Re-fetch to ensure sync state is perfect
+            loadMessages(newS.id);
 
         } catch (e) {
             console.error("Auto-start failed", e);
@@ -109,20 +163,13 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const loadSessions = async () => {
         try {
             const data = await db.getUserData(user.id);
-            // FETCH logic in db.ts gets *everything* accessible.
-            // We must filter here based on viewScope.
-            
             const allSessions = (data.sessions || [])
                 .filter(s => s.session_group !== 'System');
 
-            // --- FILTERING LOGIC ---
             const filtered = allSessions.filter(s => {
                 if (viewScope === 'personal') {
-                    // Personal: WorkspaceID IS NULL (or strictly private if previously set)
-                    // The SQL fix ensures older chats are null.
                     return !s.workspace_id; 
                 } else {
-                    // Team: Must match active workspace
                     return s.workspace_id === activeWorkspace?.id;
                 }
             });
@@ -134,6 +181,8 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
 
     const loadMessages = async (sid: string) => {
         try {
+            // Optimistic load from big fetch, but for real-time accuracy we might want a specific fetch.
+            // Using existing pattern for now, Realtime will catch new ones.
             const data = await db.getUserData(user.id);
             const msgs = data.chatHistory
                 .filter(m => m.session_id === sid)
@@ -171,7 +220,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
         finally { setIsCreatingSession(false); }
     };
 
-    // Rename Logic
     const startEditing = (session: ChatSession, e: React.MouseEvent) => {
         e.stopPropagation();
         setEditingSessionId(session.id);
@@ -245,6 +293,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
         setIsLoading(true);
 
         try {
+            // Optimistic update - will be deduplicated by subscription
             const userMsg = await db.addMessage(user.id, { role: 'user', text, session_id: activeId! });
             setMessages(prev => [...prev, userMsg]);
 
@@ -264,7 +313,11 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
 
             const result = await chat.sendMessage({ message: text });
             const aiMsg = await db.addMessage(user.id, { role: 'ai', text: result.text || "Inget svar.", session_id: activeId! });
+            
+            // Don't add AI message manually to state, let Realtime handle it (or handle duplicate logic)
+            // But for snappiness we add it, Realtime useEffect deduplicates by ID.
             setMessages(prev => [...prev, aiMsg]);
+
         } catch (error: any) {
             console.error(error);
             setMessages(prev => [...prev, { id: 'err', role: 'ai', text: "Ett fel uppstod.", timestamp: Date.now(), session_id: activeId!, user_id: user.id, created_at: '' }]);
@@ -369,16 +422,43 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                         </div>
                     )}
                     <div className="max-w-4xl mx-auto space-y-10">
-                        {messages.map((msg) => (
-                            <div key={msg.id} className={`flex gap-6 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-slideUp`}>
-                                <div className={`w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg border-2 ${msg.role === 'ai' ? 'bg-black text-white border-white/10 dark:bg-white dark:text-black' : 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-400'}`}>
-                                    {msg.role === 'ai' ? <Zap size={22} fill="currentColor"/> : 'Du'}
+                        {messages.map((msg) => {
+                            const sender = getSenderInfo(msg.user_id);
+                            
+                            return (
+                                <div key={msg.id} className={`flex gap-6 ${sender.isMe ? 'flex-row-reverse' : ''} animate-slideUp`}>
+                                    
+                                    {/* Avatar */}
+                                    <div className={`w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg border-2 shrink-0 ${
+                                        msg.role === 'ai' 
+                                            ? 'bg-black text-white border-white/10 dark:bg-white dark:text-black' 
+                                            : sender.isMe 
+                                                ? 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-400'
+                                                : 'bg-blue-100 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400'
+                                    }`}>
+                                        {msg.role === 'ai' ? <Zap size={22} fill="currentColor"/> : sender.isMe ? 'Du' : <span className="text-xs font-bold">{sender.initial}</span>}
+                                    </div>
+
+                                    <div className={`max-w-[85%] flex flex-col ${sender.isMe ? 'items-end' : 'items-start'}`}>
+                                        {/* Name Label for Teammates */}
+                                        {!sender.isMe && msg.role !== 'ai' && (
+                                            <span className="text-[10px] font-bold text-gray-400 mb-1 ml-2">{sender.name}</span>
+                                        )}
+
+                                        {/* Message Bubble */}
+                                        <div className={`p-8 rounded-[2rem] shadow-xl text-[15px] leading-[1.8] font-medium tracking-tight whitespace-pre-wrap ${
+                                            msg.role === 'ai' 
+                                                ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-none italic' 
+                                                : sender.isMe
+                                                    ? 'bg-black text-white rounded-tr-none font-bold'
+                                                    : 'bg-blue-50 dark:bg-blue-950/40 text-gray-900 dark:text-white rounded-tl-none border border-blue-100 dark:border-blue-900'
+                                        }`}>
+                                            {msg.text}
+                                        </div>
+                                    </div>
                                 </div>
-                                <div className={`p-8 rounded-[2rem] shadow-xl text-[15px] leading-[1.8] font-medium tracking-tight whitespace-pre-wrap max-w-[85%] ${msg.role === 'ai' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-none italic' : 'bg-black text-white rounded-tr-none font-bold'}`}>
-                                    {msg.text}
-                                </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                         {isLoading && (
                             <div className="flex gap-6 animate-pulse">
                                 <div className="w-12 h-12 rounded-[1.2rem] bg-black dark:bg-white flex items-center justify-center shadow-xl"><Zap size={22} className="text-white dark:text-black" /></div>
