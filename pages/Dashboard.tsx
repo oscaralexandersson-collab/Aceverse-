@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Lightbulb, Users, Mic, MessageSquare, 
   Settings as SettingsIcon, LogOut, Bell, Search, Menu, X, 
   Loader2, Wifi, WifiOff, Moon, Sun, Globe, RefreshCw, AlertTriangle, Calendar,
-  Briefcase, ChevronUp, Check, Plus
+  Briefcase, ChevronUp, Check, Plus, FileText
 } from 'lucide-react';
 import { DashboardView, User, UfEvent } from '../types';
 import { db } from '../services/db';
@@ -15,6 +15,7 @@ import CRM from '../components/dashboard/CRM';
 import PitchStudio from '../components/dashboard/PitchStudio';
 import SettingsPage from '../components/dashboard/Settings';
 import MarketingEngine from '../components/dashboard/MarketingEngine';
+import ReportBuilder from '../components/dashboard/ReportBuilder';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -141,7 +142,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
       }
   };
 
-  // Removed Settings from here to manually place it at bottom
   const menuItems: { id: DashboardView; label: string; icon: any }[] = [
     { id: 'overview', label: t('dashboard.overview'), icon: LayoutDashboard },
     { id: 'ideas', label: t('dashboard.ideas'), icon: Lightbulb },
@@ -149,6 +149,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
     { id: 'marketing', label: "Marketing Engine", icon: Globe },
     { id: 'crm', label: t('dashboard.crm'), icon: Users },
     { id: 'pitch', label: t('dashboard.pitch'), icon: Mic },
+    { id: 'report', label: "Report Studio", icon: FileText },
   ];
 
   return (
@@ -466,6 +467,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
             {currentView === 'crm' && <CRM user={user} />}
             {currentView === 'pitch' && <PitchStudio user={user} />}
             {currentView === 'settings' && <SettingsPage user={user} />}
+            {currentView === 'report' && <ReportBuilder user={user} />}
           </div>
         </div>
       </main>

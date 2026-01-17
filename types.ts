@@ -2,7 +2,7 @@
 import React from 'react';
 
 export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'news' | 'careers' | 'login' | 'dashboard' | 'contact' | 'about' | 'onboarding';
-export type DashboardView = 'overview' | 'advisor' | 'crm' | 'ideas' | 'pitch' | 'settings' | 'marketing';
+export type DashboardView = 'overview' | 'advisor' | 'crm' | 'ideas' | 'pitch' | 'settings' | 'marketing' | 'report';
 
 export interface NavItem {
   label: string;
@@ -22,6 +22,53 @@ export interface User {
   plan?: 'free' | 'pro' | 'enterprise';
   createdAt: string;
   companyReport?: CompanyReport;
+}
+
+// --- REPORT BUILDER TYPES (NEW) ---
+
+export type ReportSectionType = 
+  | 'intro'         // Innehållsförteckning (auto) & Info
+  | 'ceo_words'     // VD-ordet
+  | 'business_idea' // Affärsidé & Mål
+  | 'execution'     // Genomförande & Marknad
+  | 'financials'    // Ekonomi & Analys
+  | 'learnings'     // Lärdomar & Utveckling
+  | 'future'        // Avveckling / Framtid
+  | 'signatures';   // Underskrifter
+
+export interface ReportSectionData {
+  id: ReportSectionType;
+  title: string;
+  content: string;
+  status: 'empty' | 'draft' | 'complete';
+  score?: number; // 1-10
+  feedback?: {
+    analysis: string; // New: Deep dive text
+    jury_perspective: string; // New: How a jury sees this
+    strengths: string[];
+    weaknesses: string[];
+    concrete_examples: string[]; // New: "Try writing this instead..."
+  };
+  lastUpdated?: string;
+}
+
+export interface FinancialData {
+  revenue: number;
+  costs: number;
+  result: number;
+  equity: number;
+  debt: number;
+}
+
+export interface FullReportProject {
+  id: string; // UUID
+  user_id: string;
+  workspace_id?: string;
+  company_name: string;
+  sections: Record<ReportSectionType, ReportSectionData>;
+  financials?: FinancialData;
+  created_at: string;
+  updated_at: string;
 }
 
 // --- WORKSPACE TYPES (NEW) ---
@@ -466,6 +513,7 @@ export interface UserData {
   sessions: ChatSession[];
   settings?: UserSettings;
   reports?: CompanyReportEntry[];
+  fullReports?: FullReportProject[]; // NEW: The Report Builder projects
   notifications?: Notification[];
   brandDNAs?: BrandDNA[];
   marketingCampaigns?: MarketingCampaign[];

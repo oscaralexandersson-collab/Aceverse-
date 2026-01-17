@@ -5,7 +5,7 @@ import {
   ContactRequest, UserSettings, CompanyReport, CompanyReportEntry,
   BrandDNA, MarketingCampaign, Contact, Deal, SalesEvent, Activity,
   SustainabilityLog, UfEvent, Recommendation, Badge, MailDraftRequest,
-  PitchProject, PitchVersion, Workspace, WorkspaceMember
+  PitchProject, PitchVersion, Workspace, WorkspaceMember, FullReportProject
 } from '../types';
 import { GoogleGenAI } from "@google/genai";
 
@@ -378,7 +378,7 @@ class DatabaseService {
       const [
         leads, contacts, deals, sales, activities, logs, events,
         ideas, pitches, messages, sessions, settings, profile, 
-        reports, brandDNAs, campaigns, points, badges
+        reports, brandDNAs, campaigns, points, badges, fullReportProjects
       ] = await Promise.all([
         supabase.from('leads').select('*').order('created_at', { ascending: false }),
         supabase.from('contacts').select('*').order('created_at', { ascending: false }),
@@ -397,7 +397,8 @@ class DatabaseService {
         supabase.from('brand_dnas').select('*'),
         supabase.from('marketing_campaigns').select('*').order('created_at', { ascending: false }),
         supabase.from('user_points').select('points').eq('user_id', userId),
-        supabase.from('user_badges').select('*').eq('user_id', userId)
+        supabase.from('user_badges').select('*').eq('user_id', userId),
+        supabase.from('full_report_projects').select('*').order('updated_at', { ascending: false }) // New Table for Report Builder
       ]);
 
       const totalPoints = (points.data || []).reduce((acc, curr) => acc + (curr.points || 0), 0);
@@ -422,6 +423,30 @@ class DatabaseService {
           versions: (p.versions || []).sort((a: any, b: any) => b.version_number - a.version_number)
       }));
 
+      // Map Full Reports from existing report structure if we decide to reuse 'company_reports' table with a flag, 
+      // but for cleaner separation we'll assume a new 'full_report_projects' table exists or use JSON storage in 'company_reports'.
+      // For this implementation, let's map from the 'company_reports' table but filter by a specific structure check or type.
+      // NOTE: For simplicity in this demo, we will use the 'company_reports' table to store these as well, using report_data.type to distinguish.
+      
+      const mappedReports = (reports.data || []).map(r => ({ 
+          id: r.id, 
+          user_id: r.user_id, 
+          title: r.title, 
+          reportData: r.report_data, 
+          created_at: r.created_at,
+          workspace_id: r.workspace_id
+      }));
+
+      // Filter out the "Intelligence" reports vs "Full Builder" reports if needed in frontend.
+      
+      // Since we added 'full_report_projects' to the Promise.all, let's use that data if the table exists.
+      // If table doesn't exist, we fallback to empty array to avoid crash.
+      const mappedFullReports = (fullReportProjects.data || []).map(p => ({
+          ...p,
+          sections: typeof p.sections === 'string' ? JSON.parse(p.sections) : p.sections,
+          financials: typeof p.financials === 'string' ? JSON.parse(p.financials) : p.financials
+      }));
+
       return {
         profile: profile?.data || {},
         leads: leads.data || [],
@@ -439,13 +464,8 @@ class DatabaseService {
         chatHistory: messages.data || [],
         sessions: sessions.data || [],
         settings: settings.data || undefined,
-        reports: (reports.data || []).map(r => ({ 
-          id: r.id, 
-          user_id: r.user_id, 
-          title: r.title, 
-          reportData: r.report_data, 
-          created_at: r.created_at 
-        })),
+        reports: mappedReports,
+        fullReports: mappedFullReports, // NEW
         brandDNAs: (brandDNAs.data || []).map(b => b.dna_data || b),
         marketingCampaigns: (campaigns.data || []).map(c => c.campaign_data || c),
       };
@@ -519,6 +539,45 @@ class DatabaseService {
   async addReportToHistory(userId: string, reportData: CompanyReport): Promise<CompanyReportEntry> {
     const { data, error } = await supabase.from('company_reports').insert([{ user_id: userId, title: reportData.meta.companyName, report_data: reportData }]).select().single();
     if (error) throw error; return { id: data.id, user_id: data.user_id, title: data.title, reportData: data.report_data, created_at: data.created_at };
+  }
+
+  // --- REPORT BUILDER METHODS (NEW) ---
+  
+  async saveFullReportProject(userId: string, project: Partial<FullReportProject>) {
+      const payload = {
+          user_id: userId,
+          company_name: project.company_name,
+          sections: project.sections, // Supabase handles JSON automatically
+          financials: project.financials,
+          workspace_id: project.workspace_id || null,
+          updated_at: new Date().toISOString()
+      };
+
+      if (project.id) {
+          // Update existing
+          const { data, error } = await supabase
+              .from('full_report_projects')
+              .update(payload)
+              .eq('id', project.id)
+              .select()
+              .single();
+          if (error) throw error;
+          return data;
+      } else {
+          // Create new
+          const { data, error } = await supabase
+              .from('full_report_projects')
+              .insert([payload])
+              .select()
+              .single();
+          if (error) throw error;
+          return data;
+      }
+  }
+
+  async deleteFullReportProject(userId: string, projectId: string) {
+      const { error } = await supabase.from('full_report_projects').delete().eq('id', projectId);
+      if (error) throw error;
   }
 
   // --- MARKETING ENGINE ---
