@@ -28,6 +28,7 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
   const { t } = useLanguage();
 
   const formatRelativeTime = (dateStr: string) => {
+    if (!dateStr) return '';
     const now = new Date();
     const then = new Date(dateStr);
     const diffInMs = now.getTime() - then.getTime();
@@ -44,6 +45,7 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
 
   useEffect(() => {
     const loadData = async () => {
+        setLoading(true);
         try {
             const data = await db.getUserData(user.id);
             
@@ -51,22 +53,23 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
             const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
             const recs = await db.getRecommendations(user.id, workspaceId);
             
-            // --- STRICT SCOPE FILTERING ---
+            // --- STRICT SCOPE FILTERING (Identical to CRM) ---
             const filterScope = (item: any) => {
                 const itemId = item.workspace_id;
                 
                 if (viewScope === 'personal') {
                     // Show items that have NO workspace ID (null, undefined, or empty string)
-                    return itemId === null || itemId === undefined || itemId === '';
+                    return !itemId;
                 } else {
                     // Show items ONLY if they match the active workspace ID
                     return activeWorkspace?.id && itemId === activeWorkspace.id;
                 }
             };
 
-            const filteredContacts = data.contacts.filter(filterScope);
-            const filteredIdeas = data.ideas.filter(filterScope);
-            const filteredSales = data.salesEvents.filter(filterScope);
+            // Ensure data arrays exist before filtering
+            const filteredContacts = (data.contacts || []).filter(filterScope);
+            const filteredIdeas = (data.ideas || []).filter(filterScope);
+            const filteredSales = (data.salesEvents || []).filter(filterScope);
             const filteredProjects = (data.pitchProjects || []).filter(filterScope);
 
             setStats({
@@ -93,7 +96,7 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
         }
     };
     loadData();
-  }, [user.id, t, activeWorkspace?.id, viewScope]);
+  }, [user.id, t, activeWorkspace, viewScope]); // Changed dependency to whole object to catch deep updates
 
   const handleRecommendationClick = (rec: Recommendation) => {
       if (rec.kind === 'UF_EVENT' && onPlanEvent) {

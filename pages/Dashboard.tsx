@@ -4,10 +4,11 @@ import {
   LayoutDashboard, Lightbulb, Users, Mic, MessageSquare, 
   Settings as SettingsIcon, LogOut, Bell, Search, Menu, X, 
   Loader2, Wifi, WifiOff, Moon, Sun, Globe, RefreshCw, AlertTriangle, Calendar,
-  Briefcase, ChevronUp, Check, Plus, FileText
+  Briefcase, ChevronUp, Check, Plus, FileText, Video
 } from 'lucide-react';
-import { DashboardView, User, UfEvent } from '../types';
+import { DashboardView, User, UfEvent, Notification } from '../types';
 import { db } from '../services/db';
+import { supabase } from '../services/supabase';
 import Overview from '../components/dashboard/Overview';
 import IdeaLab from '../components/dashboard/IdeaLab';
 import Advisor from '../components/dashboard/Advisor';
@@ -16,6 +17,7 @@ import PitchStudio from '../components/dashboard/PitchStudio';
 import SettingsPage from '../components/dashboard/Settings';
 import MarketingEngine from '../components/dashboard/MarketingEngine';
 import ReportBuilder from '../components/dashboard/ReportBuilder';
+import TeamHub from '../components/dashboard/TeamHub';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
@@ -48,6 +50,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
   
   const [advisorStartPrompt, setAdvisorStartPrompt] = useState<string | null>(null);
   
+  // Call & Notification State
+  const [incomingCall, setIncomingCall] = useState<{ caller: string, workspaceId: string } | null>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  
   const { t, language, setLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
 
@@ -59,8 +67,85 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
           }
       };
       document.addEventListener("mousedown", handleClickOutside);
+      // Init notification sound
+      audioRef.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audioRef.current.volume = 0.5;
+      
       return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // Listen for team messages and notifications
+  useEffect(() => {
+      // 1. Listen for new notifications (Global)
+      // Using a unique channel name per user session to avoid conflicts
+      const channelId = `notifications-${user.id}-${Date.now()}`;
+      console.log(`Subscribing to notifications on channel: ${channelId}`);
+
+      const notifChannel = supabase.channel(channelId)
+          .on(
+              'postgres_changes',
+              {
+                  event: 'INSERT',
+                  schema: 'public',
+                  table: 'notifications',
+                  filter: `user_id=eq.${user.id}`
+              },
+              (payload) => {
+                  console.log("Realtime Notification Received:", payload);
+                  const newNotif = payload.new as Notification;
+                  setNotifications(prev => [newNotif, ...prev]);
+                  
+                  // Play sound if possible
+                  if (audioRef.current) {
+                      audioRef.current.currentTime = 0;
+                      audioRef.current.play().catch(e => console.log("Audio play blocked", e));
+                  }
+              }
+          )
+          .subscribe((status) => {
+              if (status === 'SUBSCRIBED') {
+                  console.log("Notification channel connected successfully.");
+              } else if (status === 'CHANNEL_ERROR') {
+                  console.error("Notification channel failed to connect.");
+              }
+          });
+
+      // 2. Global listener for calls (if in workspace)
+      let callChannel: any;
+      if (activeWorkspace) {
+          callChannel = supabase
+              .channel(`global-calls-${activeWorkspace.id}`)
+              .on(
+                  'postgres_changes',
+                  {
+                      event: 'INSERT',
+                      schema: 'public',
+                      table: 'team_messages',
+                      filter: `workspace_id=eq.${activeWorkspace.id}`
+                  },
+                  async (payload) => {
+                      if (payload.new.content.includes("Startade ett videosamtal") && payload.new.user_id !== user.id) {
+                          const { data } = await supabase.from('profiles').select('first_name').eq('id', payload.new.user_id).single();
+                          setIncomingCall({ 
+                              caller: data?.first_name || 'En kollega',
+                              workspaceId: activeWorkspace.id
+                          });
+                          if (audioRef.current) audioRef.current.play().catch(() => {});
+                          setTimeout(() => setIncomingCall(null), 15000);
+                      }
+                  }
+              )
+              .subscribe();
+      }
+
+      // Initial Load
+      db.getNotifications(user.id).then(setNotifications);
+
+      return () => { 
+          supabase.removeChannel(notifChannel);
+          if (callChannel) supabase.removeChannel(callChannel);
+      };
+  }, [activeWorkspace?.id, user.id]);
 
   const refreshData = useCallback(async () => {
     setIsSyncing(true);
@@ -69,10 +154,12 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
       const isHealthy = await db.checkHealth();
       if (!isHealthy) throw new Error("Connection failed");
       
-      // Pass strict scope to fetch next event correctly
       const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
       const event = await db.getNextUfEvent(user.id, workspaceId);
       setNextEvent(event);
+      
+      const notifs = await db.getNotifications(user.id);
+      setNotifications(notifs);
       
       window.dispatchEvent(new CustomEvent('ace_data_refresh'));
     } catch (error) {
@@ -142,7 +229,16 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
       }
   };
 
-  const menuItems: { id: DashboardView; label: string; icon: any }[] = [
+  const markRead = async (n: Notification) => {
+      if (!n.read) {
+          await db.markNotificationRead(n.id);
+          setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+      }
+      if (n.link === 'team') setCurrentView('team');
+      setShowNotifications(false);
+  };
+
+  let menuItems: { id: DashboardView; label: string; icon: any }[] = [
     { id: 'overview', label: t('dashboard.overview'), icon: LayoutDashboard },
     { id: 'ideas', label: t('dashboard.ideas'), icon: Lightbulb },
     { id: 'advisor', label: t('dashboard.advisor'), icon: MessageSquare },
@@ -152,9 +248,35 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
     { id: 'report', label: "Report Studio", icon: FileText },
   ];
 
+  // Insert Team Hub if in workspace mode
+  if (viewScope === 'workspace') {
+      menuItems.splice(1, 0, { id: 'team', label: "Team Hub", icon: Video });
+  }
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-950 overflow-hidden transition-colors duration-300">
       
+      {/* --- INCOMING CALL TOAST --- */}
+      {incomingCall && (
+          <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[100] animate-slideUp">
+              <div className="bg-black dark:bg-white text-white dark:text-black px-6 py-4 rounded-full shadow-2xl flex items-center gap-6 border border-gray-800 dark:border-gray-200">
+                  <div className="flex items-center gap-3">
+                      <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                      <span className="font-bold text-sm">{incomingCall.caller} anropar teamet...</span>
+                  </div>
+                  <button 
+                      onClick={() => { setCurrentView('team'); setIncomingCall(null); }} 
+                      className="bg-green-500 hover:bg-green-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-widest transition-colors"
+                  >
+                      Gå med
+                  </button>
+                  <button onClick={() => setIncomingCall(null)} className="text-gray-500 hover:text-white dark:hover:text-black"><X size={16}/></button>
+              </div>
+          </div>
+      )}
+
       {/* --- CREATE WORKSPACE MODAL --- */}
       {showCreateWsModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
@@ -417,10 +539,10 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
             </div>
         )}
 
-        <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-8 z-10">
+        <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-8 z-10 shrink-0">
           <div className="flex items-center gap-4">
             {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="text-gray-500 hover:text-black dark:hover:text-white transition-colors"><Menu size={24} /></button>}
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white capitalize">{currentView === 'crm' ? 'CRM & Leads' : currentView === 'settings' ? t('dashboard.settings') : currentView}</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white capitalize">{currentView === 'crm' ? 'CRM & Leads' : currentView === 'settings' ? t('dashboard.settings') : currentView === 'team' ? 'Team Hub' : currentView}</h2>
             
             <button 
                 onClick={refreshData} 
@@ -437,6 +559,33 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
             </button>
           </div>
           <div className="flex items-center gap-3">
+            <div className="relative">
+                <button 
+                    onClick={() => setShowNotifications(!showNotifications)} 
+                    className="p-2 text-gray-500 hover:text-black dark:hover:text-white transition-colors relative"
+                >
+                    <Bell size={20} />
+                    {unreadCount > 0 && (
+                        <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-900 animate-pulse"></div>
+                    )}
+                </button>
+                {showNotifications && (
+                    <div className="absolute right-0 top-full mt-2 w-72 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-50 animate-fadeIn">
+                        <div className="p-3 border-b border-gray-100 dark:border-gray-700 font-bold text-xs uppercase tracking-widest text-gray-500">Notiser</div>
+                        <div className="max-h-64 overflow-y-auto">
+                            {notifications.length > 0 ? notifications.map(n => (
+                                <div key={n.id} onClick={() => markRead(n)} className={`p-3 border-b border-gray-50 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 ${!n.read ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}`}>
+                                    <p className="text-xs font-bold text-gray-900 dark:text-white mb-1">{n.title}</p>
+                                    <p className="text-[10px] text-gray-600 dark:text-gray-400 line-clamp-2">{n.message}</p>
+                                    <span className="text-[9px] text-gray-400 mt-1 block">{new Date(n.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                </div>
+                            )) : (
+                                <div className="p-4 text-center text-xs text-gray-400">Inga nya notiser</div>
+                            )}
+                        </div>
+                    </div>
+                )}
+            </div>
             <button onClick={toggleTheme} className="p-2 text-gray-500 hover:text-black dark:hover:text-white transition-colors">
                 {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
             </button>
@@ -446,8 +595,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-8 custom-scrollbar relative">
-          <div className="max-w-6xl mx-auto h-full">
+        <div className={`flex-1 overflow-y-auto ${currentView === 'team' ? '' : 'p-8'} bg-gray-50 dark:bg-gray-950 custom-scrollbar relative`}>
+          <div className={`${currentView === 'team' ? 'h-full w-full' : 'max-w-6xl mx-auto h-full'}`}>
             {currentView === 'overview' && (
                 <Overview 
                     user={user} 
@@ -468,6 +617,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
             {currentView === 'pitch' && <PitchStudio user={user} />}
             {currentView === 'settings' && <SettingsPage user={user} />}
             {currentView === 'report' && <ReportBuilder user={user} />}
+            {currentView === 'team' && <TeamHub user={user} />}
           </div>
         </div>
       </main>

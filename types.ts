@@ -1,13 +1,20 @@
 
-import React from 'react';
-
-export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'news' | 'careers' | 'login' | 'dashboard' | 'contact' | 'about' | 'onboarding';
-export type DashboardView = 'overview' | 'advisor' | 'crm' | 'ideas' | 'pitch' | 'settings' | 'marketing' | 'report';
+export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'about' | 'contact' | 'login' | 'dashboard' | 'onboarding' | 'careers';
 
 export interface NavItem {
   label: string;
   page: Page;
   hasDropdown?: boolean;
+}
+
+export interface NavProps {
+  currentPage: Page;
+  onNavigate: (page: Page) => void;
+  user?: User | null;
+}
+
+export interface PageProps {
+  onNavigate: (page: Page) => void;
 }
 
 export interface User {
@@ -18,98 +25,208 @@ export interface User {
   company?: string;
   bio?: string;
   avatar?: string;
-  onboardingCompleted?: boolean;
-  plan?: 'free' | 'pro' | 'enterprise';
+  onboardingCompleted: boolean;
+  plan: 'free' | 'pro' | 'enterprise';
   createdAt: string;
   companyReport?: CompanyReport;
 }
 
-// --- REPORT BUILDER TYPES (NEW) ---
-
-export type ReportSectionType = 
-  | 'intro'         // Innehållsförteckning (auto) & Info
-  | 'ceo_words'     // VD-ordet
-  | 'business_idea' // Affärsidé & Mål
-  | 'execution'     // Genomförande & Marknad
-  | 'financials'    // Ekonomi & Analys
-  | 'learnings'     // Lärdomar & Utveckling
-  | 'future'        // Avveckling / Framtid
-  | 'signatures';   // Underskrifter
-
-export interface ReportSectionData {
-  id: ReportSectionType;
-  title: string;
-  content: string;
-  status: 'empty' | 'draft' | 'complete';
-  score?: number; // 1-10
-  feedback?: {
-    analysis: string; // New: Deep dive text
-    jury_perspective: string; // New: How a jury sees this
-    strengths: string[];
-    weaknesses: string[];
-    concrete_examples: string[]; // New: "Try writing this instead..."
-  };
-  lastUpdated?: string;
+export interface UserData {
+  profile: any;
+  leads: Lead[];
+  contacts: Contact[];
+  deals: Deal[];
+  salesEvents: SalesEvent[];
+  activities: Activity[];
+  sustainabilityLogs: SustainabilityLog[];
+  ufEvents: UfEvent[];
+  points: number;
+  badges: Badge[];
+  ideas: Idea[];
+  pitches: Pitch[];
+  pitchProjects: PitchProject[];
+  chatHistory: ChatMessage[];
+  sessions: ChatSession[];
+  settings?: UserSettings;
+  reports: any[];
+  fullReports: FullReportProject[];
+  brandDNAs: BrandDNA[];
+  marketingCampaigns: MarketingCampaign[];
+  memories?: AIMemory[];
+  notifications?: Notification[];
+  teamMessages?: TeamMessage[];
+  channels?: Channel[];
 }
 
-export interface FinancialData {
-  revenue: number;
-  costs: number;
-  result: number;
-  equity: number;
-  debt: number;
-}
+export type DashboardView = 'overview' | 'ideas' | 'advisor' | 'marketing' | 'crm' | 'pitch' | 'settings' | 'report' | 'team';
 
-export interface FullReportProject {
-  id: string; // UUID
-  user_id: string;
-  workspace_id?: string;
-  company_name: string;
-  sections: Record<ReportSectionType, ReportSectionData>;
-  financials?: FinancialData;
-  created_at: string;
-  updated_at: string;
-}
-
-// --- WORKSPACE TYPES (NEW) ---
-
-export interface Workspace {
-  id: string;
-  name: string;
-  owner_id: string;
-  created_at: string;
-  role?: 'admin' | 'member' | 'viewer'; // Augmented on fetch
-  memberCount?: number; // NEW: Count of members
-}
-
-export interface WorkspaceMember {
+export interface Channel {
   id: string;
   workspace_id: string;
-  user_id: string;
-  role: 'admin' | 'member' | 'viewer';
-  user?: User; // Join
+  name: string;
+  created_at: string;
 }
 
-// --- PITCH ENGINE TYPES ---
+export interface TeamMessage {
+  id: string;
+  workspace_id: string;
+  channel_id?: string; // Optional for backward compatibility/system messages
+  user_id: string;
+  content: string;
+  created_at: string;
+  user?: User; // Joined user data
+}
 
-export type PitchFormat = 'SCEN' | 'MONTER' | 'INVESTERARE' | 'KUND';
+export interface UfEvent {
+  id: string;
+  title: string;
+  date_at: string;
+  type: 'UF_FAIR' | 'DEADLINE' | 'COMPETITION' | 'OTHER';
+  workspace_id?: string | null;
+}
+
+export interface Recommendation {
+  id: string;
+  title: string;
+  description: string;
+  kind: 'UF_EVENT' | 'DEADLINE' | 'ACTION';
+  ctaLabel: string;
+  ctaAction: () => void;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  type: 'PERSON' | 'COMPANY';
+  company?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  linkedin?: string;
+  workspace_id?: string | null;
+  last_interaction_at?: string;
+  created_at: string;
+}
+
+export type DealStage = 'QUALIFY' | 'PROPOSAL' | 'NEGOTIATION' | 'WON' | 'LOST';
+
+export interface Deal {
+  id: string;
+  title: string;
+  company: string;
+  value: number;
+  stage: DealStage;
+  probability: number;
+  workspace_id?: string | null;
+  created_at: string;
+}
+
+export interface SalesEvent {
+  id: string;
+  product_name: string;
+  quantity: number;
+  amount: number;
+  channel: string;
+  occurred_at: string;
+  workspace_id?: string | null;
+}
+
+export interface SustainabilityLog {
+  id: string;
+  category: string;
+  impact_description: string;
+  workspace_id?: string | null;
+  created_at: string;
+}
+
+export interface Badge {
+  id: string;
+  name: string;
+  icon: string;
+  earned_at: string;
+}
+
+export interface MailRecipient {
+  id: string;
+  origin: 'CONTACT' | 'DEAL';
+  name: string;
+  email?: string;
+  company?: string;
+  context?: string;
+  lastInteraction?: string;
+}
+
+export type MailTemplateType = 'COLD_INTRO' | 'THANK_MEETING' | 'PARTNERSHIP_REQUEST' | 'FOLLOW_UP' | 'BOOK_MEETING';
+export type MailTone = 'FORMAL' | 'FRIENDLY' | 'ENTHUSIASTIC' | 'SHORT';
+
+export interface ChatSession {
+  id: string;
+  name: string;
+  session_group: string;
+  workspace_id?: string | null;
+  last_message_at?: number;
+  visibility?: 'private' | 'shared';
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'ai' | 'model';
+  text: string;
+  timestamp: number;
+  session_id: string;
+  user_id: string;
+  created_at: string;
+}
+
+export interface Idea {
+  id: string;
+  title: string;
+  chat_session_id?: string;
+  current_phase: 'A' | 'B' | 'C';
+  snapshot: {
+    problem_statement: string;
+    icp: string;
+    solution_hypothesis: string;
+    uvp: string;
+    one_pager: string;
+    persona_summary: string;
+    pricing_hypothesis: string;
+    mvp_definition: string;
+    open_questions: string[];
+    next_step: string;
+    uf_score?: UFScore;
+  };
+  workspace_id?: string | null;
+  is_active_track?: boolean;
+  committed_at?: string;
+  created_at: string;
+}
+
+export interface UFScore {
+  feasibility: number;
+  risk: 'Låg' | 'Medel' | 'Hög';
+  time_realism: 'Grön' | 'Gul' | 'Röd';
+  copy_risk: 'Låg' | 'Medel' | 'Hög';
+  complexity: 'Enkel' | 'Medel' | 'Avancerad';
+  warning_point: string;
+  motivation?: string;
+}
+
+export type PitchFormat = 'SCEN' | 'MONTER' | 'INVESTERARE';
 
 export interface PitchProject {
   id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
   title: string;
-  target_audience: string;
   format: PitchFormat;
+  target_audience: string;
   time_limit_seconds: number;
+  workspace_id?: string | null;
   created_at: string;
-  // Join
   versions?: PitchVersion[];
 }
 
 export interface PitchVersion {
   id: string;
-  project_id: string;
   version_number: number;
   transcript: string;
   analysis_data?: PitchAnalysis;
@@ -123,329 +240,79 @@ export interface PitchAnalysis {
     memorable: string;
     risk: string;
   };
-  structure_check: {
-    hook: { score: number, feedback: string };
-    problem: { score: number, feedback: string };
-    solution: { score: number, feedback: string };
-    value: { score: number, feedback: string };
-    proof: { score: number, feedback: string };
-    team: { score: number, feedback: string };
-    closing: { score: number, feedback: string };
-  };
-  improvements: {
-    original_text: string;
-    improved_text: string;
-    reason: string;
-    priority: number;
-  }[];
-}
-
-// --- CORE CRM TYPES ---
-
-export type ContactType = 'PERSON' | 'COMPANY';
-export type DealStage = 'QUALIFY' | 'PROPOSAL' | 'NEGOTIATION' | 'WON' | 'LOST';
-export type ActivityType = 'DM' | 'CALL' | 'MEETING' | 'FOLLOW_UP' | 'NOTE';
-export type UfEventType = 'UF_FAIR' | 'DEADLINE' | 'COMPETITION' | 'OTHER';
-
-// NEW: Mail Types
-export type MailTemplateType = 'COLD_INTRO' | 'THANK_MEETING' | 'PARTNERSHIP_REQUEST' | 'FOLLOW_UP' | 'BOOK_MEETING';
-export type MailTone = 'FORMAL' | 'FRIENDLY' | 'ENTHUSIASTIC' | 'SHORT';
-
-export interface MailRecipient {
-  id: string;
-  origin: 'CONTACT' | 'DEAL';
-  name: string;
-  email?: string;
-  company?: string;
-  lastInteraction?: string;
-  context?: string; // e.g., Deal stage or Contact notes
-}
-
-export interface MailDraftRequest {
-  recipient: MailRecipient;
-  template: MailTemplateType;
-  tone: MailTone;
-  extraContext?: string;
-  meetingTime?: string; // New field for specific dates
-  senderName: string;
-  senderCompany: string;
-}
-
-export interface Contact {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  type: ContactType;
-  name: string;
-  email?: string;
-  phone?: string;
-  website?: string;
-  linkedin?: string;
-  role?: string;
-  company?: string; // If type is PERSON, which company they belong to
-  channel?: string;
-  notes?: string;
-  ambassador_potential?: number; // 0-5
-  last_interaction_at?: string;
-  created_at: string;
-}
-
-export interface Lead {
-  // Keeping legacy Lead type for backward compatibility
-  id: string;
-  user_id: string;
-  name: string;
-  company: string;
-  email?: string;
-  status: string;
-  priority: string;
-  value: number;
-  lead_score: number;
-  created_at: string;
-  workspace_id?: string; // NEW
-}
-
-export interface Deal {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  contact_id?: string;
-  title: string;
-  company?: string;
-  value: number;
-  probability: number; // 0-100
-  stage: DealStage;
-  deadline_at?: string;
-  created_at: string;
-  // Joins
-  contact?: Contact;
-}
-
-export interface SalesEvent {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  contact_id?: string;
-  channel: string;
-  product_name: string;
-  quantity: number;
-  amount: number;
-  occurred_at: string;
-  created_at: string;
-}
-
-export interface Activity {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  type: ActivityType;
-  subject: string;
-  description?: string;
-  related_type?: 'CONTACT' | 'DEAL' | 'LEAD';
-  related_id?: string;
-  occurred_at: string;
-}
-
-export interface SustainabilityLog {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  related_type?: string;
-  related_id?: string;
-  category: 'REUSE' | 'LOCAL' | 'SOCIAL' | 'MATERIAL';
-  impact_description: string;
-  saved_co2_approx?: number;
-  created_at: string;
-}
-
-export interface UfEvent {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  title: string;
-  date_at: string;
-  type: UfEventType;
-  description?: string;
-}
-
-export interface Badge {
-  id: string;
-  badge_id: string;
-  awarded_at: string;
-}
-
-export interface UserPoint {
-  id: string;
-  points: number;
-  reason: string;
-  created_at: string;
-}
-
-export interface Recommendation {
-  id: string;
-  kind: 'FOLLOW_UP' | 'DEADLINE' | 'STALE_DEAL' | 'UF_EVENT' | 'TODAY_FOCUS';
-  title: string;
-  description: string;
-  priority: number; // 1-100
-  ctaLabel: string;
-  ctaAction: () => void;
-}
-
-// --- EXISTING TYPES ---
-
-export interface ChatSession {
-  id: string;
-  user_id: string;
-  workspace_id?: string | null; // NEW: Null means private
-  visibility?: 'private' | 'shared'; // NEW
-  name: string;
-  session_group: string;
-  last_message_at: number;
-  created_at: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  user_id: string;
-  session_id: string;
-  role: 'user' | 'ai';
-  text: string;
-  timestamp: number;
-  sources?: any[];
-  created_at: string;
-}
-
-export interface Idea {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  title: string;
-  description?: string;
-  score: number;
-  current_phase: string;
-  chat_session_id?: string;
-  snapshot: ProjectSnapshot;
-  nodes: IdeaNode[];
-  tasks: any[];
-  created_at: string;
-  is_active_track?: boolean;
-  committed_at?: string;
-}
-
-export interface UFScore {
-  feasibility: number; // 1-10
-  risk: 'Låg' | 'Medel' | 'Hög';
-  time_realism: 'Grön' | 'Gul' | 'Röd';
-  copy_risk: 'Låg' | 'Medel' | 'Hög';
-  complexity: 'Enkel' | 'Medel' | 'Avancerad';
-  warning_point: string;
-  motivation: string;
-}
-
-export interface ProjectSnapshot {
-  problem_statement: string;
-  icp: string;
-  solution_hypothesis: string;
-  uvp: string;
-  one_pager: string;
-  persona_summary: string;
-  pricing_hypothesis: string;
-  mvp_definition: string;
-  open_questions: string[];
-  next_step: string;
-  uf_score?: UFScore;
-  is_high_risk?: boolean;
-}
-
-export interface IdeaNode {
-  id: string;
-  node_type: string;
-  label: string;
-  parent_id: string | null;
-  details: any;
-}
-
-// Deprecated Pitch interface (keeping for type safety during migration)
-export interface Pitch {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  name: string;
-  pitch_type: 'deck' | 'speech' | 'email';
-  content: string;
-  chat_session_id?: string;
-  context_score: number;
-  created_at: string;
-}
-
-export interface CompanyReport {
-  meta: {
-    companyName: string;
-    website: string;
-    generatedDate: string;
-    language: string;
-  };
-  fullMarkdown: string;
-  summary: {
-    revenue: string;
-    ebitda: string;
-    solvency: string;
-    employees: string;
-    founded: string;
-  };
-  sources?: { id: number; url: string; title: string; reliability: number }[];
-}
-
-export interface CompanyReportEntry {
-  id: string;
-  user_id: string;
-  workspace_id?: string; // NEW
-  title: string;
-  reportData: CompanyReport;
-  created_at: string;
+  structure_check: Record<string, { score: number; feedback: string }>;
+  improvements: Array<{ original_text: string; improved_text: string; reason: string; priority: number }>;
 }
 
 export interface Notification {
   id: string;
+  user_id: string;
+  type: 'MENTION' | 'SYSTEM' | 'ALERT';
   title: string;
   message: string;
-  date: string;
+  link?: string;
   read: boolean;
+  created_at: string;
 }
 
 export interface Invoice {
   id: string;
   date: string;
-  amount: string;
-  status: string;
+  amount: number;
+  status: 'PAID' | 'PENDING';
+  pdf_url?: string;
+}
+
+export interface UserSettings {
+  notifications: {
+    email: boolean;
+    push: boolean;
+    marketing: boolean;
+  };
+  privacy: {
+    publicProfile: boolean;
+    dataSharing: boolean;
+  };
 }
 
 export interface BrandDNA {
   id: string;
-  user_id?: string;
-  workspace_id?: string; // NEW
   meta: {
     brandName: string;
     siteUrl: string;
     generatedAt: string;
   };
   visual: {
-    primaryColors: { hex: string }[];
-    typography: {
-      primaryFont: { name: string };
-      secondaryFont: { name: string };
-    };
-    aesthetic?: string;
+    primaryColors: Array<{hex: string}>;
+    typography: { primaryFont: { name: string }, secondaryFont: { name: string } };
+    aesthetic: string;
   };
   voice: {
     toneDescriptors: string[];
     doUse: string[];
     dontUse: string[];
   };
-  product?: {
+  product: {
     description: string;
     uniqueValue: string;
   };
+  workspace_id?: string | null;
+}
+
+export interface MarketingCampaign {
+  id: string;
+  brandDnaId?: string;
+  name: string;
+  brief: {
+    goal: string;
+    audience: string;
+    timeframe: string;
+    constraints: string;
+  };
+  selectedIdea?: CampaignIdea;
+  assets: CampaignAsset[];
+  dateCreated: string;
+  workspace_id?: string | null;
 }
 
 export interface CampaignIdea {
@@ -462,7 +329,7 @@ export interface CampaignAsset {
     body: string;
     hashtags: string[];
   };
-  metrics: {
+  metrics?: {
     ctr: string;
     roas: string;
   };
@@ -472,94 +339,150 @@ export interface CampaignAsset {
   };
 }
 
-export interface MarketingCampaign {
+export interface Workspace {
   id: string;
-  user_id?: string;
-  workspace_id?: string; // NEW
-  brandDnaId?: string;
   name: string;
-  brief: {
-    goal: string;
-    audience: string;
-    timeframe: string;
-    constraints: string;
+  owner_id: string;
+  created_at: string;
+  memberCount?: number;
+  role?: string;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  role: 'owner' | 'admin' | 'member';
+  user?: User;
+}
+
+export type ReportSectionType = 'intro' | 'ceo_words' | 'business_idea' | 'execution' | 'financials' | 'learnings' | 'future' | 'signatures';
+
+export interface ReportSectionData {
+  id: string;
+  title: string;
+  content: string;
+  status: 'empty' | 'draft' | 'complete';
+  score?: number;
+  feedback?: {
+    analysis: string;
+    jury_perspective: string;
+    strengths: string[];
+    weaknesses: string[];
+    concrete_examples: string[];
   };
-  selectedIdea: CampaignIdea;
-  assets: CampaignAsset[];
-  dateCreated: string;
 }
 
-export interface UserSettings {
-  notifications: { email: boolean; push: boolean; marketing: boolean };
-  privacy: { publicProfile: boolean; dataSharing: boolean };
+export interface FullReportProject {
+  id: string;
+  user_id: string;
+  company_name: string;
+  workspace_id?: string | null;
+  sections: Record<ReportSectionType, ReportSectionData>;
+  financials: {
+    revenue: number;
+    costs: number;
+    result: number;
+    equity: number;
+    debt: number;
+  };
+  updated_at: string;
 }
 
-export interface UserData {
-  profile: Partial<User>;
-  workspaces?: Workspace[]; // NEW
-  leads: Lead[];
-  contacts: Contact[];
-  deals: Deal[];
-  salesEvents: SalesEvent[];
-  activities: Activity[];
-  sustainabilityLogs: SustainabilityLog[];
-  ufEvents: UfEvent[];
-  points: number;
-  badges: Badge[];
-  ideas: Idea[];
-  pitches: Pitch[]; // Keeping for legacy
-  pitchProjects?: PitchProject[]; // NEW
-  chatHistory: ChatMessage[];
-  sessions: ChatSession[];
-  settings?: UserSettings;
-  reports?: CompanyReportEntry[];
-  fullReports?: FullReportProject[]; // NEW: The Report Builder projects
-  notifications?: Notification[];
-  brandDNAs?: BrandDNA[];
-  marketingCampaigns?: MarketingCampaign[];
+export interface Lead {
+  id: string;
+  name: string;
+  created_at: string;
 }
 
-export interface SearchResult { id: string; type: 'lead' | 'idea' | 'pitch'; title: string; subtitle: string; view: DashboardView; }
-export interface ContactRequest { name: string; email: string; subject: string; message: string; }
-export interface NavProps { currentPage: Page; onNavigate: (page: Page) => void; user?: User | null; }
-export interface PageProps { onNavigate: (page: Page) => void; }
+export interface Activity {
+  id: string;
+  occurred_at: string;
+}
 
-// Old DeckSpec for backwards compat
+export interface Pitch {
+  id: string;
+  created_at: string;
+}
+
+export interface ContactRequest {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+}
+
+export interface CompanyReport {
+  meta?: {
+    generatedDate: string;
+    companyName: string;
+    website?: string;
+  };
+  summary?: {
+    founded: string;
+    employees: string;
+    revenue: string;
+    ebitda: string;
+    solvency: string;
+  };
+  sources?: Array<{title: string}>;
+}
+
+export interface CompanyReportEntry {
+  // Placeholder
+}
+
+export interface MailDraftRequest {
+  recipient: MailRecipient;
+  template: MailTemplateType;
+  tone: MailTone;
+  extraContext: string;
+  meetingTime?: string;
+  senderName: string;
+  senderCompany: string;
+}
+
 export interface DeckSpec {
-  deck_title: string;
-  language: string;
-  slides: SlideSpec[];
+  deck_title?: string;
+  language?: string;
+  slides?: Array<{
+    layout_id: string;
+    title?: string;
+    subtitle?: string;
+    body?: string;
+    problems?: Array<{title: string, body: string}>;
+    solutions?: Array<{title: string, body: string, icon_query?: string}>;
+    narrative?: string;
+    agenda_items?: string[];
+    team?: Array<{name: string, role: string, bio: string, image_query?: string}>;
+    bullets?: string[];
+    [key: string]: any; 
+  }>;
 }
 
-export interface SlideSpec {
-  slide_number: number;
-  layout_id: string;
-  title?: string;
-  subtitle?: string;
-  presenter_name?: string;
-  presenter_role?: string;
-  agenda_items?: string[];
-  col_left?: string;
-  col_right?: string;
-  problems?: { title: string; body: string }[];
-  solutions?: { title: string; body: string; icon_query?: string }[];
-  services?: { title: string; body: string }[];
-  narrative?: string;
-  kpi_primary_value?: string;
-  kpi_primary_caption?: string;
-  kpi_secondary_value?: string;
-  kpi_secondary_caption?: string;
-  direct_bullets?: string[];
-  indirect_bullets?: string[];
-  advantages?: { title: string; body: string }[];
-  kpis?: { value: string; label: string }[];
-  chart?: { series_label: string; x_labels: string[]; y_values: number[] };
-  timeline?: { label: string; body: string }[];
-  bullets?: string[];
-  pie?: { label: string; percent: number }[];
-  team?: { name: string; role: string; bio: string; image_query?: string }[];
-  phone?: string;
-  website?: string;
-  email?: string;
-  address?: string;
+export interface AIMemory {
+  id: string;
+  user_id: string;
+  workspace_id?: string | null;
+  content: string;
+  source_type: 'CRM' | 'PITCH' | 'IDEA' | 'CHAT' | 'SYSTEM' | 'REPORT';
+  source_id?: string;
+  importance: number;
+  created_at: string;
+}
+
+export interface GoogleCalendarEvent {
+  id: string;
+  summary: string;
+  start: { dateTime: string };
+  end: { dateTime: string };
+  htmlLink: string;
+}
+
+export interface GoogleContact {
+  resourceName: string;
+  names?: { displayName: string, givenName: string, familyName: string }[];
+  emailAddresses?: { value: string }[];
+  phoneNumbers?: { value: string }[];
+  organizations?: { name: string, title: string }[];
 }

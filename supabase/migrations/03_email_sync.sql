@@ -1,3 +1,4 @@
+
 -- Function to sync email updates from auth.users to public.profiles
 CREATE OR REPLACE FUNCTION public.handle_user_email_update()
 RETURNS TRIGGER AS $$

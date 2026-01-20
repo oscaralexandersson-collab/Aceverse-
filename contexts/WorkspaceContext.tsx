@@ -69,9 +69,6 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
       // Fetch member counts for all workspaces in the list
       if (wsList.length > 0) {
           const ids = wsList.map(w => w.id);
-          // Query workspace_members for these workspaces to get total count
-          // Using a separate query to avoid complex grouping on client if list is large, 
-          // but for small lists this is fine. RLS allows viewing members of own workspaces.
           const { data: allMembers } = await supabase
               .from('workspace_members')
               .select('workspace_id')
@@ -103,10 +100,6 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     } catch (err: any) {
       console.error("Workspace sync failed:", err.message || err);
-      // Alert user if critical configuration error occurs
-      if (err.message?.includes("infinite recursion")) {
-          alert("DATABASE CONFIG ERROR: 'Infinite Recursion' detected.\n\nPlease run the SQL fix provided in the chat to resolve the RLS policy loop.");
-      }
     } finally {
       setIsLoading(false);
     }
@@ -117,7 +110,7 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
     if (viewScope === 'workspace' && activeWorkspace) {
       const fetchMembers = async () => {
         try {
-            // 1. Fetch raw members first (avoiding JOIN error)
+            // 1. Fetch raw members first
             const { data: memberRows, error: memberError } = await supabase
                 .from('workspace_members')
                 .select('*')
@@ -130,23 +123,38 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
                 return;
             }
 
-            // 2. Fetch profiles for these members manually
+            // 2. Fetch profiles manually to ensure we get data (avoids complexity with joins if schema is strict)
             const userIds = memberRows.map(m => m.user_id);
             const { data: profiles, error: profileError } = await supabase
                 .from('profiles')
                 .select('*')
                 .in('id', userIds);
             
-            if (profileError) {
-                console.warn("Could not fetch profiles for members:", profileError.message);
-                // Continue with just member data if profiles fail
-            }
+            // 3. Map profile data to members
+            const joinedMembers = memberRows.map(member => {
+                // Map snake_case DB profile to camelCase User object
+                const rawProfile = profiles?.find(p => p.id === member.user_id);
+                let mappedUser = undefined;
+                
+                if (rawProfile) {
+                    mappedUser = {
+                        id: rawProfile.id,
+                        firstName: rawProfile.first_name || 'Anonym',
+                        lastName: rawProfile.last_name || '',
+                        email: rawProfile.email || '',
+                        avatar: rawProfile.avatar,
+                        // Add defaults for required User type fields
+                        plan: rawProfile.plan || 'free',
+                        onboardingCompleted: rawProfile.onboarding_completed || false,
+                        createdAt: rawProfile.created_at || new Date().toISOString()
+                    };
+                }
 
-            // 3. Merge data in memory
-            const joinedMembers = memberRows.map(member => ({
-                ...member,
-                user: profiles?.find(p => p.id === member.user_id)
-            }));
+                return {
+                    ...member,
+                    user: mappedUser
+                };
+            });
 
             setMembers(joinedMembers as any);
 
@@ -158,7 +166,7 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
     } else {
         setMembers([]);
     }
-  }, [activeWorkspace, viewScope]);
+  }, [activeWorkspace?.id, viewScope]); // Trigger on ID change specifically
 
   const switchScope = (scope: ViewScope, workspaceId?: string) => {
       setViewScope(scope);
@@ -181,11 +189,7 @@ export const WorkspaceProvider: React.FC<{ children: ReactNode }> = ({ children 
   const inviteMember = async (email: string) => {
       if (!activeWorkspace) throw new Error("Inget team valt.");
       await db.inviteMemberByEmail(activeWorkspace.id, email);
-      // Trigger refresh of members
-      const user = await db.getCurrentUser();
-      // Re-trigger effect by shallow updating activeWorkspace
       if(activeWorkspace) setActiveWorkspace({...activeWorkspace});
-      // Also refresh to update counts
       await refreshWorkspaces();
   };
 
