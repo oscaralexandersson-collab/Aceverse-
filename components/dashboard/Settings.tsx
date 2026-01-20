@@ -1,327 +1,378 @@
-
-import React, { useState, useEffect, useRef } from 'react';
-import { User, Notification, Invoice, UserSettings, AIMemory } from '../../types';
+import React, { useState, useEffect } from 'react';
+import { User, UserSettings } from '../../types';
 import { db } from '../../services/db';
-import { googleService } from '../../services/googleIntegration';
+import { supabase } from '../../services/supabase';
+// import { googleService } from '../../services/googleIntegration'; // Unused in this snippet but maybe needed for integrations tab
 import { useLanguage } from '../../contexts/LanguageContext';
 import { 
-    Globe, User as UserIcon, Bell, Shield, CreditCard, Check, 
-    Download, Trash2, Mail, Smartphone, AlertTriangle, FileText,
-    Star, ArrowRight, Loader2, Calendar, MapPin, Briefcase,
-    PauseCircle, Lock, Upload, XCircle, RefreshCw, Brain, Database, Link, LogOut
+    User as UserIcon, Bell, Shield, CreditCard,
+    Loader2, Link, Save, Download, Trash2, Mail, Lock, 
+    Globe, Layout, Smartphone
 } from 'lucide-react';
 
 interface SettingsProps {
     user: User;
 }
 
-type SettingsTab = 'profile' | 'notifications' | 'intelligence' | 'security' | 'billing' | 'report' | 'integrations';
+type SettingsTab = 'general' | 'security' | 'notifications' | 'billing' | 'integrations';
 
 const Settings: React.FC<SettingsProps> = ({ user }) => {
-    const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
-    const { language, setLanguage, t } = useLanguage();
-    
-    // State
+    const { t, language, setLanguage } = useLanguage();
+    const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+    const [isLoading, setIsLoading] = useState(false);
+    const [message, setMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
+
+    // Form State
+    const [formData, setFormData] = useState({
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        company: user.company || '',
+        bio: user.bio || ''
+    });
+
     const [settings, setSettings] = useState<UserSettings>({
         notifications: { email: true, push: true, marketing: false },
         privacy: { publicProfile: false, dataSharing: false }
     });
-    const [memories, setMemories] = useState<AIMemory[]>([]);
-    
-    // Live Profile Data (to fix email sync issue)
-    const [liveProfile, setLiveProfile] = useState<User>(user);
 
+    // Load fresh data on mount to fix "wrong email" issues
     useEffect(() => {
-        const loadData = async () => {
-            // Fetch full user data to get memories and latest settings
-            const data = await db.getUserData(user.id);
-            if (data.settings) setSettings(data.settings);
-            if (data.memories) setMemories(data.memories);
-            
-            // Also refresh the specific user object to ensure email is live
-            const freshUser = await db.getCurrentUser();
-            if (freshUser) setLiveProfile(freshUser);
+        const loadFreshData = async () => {
+            const currentUser = await db.getCurrentUser();
+            if (currentUser) {
+                setFormData({
+                    firstName: currentUser.firstName,
+                    lastName: currentUser.lastName,
+                    email: currentUser.email,
+                    company: currentUser.company || '',
+                    bio: currentUser.bio || ''
+                });
+            }
+            const userData = await db.getUserData(user.id);
+            if (userData.settings) {
+                setSettings(userData.settings);
+            }
         };
-        loadData();
+        loadFreshData();
     }, [user.id]);
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        setFormData({ ...formData, [e.target.name]: e.target.value });
+    };
+
+    const handleSaveProfile = async () => {
+        setIsLoading(true);
+        setMessage(null);
+        try {
+            // 1. Update Profile Data
+            const { error: profileError } = await supabase.from('profiles').update({
+                first_name: formData.firstName,
+                last_name: formData.lastName,
+                company_name: formData.company,
+                bio: formData.bio,
+                // We update the email column in profiles for display, but Auth handles the real change
+                email: formData.email 
+            }).eq('id', user.id);
+
+            if (profileError) throw profileError;
+
+            // 2. Update Auth Email if changed (Requires re-confirmation usually)
+            if (formData.email !== user.email) {
+                const { error: authError } = await supabase.auth.updateUser({ email: formData.email });
+                if (authError) throw authError;
+                setMessage({ type: 'success', text: 'Profil sparad. En bekräftelselänk har skickats till din nya e-postadress. Bytet slutförs när du klickar på länken.' });
+            } else {
+                setMessage({ type: 'success', text: 'Profil uppdaterad i databasen.' });
+            }
+            
+        } catch (error: any) {
+            console.error(error);
+            setMessage({ type: 'error', text: `Kunde inte spara ändringar: ${error.message}` });
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
     const handleSaveSettings = async (newSettings: UserSettings) => {
         setSettings(newSettings);
         await db.saveSettings(user.id, newSettings);
     };
 
-    const handleDeleteMemory = async (id: string) => {
-        await db.deleteMemory(id);
-        setMemories(prev => prev.filter(m => m.id !== id));
-    };
-
-    const renderTabContent = () => {
-        switch (activeTab) {
-            case 'profile':
-                return <ProfileSection user={liveProfile} language={language} setLanguage={setLanguage} />;
-            case 'notifications':
-                return <NotificationsSection user={liveProfile} settings={settings} onUpdate={handleSaveSettings} />;
-            case 'intelligence':
-                return <IntelligenceSection memories={memories} onDelete={handleDeleteMemory} />;
-            case 'integrations':
-                return <IntegrationsSection />;
-            case 'security':
-                return <SecuritySection user={liveProfile} settings={settings} onUpdate={handleSaveSettings} />;
-            case 'billing':
-                return <BillingSection user={liveProfile} />;
-            case 'report':
-                return <ReportSection user={liveProfile} />;
-            default:
-                return null;
+    const handleExportData = async () => {
+        setIsLoading(true);
+        setMessage(null);
+        try {
+            const allData = await db.getUserData(user.id);
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(allData, null, 2));
+            const downloadAnchorNode = document.createElement('a');
+            downloadAnchorNode.setAttribute("href", dataStr);
+            downloadAnchorNode.setAttribute("download", `aceverse_export_${user.id}.json`);
+            document.body.appendChild(downloadAnchorNode);
+            downloadAnchorNode.click();
+            downloadAnchorNode.remove();
+            setMessage({ type: 'success', text: 'Din data har exporterats och nedladdningen har startat.' });
+        } catch (e: any) {
+            setMessage({ type: 'error', text: `Export misslyckades: ${e.message}` });
+        } finally {
+            setIsLoading(false);
         }
     };
 
-  return (
-    <div className="max-w-5xl mx-auto animate-fadeIn">
-      <div className="mb-8">
-        <h1 className="font-serif-display text-4xl mb-2 text-gray-900 dark:text-white">{t('settings.title')}</h1>
-        <p className="text-gray-500 dark:text-gray-400">Hantera dina kontoinställningar och företagsdetaljer.</p>
-      </div>
-
-      <div className="flex flex-col lg:flex-row gap-8 items-start">
-        {/* Sidebar Navigation */}
-        <div className="w-full lg:w-64 flex flex-col gap-2 sticky top-4">
-            <NavButton 
-                active={activeTab === 'profile'} 
-                onClick={() => setActiveTab('profile')} 
-                icon={<UserIcon size={16} />} 
-                label={t('settings.profile')} 
-            />
-            <NavButton 
-                active={activeTab === 'integrations'} 
-                onClick={() => setActiveTab('integrations')} 
-                icon={<Link size={16} />} 
-                label="Integrationer" 
-            />
-            <NavButton 
-                active={activeTab === 'intelligence'} 
-                onClick={() => setActiveTab('intelligence')} 
-                icon={<Brain size={16} />} 
-                label="Ace Intelligence" 
-            />
-            <NavButton 
-                active={activeTab === 'report'} 
-                onClick={() => setActiveTab('report')} 
-                icon={<FileText size={16} />} 
-                label="Bolagsrapport" 
-            />
-            <NavButton 
-                active={activeTab === 'notifications'} 
-                onClick={() => setActiveTab('notifications')} 
-                icon={<Bell size={16} />} 
-                label={t('settings.notifications')} 
-            />
-            <NavButton 
-                active={activeTab === 'security'} 
-                onClick={() => setActiveTab('security')} 
-                icon={<Shield size={16} />} 
-                label={t('settings.security')} 
-            />
-            <NavButton 
-                active={activeTab === 'billing'} 
-                onClick={() => setActiveTab('billing')} 
-                icon={<CreditCard size={16} />} 
-                label={t('settings.billing')} 
-            />
-        </div>
-
-        {/* Content Area */}
-        <div className="flex-1 w-full">
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-sm p-8 min-h-[500px]">
-                {renderTabContent()}
-            </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const NavButton = ({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) => (
-    <button 
-        onClick={onClick}
-        className={`w-full text-left px-4 py-3 rounded-xl transition-all text-sm font-medium flex items-center gap-3 border ${
-            active 
-            ? 'bg-black dark:bg-white text-white dark:text-black shadow-lg shadow-black/10 border-black dark:border-white' 
-            : 'text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800 hover:shadow-sm border-transparent hover:border-gray-100 dark:hover:border-gray-700'
-        }`}
-    >
-        {icon}
-        {label}
-    </button>
-);
-
-const IntegrationsSection = () => {
-    const [isConnected, setIsConnected] = useState(false);
-    const [isInitializing, setIsInitializing] = useState(true);
-
-    useEffect(() => {
-        // Check initial status
-        setIsConnected(googleService.isConnected);
-        
-        // Init service
-        googleService.initialize().then(() => {
-            setIsInitializing(false);
-        });
-
-        // Listen for status changes
-        const handleConnect = () => setIsConnected(true);
-        const handleDisconnect = () => setIsConnected(false);
-
-        window.addEventListener('ace_google_connected', handleConnect);
-        window.addEventListener('ace_google_disconnected', handleDisconnect);
-
-        return () => {
-            window.removeEventListener('ace_google_connected', handleConnect);
-            window.removeEventListener('ace_google_disconnected', handleDisconnect);
-        };
-    }, []);
-
-    const handleConnect = () => {
-        googleService.login();
-    };
-
-    const handleDisconnect = () => {
-        googleService.logout();
-    };
+    const menuItems = [
+        { id: 'general', label: t('settings.profile'), icon: UserIcon },
+        { id: 'security', label: t('settings.security'), icon: Shield },
+        { id: 'notifications', label: t('settings.notifications'), icon: Bell },
+        { id: 'integrations', label: 'Integrationer', icon: Link },
+        { id: 'billing', label: t('settings.billing'), icon: CreditCard },
+    ];
 
     return (
-        <div className="animate-fadeIn">
-            <div className="flex items-center gap-4 mb-8 border-b border-gray-100 dark:border-gray-800 pb-6">
-                <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-2xl flex items-center justify-center text-blue-600 dark:text-blue-400">
-                    <Link size={24} />
+        <div className="max-w-6xl mx-auto h-full flex flex-col md:flex-row gap-8 animate-fadeIn pb-20">
+            
+            {/* --- SIDEBAR MENU --- */}
+            <aside className="w-full md:w-64 flex-shrink-0">
+                <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800 sticky top-4">
+                    <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest px-4 mb-4 mt-2">Inställningar</h2>
+                    <nav className="space-y-1">
+                        {menuItems.map((item) => (
+                            <button
+                                key={item.id}
+                                onClick={() => { setActiveTab(item.id as SettingsTab); setMessage(null); }}
+                                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                                    activeTab === item.id 
+                                    ? 'bg-black text-white dark:bg-white dark:text-black shadow-md' 
+                                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                                }`}
+                            >
+                                <item.icon size={18} />
+                                {item.label}
+                            </button>
+                        ))}
+                    </nav>
                 </div>
-                <div>
-                    <h3 className="text-lg font-bold text-gray-900 dark:text-white">Google Workspace</h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">Anslut din kalender och Gmail för att låta Aceverse automatisera mötesbokning och utkast.</p>
-                </div>
-                <div className="ml-auto">
-                    {isInitializing ? (
-                        <div className="flex items-center gap-2 text-sm text-gray-400"><Loader2 className="animate-spin" size={16} /> Laddar...</div>
-                    ) : isConnected ? (
-                        <button onClick={handleDisconnect} className="px-4 py-2 border border-red-200 dark:border-red-900 text-red-600 dark:text-red-400 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">Koppla från</button>
-                    ) : (
-                        <button onClick={handleConnect} className="px-6 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-bold uppercase tracking-wide hover:opacity-80 transition-opacity">Anslut</button>
-                    )}
-                </div>
-            </div>
+            </aside>
+
+            {/* --- MAIN CONTENT AREA --- */}
+            <main className="flex-1 min-w-0">
+                
+                {message && (
+                    <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 text-sm font-bold animate-slideUp ${message.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                        {message.type === 'success' ? <div className="w-2 h-2 bg-green-500 rounded-full"/> : <div className="w-2 h-2 bg-red-500 rounded-full"/>}
+                        {message.text}
+                    </div>
+                )}
+
+                {/* GENERAL TAB */}
+                {activeTab === 'general' && (
+                    <div className="space-y-6">
+                        <div className="bg-white dark:bg-gray-900 p-8 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+                            <h2 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-8">{t('settings.profile')}</h2>
+                            
+                            <div className="flex items-center gap-6 mb-8">
+                                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-gray-200 to-gray-300 flex items-center justify-center text-2xl font-bold text-gray-600 shadow-inner">
+                                    {formData.firstName?.[0]}
+                                </div>
+                                <div>
+                                    <button className="px-4 py-2 bg-gray-100 dark:bg-gray-800 rounded-lg text-xs font-bold uppercase hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
+                                        Byt bild
+                                    </button>
+                                    <p className="text-xs text-gray-400 mt-2">Max 800KB. JPG/PNG.</p>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-6 mb-6">
+                                <div>
+                                    <label className="block text-xs font-bold uppercase text-gray-500 mb-2">Förnamn</label>
+                                    <input 
+                                        name="firstName" 
+                                        value={formData.firstName} 
+                                        onChange={handleInputChange} 
+                                        className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-medium dark:text-white border border-transparent focus:border-black dark:focus:border-white transition-all"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-bold uppercase text-gray-500 mb-2">Efternamn</label>
+                                    <input 
+                                        name="lastName" 
+                                        value={formData.lastName} 
+                                        onChange={handleInputChange} 
+                                        className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-medium dark:text-white border border-transparent focus:border-black dark:focus:border-white transition-all"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="mb-6">
+                                <label className="block text-xs font-bold uppercase text-gray-500 mb-2">E-postadress</label>
+                                <input 
+                                    name="email" 
+                                    value={formData.email} 
+                                    onChange={handleInputChange} 
+                                    className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-medium dark:text-white border border-transparent focus:border-black dark:focus:border-white transition-all"
+                                />
+                            </div>
+
+                            <div className="mb-6">
+                                <label className="block text-xs font-bold uppercase text-gray-500 mb-2">Företag / Organisation</label>
+                                <input 
+                                    name="company" 
+                                    value={formData.company} 
+                                    onChange={handleInputChange} 
+                                    className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-medium dark:text-white border border-transparent focus:border-black dark:focus:border-white transition-all"
+                                />
+                            </div>
+
+                            <div className="mb-8">
+                                <label className="block text-xs font-bold uppercase text-gray-500 mb-2">Bio / Pitch</label>
+                                <textarea 
+                                    name="bio" 
+                                    value={formData.bio} 
+                                    onChange={handleInputChange} 
+                                    rows={4}
+                                    className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-medium dark:text-white border border-transparent focus:border-black dark:focus:border-white transition-all resize-none"
+                                />
+                            </div>
+
+                            <button 
+                                onClick={handleSaveProfile} 
+                                disabled={isLoading} 
+                                className="w-full bg-black dark:bg-white text-white dark:text-black py-4 rounded-xl font-bold uppercase tracking-widest text-sm hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                            >
+                                {isLoading ? <Loader2 className="animate-spin" /> : <Save size={18} />}
+                                Spara Ändringar
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* NOTIFICATIONS TAB */}
+                {activeTab === 'notifications' && (
+                    <div className="bg-white dark:bg-gray-900 p-8 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+                        <h2 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-8">Aviseringar</h2>
+                        <div className="space-y-6">
+                            {[
+                                { id: 'email', label: 'E-postnotiser', desc: 'Få veckovisa sammanfattningar och viktiga uppdateringar via e-post.', icon: Mail },
+                                { id: 'push', label: 'Push-notiser', desc: 'Notiser i webbläsaren vid nya meddelanden eller händelser.', icon: Smartphone },
+                                { id: 'marketing', label: 'Marknadsföring', desc: 'Nyheter om Aceverse, tävlingar och partnererbjudanden.', icon: Megaphone }
+                            ].map((item) => (
+                                <div key={item.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center text-gray-500">
+                                            <item.icon size={20} />
+                                        </div>
+                                        <div>
+                                            <h4 className="font-bold text-gray-900 dark:text-white">{item.label}</h4>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">{item.desc}</p>
+                                        </div>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input 
+                                            type="checkbox" 
+                                            className="sr-only peer"
+                                            checked={settings.notifications[item.id as keyof typeof settings.notifications]}
+                                            onChange={(e) => handleSaveSettings({
+                                                ...settings,
+                                                notifications: { ...settings.notifications, [item.id]: e.target.checked }
+                                            })}
+                                        />
+                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                                    </label>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* SECURITY TAB */}
+                {activeTab === 'security' && (
+                    <div className="space-y-6">
+                        <div className="bg-white dark:bg-gray-900 p-8 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+                            <h2 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-8">Säkerhet & Data</h2>
+                            
+                            <div className="space-y-6 mb-12">
+                                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center text-gray-500"><Globe size={20} /></div>
+                                        <div>
+                                            <h4 className="font-bold text-gray-900 dark:text-white">Publik Profil</h4>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Gör din profil synlig för andra användare och investerare.</p>
+                                        </div>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input 
+                                            type="checkbox" 
+                                            className="sr-only peer"
+                                            checked={settings.privacy.publicProfile}
+                                            onChange={(e) => handleSaveSettings({
+                                                ...settings,
+                                                privacy: { ...settings.privacy, publicProfile: e.target.checked }
+                                            })}
+                                        />
+                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                                    </label>
+                                </div>
+
+                                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center text-gray-500"><Lock size={20} /></div>
+                                        <div>
+                                            <h4 className="font-bold text-gray-900 dark:text-white">Lösenord</h4>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Byt ditt lösenord via länk.</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={async () => {
+                                        await supabase.auth.resetPasswordForEmail(user.email, { redirectTo: window.location.origin + '/reset-password' });
+                                        setMessage({ type: 'success', text: 'Återställningslänk skickad till din e-post.' });
+                                    }} className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-bold uppercase hover:opacity-80">Skicka länk</button>
+                                </div>
+                            </div>
+
+                            <h3 className="font-bold text-lg mb-4 text-red-500">Farozon</h3>
+                            <div className="border border-red-100 dark:border-red-900 bg-red-50 dark:bg-red-900/10 rounded-xl p-6">
+                                <h4 className="font-bold text-red-700 dark:text-red-400 mb-2">Exportera Data</h4>
+                                <p className="text-xs text-red-600 dark:text-red-300 mb-4">Ladda ner all din data (idéer, chattar, CRM) i JSON-format.</p>
+                                <button onClick={handleExportData} className="px-4 py-2 bg-white dark:bg-red-900 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 rounded-lg text-xs font-bold uppercase hover:bg-red-50 dark:hover:bg-red-800 transition-colors flex items-center gap-2">
+                                    <Download size={16} /> Exportera Data
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* BILLING TAB */}
+                {activeTab === 'billing' && (
+                    <div className="bg-white dark:bg-gray-900 p-8 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm text-center py-20">
+                        <CreditCard size={48} className="mx-auto mb-6 text-gray-300" />
+                        <h3 className="text-2xl font-serif-display text-gray-900 dark:text-white mb-2">Aceverse Pro</h3>
+                        <p className="text-gray-500 dark:text-gray-400 mb-8">Du använder just nu gratisversionen.</p>
+                        <button className="bg-black dark:bg-white text-white dark:text-black px-8 py-4 rounded-full font-bold uppercase tracking-widest text-sm hover:scale-105 transition-transform shadow-xl">Uppgradera Plan</button>
+                    </div>
+                )}
+
+                {/* INTEGRATIONS TAB */}
+                {activeTab === 'integrations' && (
+                    <div className="bg-white dark:bg-gray-900 p-8 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm">
+                        <h2 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-8">Integrationer</h2>
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between p-6 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-white dark:bg-gray-900 rounded-xl flex items-center justify-center shadow-sm">
+                                        <svg className="w-6 h-6" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-gray-900 dark:text-white">Google Workspace</h4>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Synka kalender och kontakter.</p>
+                                    </div>
+                                </div>
+                                <button className="px-4 py-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg text-xs font-bold uppercase hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors">Anslut</button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+            </main>
         </div>
     );
 };
-
-const ProfileSection = ({ user, language, setLanguage }: { user: User, language: string, setLanguage: (l: any) => void }) => (
-    <div className="space-y-6">
-        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Min Profil</h3>
-        <div className="grid grid-cols-2 gap-4">
-            <div>
-                <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Förnamn</label>
-                <input disabled value={user.firstName} className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border-none opacity-60 cursor-not-allowed dark:text-white" />
-            </div>
-            <div>
-                <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Efternamn</label>
-                <input disabled value={user.lastName} className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border-none opacity-60 cursor-not-allowed dark:text-white" />
-            </div>
-        </div>
-        <div>
-            <label className="block text-xs font-bold uppercase text-gray-500 mb-1">E-post</label>
-            <input disabled value={user.email} className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border-none opacity-60 cursor-not-allowed dark:text-white" />
-        </div>
-        <div>
-            <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Språk</label>
-            <div className="flex gap-2">
-                <button onClick={() => setLanguage('sv')} className={`px-4 py-2 rounded-lg text-sm font-bold border transition-colors ${language === 'sv' ? 'bg-black text-white border-black dark:bg-white dark:text-black' : 'border-gray-200 text-gray-500 dark:border-gray-700'}`}>Svenska</button>
-                <button onClick={() => setLanguage('en')} className={`px-4 py-2 rounded-lg text-sm font-bold border transition-colors ${language === 'en' ? 'bg-black text-white border-black dark:bg-white dark:text-black' : 'border-gray-200 text-gray-500 dark:border-gray-700'}`}>English</button>
-            </div>
-        </div>
-    </div>
-);
-
-const NotificationsSection = ({ user, settings, onUpdate }: { user: User, settings: UserSettings, onUpdate: (s: UserSettings) => void }) => {
-    const toggle = (key: keyof UserSettings['notifications']) => {
-        onUpdate({ ...settings, notifications: { ...settings.notifications, [key]: !settings.notifications[key] } });
-    };
-    return (
-        <div className="space-y-6">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Aviseringar</h3>
-            <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                    <span className="text-gray-900 dark:text-white">E-postnotiser</span>
-                    <input type="checkbox" checked={settings.notifications.email} onChange={() => toggle('email')} className="accent-black dark:accent-white w-5 h-5"/>
-                </div>
-                <div className="flex items-center justify-between">
-                    <span className="text-gray-900 dark:text-white">Push-notiser</span>
-                    <input type="checkbox" checked={settings.notifications.push} onChange={() => toggle('push')} className="accent-black dark:accent-white w-5 h-5"/>
-                </div>
-                <div className="flex items-center justify-between">
-                    <span className="text-gray-900 dark:text-white">Marknadsföring</span>
-                    <input type="checkbox" checked={settings.notifications.marketing} onChange={() => toggle('marketing')} className="accent-black dark:accent-white w-5 h-5"/>
-                </div>
-            </div>
-        </div>
-    );
-};
-
-const IntelligenceSection = ({ memories, onDelete }: { memories: AIMemory[], onDelete: (id: string) => void }) => (
-    <div className="space-y-6">
-        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Ace Intelligence (Minne)</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Här lagras viktig kontext som AI:n använder för att hjälpa dig.</p>
-        <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar">
-            {memories.map(m => (
-                <div key={m.id} className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg flex justify-between items-center text-sm border border-gray-100 dark:border-gray-700">
-                    <span className="text-gray-700 dark:text-gray-200">{m.content}</span>
-                    <button onClick={() => onDelete(m.id)} className="text-red-500 hover:text-red-700 p-2"><Trash2 size={14} /></button>
-                </div>
-            ))}
-            {memories.length === 0 && <p className="text-gray-400 italic">Inget minne sparat än.</p>}
-        </div>
-    </div>
-);
-
-const SecuritySection = ({ user, settings, onUpdate }: { user: User, settings: UserSettings, onUpdate: (s: UserSettings) => void }) => {
-    const toggle = (key: keyof UserSettings['privacy']) => {
-        onUpdate({ ...settings, privacy: { ...settings.privacy, [key]: !settings.privacy[key] } });
-    };
-    return (
-        <div className="space-y-6">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white">Säkerhet & Sekretess</h3>
-            <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                    <span className="text-gray-900 dark:text-white">Offentlig Profil</span>
-                    <input type="checkbox" checked={settings.privacy.publicProfile} onChange={() => toggle('publicProfile')} className="accent-black dark:accent-white w-5 h-5" />
-                </div>
-                <div className="flex items-center justify-between">
-                    <span className="text-gray-900 dark:text-white">Dela anonymiserad data för förbättring</span>
-                    <input type="checkbox" checked={settings.privacy.dataSharing} onChange={() => toggle('dataSharing')} className="accent-black dark:accent-white w-5 h-5" />
-                </div>
-            </div>
-            <div className="pt-6 border-t border-gray-100 dark:border-gray-800">
-                <button className="text-red-500 text-sm font-bold flex items-center gap-2 hover:underline"><LogOut size={16}/> Radera konto</button>
-            </div>
-        </div>
-    );
-};
-
-const BillingSection = ({ user }: { user: User }) => (
-    <div className="space-y-6">
-        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Plan & Fakturering</h3>
-        <div className="p-4 bg-gray-100 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <p className="text-sm font-bold uppercase tracking-widest text-gray-500 mb-1">Nuvarande Plan</p>
-            <p className="text-xl font-bold text-gray-900 dark:text-white">{user.plan === 'pro' ? 'Aceverse Pro' : user.plan === 'enterprise' ? 'Enterprise' : 'Free Tier'}</p>
-        </div>
-        <button className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-sm font-bold hover:opacity-80 transition-opacity">Uppgradera</button>
-    </div>
-);
-
-const ReportSection = ({ user }: { user: User }) => (
-    <div className="space-y-6">
-        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Bolagsrapport</h3>
-        <p className="text-sm text-gray-500 dark:text-gray-400">Generera en sammanställning av ditt UF-år.</p>
-        <button className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-sm font-bold flex items-center gap-2 hover:opacity-80 transition-opacity"><Download size={16}/> Ladda ner PDF</button>
-    </div>
-);
 
 export default Settings;

@@ -13,12 +13,30 @@ import DeleteConfirmModal from './DeleteConfirmModal';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 export const UF_KNOWLEDGE_BASE = `
-# 🔒 UF-läraren - PREMIUM RÅDGIVARE & KVALITETSGRANSKARE
-Du är "UF-läraren", en AI-assistent för Ung Företagsamhet. 
-Din uppgift är att coacha unga entreprenörer genom deras UF-år.
-Var professionell, uppmuntrande men realistisk.
-Följ strikta kvalitetskrav: koncis, inga hashtags, minimalt med emojis.
-Använd svenska i ditt svar.
+# 🔒 SYSTEM INSTRUKTION: UF-LÄRAREN (GDPR HARDENED MODE)
+
+## IDENTITET & SYFTE
+Du är en strikt, professionell affärsrådgivare för gymnasieelever. Du är INTE en vän, terapeut eller social chattbot.
+Ditt enda mål är att hjälpa eleven med deras UF-företag (Ung Företagsamhet).
+
+## 🚫 ABSOLUTA FÖRBUD (NON-NEGOTIABLE)
+1. **INGET SMÅPRAT:** Du får ALDRIG fråga "Hur mår du?", "Hur är läget?" eller inleda sociala fraser. Gå rakt på sak.
+2. **INGA PERSONUPPGIFTER (GDPR):** Om eleven nämner namn på tredje part, personnummer, hälsa, politisk åsikt eller etnicitet MÅSTE du omedelbart svara: 
+   "STOPP. Av integritetsskäl får vi inte diskutera personuppgifter eller känslig data här. Vänligen ta bort den informationen och ställ frågan generellt."
+3. **INGEN EMOTIONELL COACHING:** Om eleven uttrycker stress/ångest, hänvisa strikt till skolans kurator. Du hanterar endast affärsfrågor.
+
+## KOMMUNIKATIONSSTIL
+- **Ton:** Formell, uppmuntrande men distanserad, koncis.
+- **Språk:** Alltid Svenska.
+- **Format:** Använd punktlistor och fetstil för tydlighet. Inga långa textväggar.
+
+## PEDAGOGISK METOD
+- Ge inte svaret direkt ("Här är din affärsplan").
+- Ställ motfrågor som får eleven att tänka ("Vilken målgrupp har störst betalningsvilja?").
+- Hänvisa alltid till UF-årets faser (Affärsidé -> Planering -> Sälj -> Avveckling).
+
+## KONTEXTHATERING
+Du har tillgång till elevens tidigare arbete via "Ace Cortex". Använd det för att ge specifik feedback på deras affärsidé, men lagra aldrig ny personlig information i din kontext.
 `;
 
 interface AdvisorProps {
@@ -139,12 +157,12 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const chat = ai.chats.create({
                 model: 'gemini-3-pro-preview',
-                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.5 },
+                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.3 }, // Low temp for stricter adherence
                 history: [{ role: 'user', parts: [{ text: promptText }] }]
             });
 
             const result = await chat.sendMessage({ message: promptText });
-            const aiText = result.text || "Jag hjälper dig gärna planera. Vad är första steget?";
+            const aiText = result.text || "Jag uppfattade frågan. Hur vill du gå vidare?";
             
             // Add AI response (triggers Realtime)
             await db.addMessage(user.id, { role: 'ai', text: aiText, session_id: newS.id });
@@ -192,7 +210,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                 setMessages([{
                     id: 'init-' + sid,
                     role: 'ai',
-                    text: `Hej ${user.firstName}! Jag är redo att hjälpa dig ${viewScope === 'workspace' ? 'och teamet' : ''}. Vad funderar du på idag?`,
+                    text: `Systemstatus: GDPR-säkrat läge aktiverat. Jag är redo att granska ditt UF-arbete. Vad är dagens fokus?`,
                     timestamp: Date.now(),
                     session_id: sid,
                     user_id: user.id,
@@ -304,7 +322,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const chat = ai.chats.create({
                 model: 'gemini-3-pro-preview',
-                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.5 },
+                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.3 }, // Low temperature for strictness
                 history: messages.concat(userMsg).slice(-10).map(m => ({ 
                     role: m.role === 'user' ? 'user' : 'model', 
                     parts: [{ text: m.text }] 
@@ -312,15 +330,16 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             });
 
             const result = await chat.sendMessage({ message: text });
-            const aiMsg = await db.addMessage(user.id, { role: 'ai', text: result.text || "Inget svar.", session_id: activeId! });
+            const aiText = result.text || "Inget svar.";
             
             // Don't add AI message manually to state, let Realtime handle it (or handle duplicate logic)
             // But for snappiness we add it, Realtime useEffect deduplicates by ID.
+            const aiMsg = await db.addMessage(user.id, { role: 'ai', text: aiText, session_id: activeId! });
             setMessages(prev => [...prev, aiMsg]);
 
         } catch (error: any) {
             console.error(error);
-            setMessages(prev => [...prev, { id: 'err', role: 'ai', text: "Ett fel uppstod.", timestamp: Date.now(), session_id: activeId!, user_id: user.id, created_at: '' }]);
+            setMessages(prev => [...prev, { id: 'err', role: 'ai', text: "Ett fel uppstod vid kontakt med AI-modellen.", timestamp: Date.now(), session_id: activeId!, user_id: user.id, created_at: '' }]);
         } finally { setIsLoading(false); }
     };
 
@@ -462,7 +481,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                         {isLoading && (
                             <div className="flex gap-6 animate-pulse">
                                 <div className="w-12 h-12 rounded-[1.2rem] bg-black dark:bg-white flex items-center justify-center shadow-xl"><Zap size={22} className="text-white dark:text-black" /></div>
-                                <div className="p-8 rounded-[2rem] bg-gray-100 dark:bg-gray-800 w-full max-w-md border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-[0.4em] italic flex items-center gap-4"><Loader2 size={16} className="animate-spin" /> UF-läraren tänker...</div>
+                                <div className="p-8 rounded-[2rem] bg-gray-100 dark:bg-gray-800 w-full max-w-md border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-[0.4em] italic flex items-center gap-4"><Loader2 size={16} className="animate-spin" /> UF-läraren granskar...</div>
                             </div>
                         )}
                         <div ref={scrollRef} />
