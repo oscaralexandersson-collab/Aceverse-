@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Notification, Invoice, UserSettings } from '../../types';
 import { db } from '../../services/db';
@@ -128,6 +127,7 @@ const ProfileSection = ({ user, language, setLanguage }: { user: User, language:
     const [lastName, setLastName] = useState(user.lastName);
     const [company, setCompany] = useState(user.company || '');
     const [bio, setBio] = useState(user.bio || '');
+    const [email, setEmail] = useState(user.email);
     
     // UI States
     const [msg, setMsg] = useState('');
@@ -140,8 +140,16 @@ const ProfileSection = ({ user, language, setLanguage }: { user: User, language:
     
     const handleSave = async () => {
         setIsSaving(true);
+        setMsg('');
         try {
             await db.updateProfile(user.id, { firstName, lastName, company, bio });
+            
+            // Check if email changed
+            if (email !== user.email) {
+                await db.updateEmail(email);
+                alert(`En bekräftelselänk har skickats till ${email}. Klicka på den för att slutföra bytet.`);
+            }
+
             setMsg('Profil uppdaterad.');
             setTimeout(() => setMsg(''), 3000);
             
@@ -149,8 +157,8 @@ const ProfileSection = ({ user, language, setLanguage }: { user: User, language:
             if (firstName !== user.firstName || lastName !== user.lastName) {
                 setTimeout(() => window.location.reload(), 500);
             }
-        } catch (error) {
-            setMsg('Fel vid uppdatering.');
+        } catch (error: any) {
+            setMsg(`Fel: ${error.message || 'Kunde inte uppdatera'}`);
         } finally {
             setIsSaving(false);
         }
@@ -270,8 +278,8 @@ const ProfileSection = ({ user, language, setLanguage }: { user: User, language:
                 </div>
 
                 <div>
-                    <label className={labelClasses}>E-post</label>
-                    <input type="email" value={user.email} disabled className={`${inputClasses} opacity-60 cursor-not-allowed bg-gray-100 dark:bg-gray-800/50`} />
+                    <label className={labelClasses}>E-post (Kräver verifiering vid byte)</label>
+                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputClasses} />
                 </div>
 
                 <div>

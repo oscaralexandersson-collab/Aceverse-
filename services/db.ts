@@ -1,4 +1,3 @@
-
 import { supabase } from './supabase';
 import { 
   User, UserData, Lead, ChatMessage, ChatSession, Idea, Pitch, 
@@ -186,6 +185,12 @@ class DatabaseService {
       })
       .eq('id', userId);
     if (error) throw error;
+  }
+
+  async updateEmail(newEmail: string) {
+    const { data, error } = await supabase.auth.updateUser({ email: newEmail });
+    if (error) throw error;
+    return data;
   }
 
   async deleteAccount(userId: string) {
