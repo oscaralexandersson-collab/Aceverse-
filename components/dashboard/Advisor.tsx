@@ -13,31 +13,91 @@ import DeleteConfirmModal from './DeleteConfirmModal';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
 
 export const UF_KNOWLEDGE_BASE = `
-# 🔒 SYSTEM INSTRUKTION: UF-LÄRAREN (GDPR HARDENED MODE)
+# 🔒 SYSTEM PROMPT: UF-LÄRAREN (GDPR & COMPLIANCE MODE)
 
-## IDENTITET & SYFTE
-Du är en strikt, professionell affärsrådgivare för gymnasieelever. Du är INTE en vän, terapeut eller social chattbot.
-Ditt enda mål är att hjälpa eleven med deras UF-företag (Ung Företagsamhet).
+## ⚖️ JURIDISK GRUND & COMPLIANCE (GDPR)
+Du är "UF-läraren", en AI-assistent som agerar under **Dataskyddsförordningen (GDPR)**. Du hjälper gymnasieelever med Ung Företagsamhet.
 
-## 🚫 ABSOLUTA FÖRBUD (NON-NEGOTIABLE)
-1. **INGET SMÅPRAT:** Du får ALDRIG fråga "Hur mår du?", "Hur är läget?" eller inleda sociala fraser. Gå rakt på sak.
-2. **INGA PERSONUPPGIFTER (GDPR):** Om eleven nämner namn på tredje part, personnummer, hälsa, politisk åsikt eller etnicitet MÅSTE du omedelbart svara: 
-   "STOPP. Av integritetsskäl får vi inte diskutera personuppgifter eller känslig data här. Vänligen ta bort den informationen och ställ frågan generellt."
-3. **INGEN EMOTIONELL COACHING:** Om eleven uttrycker stress/ångest, hänvisa strikt till skolans kurator. Du hanterar endast affärsfrågor.
+### ARTIKEL 5 - GRUNDLÄGGANDE PRINCIPER
+1. **Laglighet:** Din rådgivning baseras på utbildningsändamål (Art. 6.1(e)).
+2. **Ändamålsbegränsning:** Data används ENDAST för pedagogiskt stöd. Aldrig för profilering.
+3. **Dataminimering:** Du samlar INTE in onödiga personuppgifter. Du känner inte till elevens riktiga namn om de inte säger det, och du ska genast glömma det.
 
-## KOMMUNIKATIONSSTIL
-- **Ton:** Formell, uppmuntrande men distanserad, koncis.
-- **Språk:** Alltid Svenska.
-- **Format:** Använd punktlistor och fetstil för tydlighet. Inga långa textväggar.
+### 🚫 ARTIKEL 9 - ABSOLUTA FÖRBUD (BRYT ALDRIG DESSA)
+Du får **ALDRIG** fråga om eller lagra information om:
+❌ Ras eller etniskt ursprung ("Var kommer du ifrån?")
+❌ Politiska åsikter
+❌ Religiös eller filosofisk övertygelse
+❌ Hälsa / Sjukdomshistoria ("Hur mår du?" - om det leder till hälsosvar)
+❌ Sexuell läggning
 
-## PEDAGOGISK METOD
-- Ge inte svaret direkt ("Här är din affärsplan").
-- Ställ motfrågor som får eleven att tänka ("Vilken målgrupp har störst betalningsvilja?").
-- Hänvisa alltid till UF-årets faser (Affärsidé -> Planering -> Sälj -> Avveckling).
+⚠️ **OM ANVÄNDAREN DELAR KÄNSLIG DATA:**
+Om en elev skriver: "Jag mår dåligt psykiskt" eller "Min religion förbjuder ränta", måste du svara:
+*"Jag kan tyvärr inte ta emot den typen av personlig information av integritetsskäl. Jag har raderat den delen från min kontext. Låt oss återgå till ditt UF-företag."*
 
-## KONTEXTHATERING
-Du har tillgång till elevens tidigare arbete via "Ace Cortex". Använd det för att ge specifik feedback på deras affärsidé, men lagra aldrig ny personlig information i din kontext.
+### ARTIKEL 22 - AUTOMATISERAT BESLUTSFATTANDE
+❌ Du får **ALDRIG** sätta betyg eller ge omdömen som låter som formella betyg (A-F).
+✅ Du får ge pedagogisk feedback: "Baserat på UF:s kriterier kan din lärare bedöma detta som..."
+
+## 🎓 PEDAGOGISK PROFIL
+- **Ton:** Professionell, uppmuntrande men distanserad. Du är en lärare, inte en "kompis".
+- **Metodik:** Ge inte svaret direkt. Ställ motfrågor. ("Hur tror du målgruppen reagerar på det priset?")
+- **Fokus:** Affärsutveckling, Sälj, Marknadsföring, Ekonomi, Lagar & Regler.
+
+## INSTRUKTIONER FÖR SVAR
+1. Håll svaren korta och strukturerade (punktlistor är bra).
+2. Använd fetstil för nyckelbegrepp.
+3. Om eleven frågar "Spara min data", bekräfta att konversationen sparas krypterat enligt Art. 32.
 `;
+
+// --- MARKDOWN RENDERER COMPONENT ---
+const MarkdownRenderer: React.FC<{ text: string }> = ({ text }) => {
+    // Helper to parse bold text (**bold**)
+    const parseBold = (line: string) => {
+        const parts = line.split(/(\*\*.*?\*\*)/g);
+        return parts.map((part, index) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+                return <strong key={index} className="font-bold text-black dark:text-white">{part.slice(2, -2)}</strong>;
+            }
+            return part;
+        });
+    };
+
+    const lines = text.split('\n');
+    
+    return (
+        <div className="space-y-1.5 text-gray-800 dark:text-gray-200">
+            {lines.map((line, i) => {
+                const trimmed = line.trim();
+                if (!trimmed) return <div key={i} className="h-2" />;
+
+                // Headers
+                if (trimmed.startsWith('### ')) {
+                    return <h4 key={i} className="font-serif-display text-lg font-bold text-gray-900 dark:text-white mt-4 mb-2">{parseBold(trimmed.slice(4))}</h4>;
+                }
+                if (trimmed.startsWith('## ')) {
+                    return <h3 key={i} className="font-serif-display text-xl font-bold text-gray-900 dark:text-white mt-6 mb-3">{parseBold(trimmed.slice(3))}</h3>;
+                }
+                if (trimmed.startsWith('# ')) {
+                    return <h2 key={i} className="font-serif-display text-2xl font-bold text-gray-900 dark:text-white mt-6 mb-4">{parseBold(trimmed.slice(2))}</h2>;
+                }
+
+                // List Items (Fixing the "ugly dots")
+                if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+                    return (
+                        <div key={i} className="flex items-start gap-3 pl-1 mb-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-black/60 dark:bg-white/60 mt-2.5 shrink-0"></div>
+                            <div className="leading-relaxed">{parseBold(trimmed.slice(2))}</div>
+                        </div>
+                    );
+                }
+
+                // Paragraphs
+                return <p key={i} className="leading-relaxed">{parseBold(line)}</p>;
+            })}
+        </div>
+    );
+};
 
 interface AdvisorProps {
     user: User;
@@ -96,10 +156,8 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                 },
                 (payload) => {
                     const newMsg = payload.new as ChatMessage;
-                    // Check if we already have this message (to avoid duplicates from optimistic updates)
                     setMessages((prev) => {
                         if (prev.some(m => m.id === newMsg.id)) return prev;
-                        // Determine if we need to scroll
                         setTimeout(() => scrollRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
                         return [...prev, newMsg];
                     });
@@ -114,11 +172,9 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
 
     useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isLoading]);
 
-    // --- HELPER: Identify Teammates ---
     const getSenderInfo = (msgUserId: string) => {
         if (msgUserId === user.id) return { name: 'Du', isMe: true };
         
-        // Find in workspace members
         const member = members.find(m => m.user_id === msgUserId);
         if (member?.user) {
             return { 
@@ -147,7 +203,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
 
             const newS = await db.createChatSession(user.id, 'Planering: ' + promptText.substring(0, 20) + '...', 'Default', workspaceId, visibility);
             
-            // Add initial user message (triggers Realtime for others)
             await db.addMessage(user.id, { role: 'user', text: promptText, session_id: newS.id });
             
             setSessions(prev => [newS, ...prev]);
@@ -157,17 +212,14 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const chat = ai.chats.create({
                 model: 'gemini-3-pro-preview',
-                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.3 }, // Low temp for stricter adherence
+                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.3 }, 
                 history: [{ role: 'user', parts: [{ text: promptText }] }]
             });
 
             const result = await chat.sendMessage({ message: promptText });
             const aiText = result.text || "Jag uppfattade frågan. Hur vill du gå vidare?";
             
-            // Add AI response (triggers Realtime)
             await db.addMessage(user.id, { role: 'ai', text: aiText, session_id: newS.id });
-            
-            // Re-fetch to ensure sync state is perfect
             loadMessages(newS.id);
 
         } catch (e) {
@@ -199,8 +251,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
 
     const loadMessages = async (sid: string) => {
         try {
-            // Optimistic load from big fetch, but for real-time accuracy we might want a specific fetch.
-            // Using existing pattern for now, Realtime will catch new ones.
             const data = await db.getUserData(user.id);
             const msgs = data.chatHistory
                 .filter(m => m.session_id === sid)
@@ -210,7 +260,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                 setMessages([{
                     id: 'init-' + sid,
                     role: 'ai',
-                    text: `Systemstatus: GDPR-säkrat läge aktiverat. Jag är redo att granska ditt UF-arbete. Vad är dagens fokus?`,
+                    text: `👋 Välkommen till UF-läraren (GDPR-Säkrad).\n\nJag hjälper dig med ditt UF-arbete under strikt sekretess (Art. 32). Inga känsliga personuppgifter får delas här.\n\nVad vill du ha hjälp med idag?`,
                     timestamp: Date.now(),
                     session_id: sid,
                     user_id: user.id,
@@ -264,22 +314,14 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const response = await ai.models.generateContent({
                 model: 'gemini-3-flash-preview',
-                contents: `Du är en expert på att sammanfatta konversationer. 
-                Baserat på följande första meddelande från en elev, skapa en kort, relevant titel (max 4-5 ord) för chatten på svenska.
-                Titeln ska vara beskrivande (t.ex. "Affärsplan hjälp" eller "Marknadsföringstips").
-                Inga citattecken.
-                
-                Meddelande: "${firstUserMessage}"`,
+                contents: `Skapa en titel på max 4 ord för denna konversation. Svara bara med titeln. Text: "${firstUserMessage}"`,
             });
-            
             const newTitle = response.text?.trim();
             if (newTitle) {
                 await db.updateChatSession(user.id, sessionId, newTitle);
                 setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, name: newTitle } : s));
             }
-        } catch (e) {
-            console.warn("Could not auto-generate title", e);
-        }
+        } catch (e) { console.warn("Could not auto-generate title", e); }
     };
 
     const handleSend = async (e: React.FormEvent) => {
@@ -301,9 +343,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                 activeId = newS.id;
                 isNewSession = true;
             } catch (err) { setIsLoading(false); return; }
-        } else {
-            const hasUserHistory = messages.some(m => m.role === 'user' && m.session_id === activeId);
-            if (!hasUserHistory) isNewSession = true;
         }
 
         const text = input;
@@ -311,7 +350,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
         setIsLoading(true);
 
         try {
-            // Optimistic update - will be deduplicated by subscription
             const userMsg = await db.addMessage(user.id, { role: 'user', text, session_id: activeId! });
             setMessages(prev => [...prev, userMsg]);
 
@@ -322,7 +360,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             const chat = ai.chats.create({
                 model: 'gemini-3-pro-preview',
-                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.3 }, // Low temperature for strictness
+                config: { systemInstruction: UF_KNOWLEDGE_BASE, temperature: 0.3 },
                 history: messages.concat(userMsg).slice(-10).map(m => ({ 
                     role: m.role === 'user' ? 'user' : 'model', 
                     parts: [{ text: m.text }] 
@@ -332,8 +370,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             const result = await chat.sendMessage({ message: text });
             const aiText = result.text || "Inget svar.";
             
-            // Don't add AI message manually to state, let Realtime handle it (or handle duplicate logic)
-            // But for snappiness we add it, Realtime useEffect deduplicates by ID.
             const aiMsg = await db.addMessage(user.id, { role: 'ai', text: aiText, session_id: activeId! });
             setMessages(prev => [...prev, aiMsg]);
 
@@ -360,8 +396,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             <div className={`bg-gray-50/50 dark:bg-black/40 border-r border-gray-200 dark:border-gray-800 transition-all duration-500 flex flex-col ${isSidebarOpen ? 'w-80' : 'w-0 overflow-hidden opacity-0'}`}>
                 <div className="p-6 border-b border-gray-100 dark:border-gray-800">
                     <h2 className="font-serif-display text-xl font-bold uppercase italic tracking-tight mb-4">UF-läraren</h2>
-                    
-                    {/* Status Badge */}
                     <div className="flex items-center gap-2 mb-4">
                         <div className={`w-2 h-2 rounded-full ${viewScope === 'workspace' ? 'bg-blue-500' : 'bg-gray-400'}`}></div>
                         <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
@@ -415,11 +449,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                             )}
                         </div>
                     ))}
-                    {sessions.length === 0 && (
-                        <div className="text-center py-10 opacity-40 text-xs font-bold uppercase tracking-widest">
-                            Inga chattar här än.
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -429,7 +458,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                         {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
                     </button>
                     <div className="flex items-center gap-3 px-5 py-2 bg-gray-50 dark:bg-gray-800 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] italic">
-                        <ShieldCheck size={14} className="text-green-500" /> {viewScope === 'workspace' ? 'Konferensrum (Delat)' : 'Privat Rum'}
+                        <ShieldCheck size={14} className="text-green-500" /> {viewScope === 'workspace' ? 'Konferensrum (Delat)' : 'Privat Rum (GDPR)'}
                     </div>
                 </div>
 
@@ -446,8 +475,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                             
                             return (
                                 <div key={msg.id} className={`flex gap-6 ${sender.isMe ? 'flex-row-reverse' : ''} animate-slideUp`}>
-                                    
-                                    {/* Avatar */}
                                     <div className={`w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg border-2 shrink-0 ${
                                         msg.role === 'ai' 
                                             ? 'bg-black text-white border-white/10 dark:bg-white dark:text-black' 
@@ -459,20 +486,21 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                                     </div>
 
                                     <div className={`max-w-[85%] flex flex-col ${sender.isMe ? 'items-end' : 'items-start'}`}>
-                                        {/* Name Label for Teammates */}
                                         {!sender.isMe && msg.role !== 'ai' && (
                                             <span className="text-[10px] font-bold text-gray-400 mb-1 ml-2">{sender.name}</span>
                                         )}
-
-                                        {/* Message Bubble */}
-                                        <div className={`p-8 rounded-[2rem] shadow-xl text-[15px] leading-[1.8] font-medium tracking-tight whitespace-pre-wrap ${
+                                        <div className={`p-8 rounded-[2rem] shadow-xl text-[15px] font-medium tracking-tight ${
                                             msg.role === 'ai' 
-                                                ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-none italic' 
+                                                ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-none' 
                                                 : sender.isMe
                                                     ? 'bg-black text-white rounded-tr-none font-bold'
                                                     : 'bg-blue-50 dark:bg-blue-950/40 text-gray-900 dark:text-white rounded-tl-none border border-blue-100 dark:border-blue-900'
                                         }`}>
-                                            {msg.text}
+                                            {msg.role === 'ai' ? (
+                                                <MarkdownRenderer text={msg.text} />
+                                            ) : (
+                                                msg.text
+                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -481,7 +509,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                         {isLoading && (
                             <div className="flex gap-6 animate-pulse">
                                 <div className="w-12 h-12 rounded-[1.2rem] bg-black dark:bg-white flex items-center justify-center shadow-xl"><Zap size={22} className="text-white dark:text-black" /></div>
-                                <div className="p-8 rounded-[2rem] bg-gray-100 dark:bg-gray-800 w-full max-w-md border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-[0.4em] italic flex items-center gap-4"><Loader2 size={16} className="animate-spin" /> UF-läraren granskar...</div>
+                                <div className="p-8 rounded-[2rem] bg-gray-100 dark:bg-gray-800 w-full max-w-md border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-[0.4em] italic flex items-center gap-4"><Loader2 size={16} className="animate-spin" /> UF-läraren tänker...</div>
                             </div>
                         )}
                         <div ref={scrollRef} />

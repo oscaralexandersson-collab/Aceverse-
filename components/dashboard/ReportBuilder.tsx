@@ -365,7 +365,7 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ user }) => {
                     {sections.map((sec) => (
                         <div 
                             key={sec.id} 
-                            onClick={() => setDetailSection(sec.id)}
+                            onClick={() => setDetailSection(sec.id as ReportSectionType)}
                             className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-[2rem] p-6 cursor-pointer hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden"
                         >
                             <div className="flex justify-between items-start mb-4">

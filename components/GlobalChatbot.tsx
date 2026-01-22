@@ -12,6 +12,51 @@ interface GlobalChatbotProps {
     user: User;
 }
 
+// --- DUPLICATED MARKDOWN RENDERER FOR SELF-CONTAINMENT ---
+const MarkdownRenderer: React.FC<{ text: string }> = ({ text }) => {
+    const parseBold = (line: string) => {
+        const parts = line.split(/(\*\*.*?\*\*)/g);
+        return parts.map((part, index) => {
+            if (part.startsWith('**') && part.endsWith('**')) {
+                return <strong key={index} className="font-bold text-black dark:text-white">{part.slice(2, -2)}</strong>;
+            }
+            return part;
+        });
+    };
+
+    const lines = text.split('\n');
+    
+    return (
+        <div className="space-y-1 text-gray-800 dark:text-gray-200">
+            {lines.map((line, i) => {
+                const trimmed = line.trim();
+                if (!trimmed) return <div key={i} className="h-1.5" />;
+
+                if (trimmed.startsWith('### ')) {
+                    return <h4 key={i} className="font-serif-display text-sm font-bold text-gray-900 dark:text-white mt-3 mb-1">{parseBold(trimmed.slice(4))}</h4>;
+                }
+                if (trimmed.startsWith('## ')) {
+                    return <h3 key={i} className="font-serif-display text-base font-bold text-gray-900 dark:text-white mt-4 mb-2">{parseBold(trimmed.slice(3))}</h3>;
+                }
+                if (trimmed.startsWith('# ')) {
+                    return <h2 key={i} className="font-serif-display text-lg font-bold text-gray-900 dark:text-white mt-4 mb-2">{parseBold(trimmed.slice(2))}</h2>;
+                }
+
+                if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+                    return (
+                        <div key={i} className="flex items-start gap-2 pl-1 mb-0.5">
+                            <div className="w-1 h-1 rounded-full bg-black/60 dark:bg-white/60 mt-2 shrink-0"></div>
+                            <div className="leading-relaxed text-xs sm:text-sm">{parseBold(trimmed.slice(2))}</div>
+                        </div>
+                    );
+                }
+
+                return <p key={i} className="leading-relaxed text-xs sm:text-sm">{parseBold(line)}</p>;
+            })}
+        </div>
+    );
+};
+
 const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
     const { activeWorkspace, viewScope } = useWorkspace();
     const [isOpen, setIsOpen] = useState(false);
@@ -59,20 +104,6 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
 
     useEffect(() => { if (isOpen) { connectToSession(); setShowPeek(false); } }, [isOpen, user.id]);
     useEffect(() => { if (messages.length > 0) bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, isTyping]);
-
-    const formatResponse = (text: string) => {
-        if (!text) return '';
-        let html = text.replace(/\*\*(.*?)\*\*/g, '<strong class="font-bold text-black dark:text-white">$1</strong>');
-        html = html.replace(/^# (.*$)/gim, '<h3 class="font-serif-display text-lg mb-2 mt-4 text-black dark:text-white">$1</h3>');
-        html = html.replace(/^## (.*$)/gim, '<h4 class="font-bold text-sm mb-1 mt-3 text-black dark:text-white">$1</h4>');
-        html = html.replace(/^\- (.*$)/gim, '<li class="ml-4 mb-1 flex items-start gap-2"><span class="w-1 h-1 rounded-full bg-black dark:bg-white mt-2 shrink-0"></span><span>$1</span></li>');
-        return html.split('\n').map(line => {
-            const trimmed = line.trim();
-            if (!trimmed) return '<div class="h-2"></div>';
-            if (trimmed.startsWith('<h') || trimmed.startsWith('<li')) return line;
-            return `<p class="mb-2 leading-relaxed">${line}</p>`;
-        }).join('');
-    };
 
     const handleSend = async (e?: React.FormEvent) => {
         e?.preventDefault();
@@ -239,8 +270,12 @@ const GlobalChatbot: React.FC<GlobalChatbotProps> = ({ user }) => {
                     <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-gray-50/50 dark:bg-gray-950/30">
                         {messages.map((msg) => (
                             <div key={msg.id} className={`flex gap-3 max-w-[95%] ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}>
-                                <div className={`p-4 rounded-3xl text-sm leading-relaxed shadow-sm ${msg.role === 'user' ? 'bg-black text-white rounded-tr-none' : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-none'}`}>
-                                    <div className="prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: formatResponse(msg.text) }} />
+                                <div className={`p-4 rounded-3xl shadow-sm ${msg.role === 'user' ? 'bg-black text-white rounded-tr-none' : 'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-none'}`}>
+                                    {msg.role === 'ai' ? (
+                                        <MarkdownRenderer text={msg.text} />
+                                    ) : (
+                                        <p className="text-sm leading-relaxed font-medium">{msg.text}</p>
+                                    )}
                                 </div>
                             </div>
                         ))}

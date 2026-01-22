@@ -313,10 +313,34 @@ class DatabaseService {
       await supabase.from('pitch_projects').delete().eq('id', id);
   }
 
-  // --- SETTINGS ---
+  // --- SETTINGS & GDPR ---
   async saveSettings(userId: string, settings: UserSettings) {
-      // Assuming settings is a jsonb column in profiles or a separate table
       await supabase.from('profiles').update({ settings }).eq('id', userId);
+  }
+
+  // GDPR: Right to be Forgotten (Article 17)
+  async wipeUserData(userId: string) {
+      // In Supabase, cascading deletes on the 'profiles' or 'auth.users' table usually handle this.
+      // But to be explicit and ensure all business logic data is gone:
+      
+      const tables = [
+          'contacts', 'deals', 'sales_events', 'ideas', 'pitch_projects',
+          'chat_sessions', 'chat_messages', 'brand_dna', 'marketing_campaigns',
+          'full_report_projects', 'ai_memories', 'uf_events', 'sustainability_logs',
+          'notifications'
+      ];
+
+      for (const table of tables) {
+          await supabase.from(table).delete().eq('user_id', userId);
+      }
+      
+      // Finally, delete profile (Auth deletion usually requires admin API, but profile deletion is user-allowed via RLS usually)
+      // Note: Deleting auth user via client SDK is not directly possible for security.
+      // We delete the profile which triggers cascading deletes for anything else linked.
+      // The auth user remains but with no data, effectively anonymized until next login (which creates new empty profile).
+      // Ideally, call a backend Edge Function for full admin deletion.
+      // Here we simulate "Wipe Data" content-wise.
+      await supabase.from('profiles').delete().eq('id', userId);
   }
 
   async getRecentMemories(userId: string, workspaceId?: string | null): Promise<string> {
@@ -339,7 +363,6 @@ class DatabaseService {
       await supabase.from('profiles').update({
           company_name: data.company,
           onboarding_completed: true,
-          // Store other onboarding fields if needed
       }).eq('id', userId);
       return this.getCurrentUser();
   }
@@ -361,7 +384,6 @@ class DatabaseService {
   async createWorkspace(userId: string, name: string): Promise<Workspace> {
       const { data: ws, error } = await supabase.from('workspaces').insert({ name, owner_id: userId }).select().single();
       if (error) throw error;
-      // Add owner as admin
       await supabase.from('workspace_members').insert({ workspace_id: ws.id, user_id: userId, role: 'owner' });
       return ws as Workspace;
   }
@@ -369,12 +391,10 @@ class DatabaseService {
       await supabase.from('workspaces').delete().eq('id', workspaceId);
   }
   async inviteMemberByEmail(workspaceId: string, email: string) {
-      // In a real app this sends an invite. Here we just add if user exists or mock it
       const { data: user } = await supabase.from('profiles').select('id').eq('email', email).single();
       if (user) {
           await supabase.from('workspace_members').insert({ workspace_id: workspaceId, user_id: user.id, role: 'member' });
       } else {
-          // Store invite pending
           await supabase.from('workspace_invites').insert({ workspace_id: workspaceId, email, role: 'member' });
       }
   }
@@ -417,7 +437,6 @@ class DatabaseService {
         .order('created_at', { ascending: true })
         .limit(100);
         
-      // Map join result
       return (data || []).map((msg: any) => ({
           ...msg,
           user: msg.user ? {

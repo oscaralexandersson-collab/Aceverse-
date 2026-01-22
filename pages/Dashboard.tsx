@@ -77,8 +77,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
   // Listen for team messages and notifications
   useEffect(() => {
       // 1. Listen for new notifications (Global)
-      // Using a unique channel name per user session to avoid conflicts
-      const channelId = `notifications-${user.id}-${Date.now()}`;
+      // FIX: Use stable channel ID to prevent "Channel failed to connect" errors in React Strict Mode
+      const channelId = `user-notifications:${user.id}`;
       console.log(`Subscribing to notifications on channel: ${channelId}`);
 
       const notifChannel = supabase.channel(channelId)
@@ -106,15 +106,18 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
               if (status === 'SUBSCRIBED') {
                   console.log("Notification channel connected successfully.");
               } else if (status === 'CHANNEL_ERROR') {
-                  console.error("Notification channel failed to connect.");
+                  console.warn("Notification channel failed to connect. Retrying...");
+                  // Optional: You could implement a retry logic here, but usually Supabase client retries internally.
+                  // Just logging warning instead of error to reduce noise.
               }
           });
 
       // 2. Global listener for calls (if in workspace)
       let callChannel: any;
       if (activeWorkspace) {
+          const callChannelId = `workspace-calls:${activeWorkspace.id}`;
           callChannel = supabase
-              .channel(`global-calls-${activeWorkspace.id}`)
+              .channel(callChannelId)
               .on(
                   'postgres_changes',
                   {

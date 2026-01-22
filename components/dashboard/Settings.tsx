@@ -1,13 +1,13 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, UserSettings } from '../../types';
 import { db } from '../../services/db';
 import { supabase } from '../../services/supabase';
-// import { googleService } from '../../services/googleIntegration'; // Unused in this snippet but maybe needed for integrations tab
 import { useLanguage } from '../../contexts/LanguageContext';
 import { 
     User as UserIcon, Bell, Shield, CreditCard,
     Loader2, Link, Save, Download, Trash2, Mail, Lock, 
-    Globe, Layout, Smartphone
+    Globe, Layout, Smartphone, Megaphone, FileText, CheckCircle2, Eye, X
 } from 'lucide-react';
 
 interface SettingsProps {
@@ -21,6 +21,8 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
     const [activeTab, setActiveTab] = useState<SettingsTab>('general');
     const [isLoading, setIsLoading] = useState(false);
     const [message, setMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
+    const [showDataModal, setShowDataModal] = useState(false);
+    const [userDataJSON, setUserDataJSON] = useState<string>('');
 
     // Form State
     const [formData, setFormData] = useState({
@@ -36,7 +38,6 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
         privacy: { publicProfile: false, dataSharing: false }
     });
 
-    // Load fresh data on mount to fix "wrong email" issues
     useEffect(() => {
         const loadFreshData = async () => {
             const currentUser = await db.getCurrentUser();
@@ -65,19 +66,16 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
         setIsLoading(true);
         setMessage(null);
         try {
-            // 1. Update Profile Data
             const { error: profileError } = await supabase.from('profiles').update({
                 first_name: formData.firstName,
                 last_name: formData.lastName,
                 company_name: formData.company,
                 bio: formData.bio,
-                // We update the email column in profiles for display, but Auth handles the real change
                 email: formData.email 
             }).eq('id', user.id);
 
             if (profileError) throw profileError;
 
-            // 2. Update Auth Email if changed (Requires re-confirmation usually)
             if (formData.email !== user.email) {
                 const { error: authError } = await supabase.auth.updateUser({ email: formData.email });
                 if (authError) throw authError;
@@ -99,6 +97,36 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
         await db.saveSettings(user.id, newSettings);
     };
 
+    const handleViewData = async () => {
+        setIsLoading(true);
+        try {
+            const allData = await db.getUserData(user.id);
+            // Create a clean readable format for Art. 15 compliance
+            const report = {
+                Registrerad: {
+                    Namn: `${user.firstName} ${user.lastName}`,
+                    Email: user.email,
+                    ID: user.id
+                },
+                "Lagrad Data": {
+                    "Antal Chattar": allData.sessions.length,
+                    "Antal Kontakter": allData.contacts.length,
+                    "Antal Affärer": allData.deals.length,
+                    "Skapade Idéer": allData.ideas.length,
+                    "Pitchar": allData.pitchProjects.length
+                },
+                "Rättslig Grund": "Art. 6.1(b) Fullgörande av avtal (Tjänsten)",
+                "Lagringsperiod": "Tills konto raderas eller inaktivitet i 24 månader."
+            };
+            setUserDataJSON(JSON.stringify(report, null, 2));
+            setShowDataModal(true);
+        } catch(e) {
+            alert("Kunde inte hämta data.");
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const handleExportData = async () => {
         setIsLoading(true);
         setMessage(null);
@@ -107,11 +135,11 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
             const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(allData, null, 2));
             const downloadAnchorNode = document.createElement('a');
             downloadAnchorNode.setAttribute("href", dataStr);
-            downloadAnchorNode.setAttribute("download", `aceverse_export_${user.id}.json`);
+            downloadAnchorNode.setAttribute("download", `aceverse_gdpr_export_${user.id}.json`);
             document.body.appendChild(downloadAnchorNode);
             downloadAnchorNode.click();
             downloadAnchorNode.remove();
-            setMessage({ type: 'success', text: 'Din data har exporterats och nedladdningen har startat.' });
+            setMessage({ type: 'success', text: 'Din data har exporterats enligt Art. 20 (Dataportabilitet).' });
         } catch (e: any) {
             setMessage({ type: 'error', text: `Export misslyckades: ${e.message}` });
         } finally {
@@ -119,9 +147,27 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
         }
     };
 
+    const handleDeleteAccount = async () => {
+        const confirmText = "RADERA ALLT";
+        const input = prompt(`VARNING: Detta raderar all din data permanent (Art. 17). Detta kan inte ångras.\n\nSkriv "${confirmText}" för att bekräfta:`);
+        if (input === confirmText) {
+            setIsLoading(true);
+            try {
+                // Wipe user data
+                await db.wipeUserData(user.id);
+                // Sign out
+                await supabase.auth.signOut();
+                window.location.reload();
+            } catch(e) {
+                alert("Kunde inte radera kontot. Kontakta support.");
+                setIsLoading(false);
+            }
+        }
+    };
+
     const menuItems = [
         { id: 'general', label: t('settings.profile'), icon: UserIcon },
-        { id: 'security', label: t('settings.security'), icon: Shield },
+        { id: 'security', label: 'GDPR & Säkerhet', icon: Shield },
         { id: 'notifications', label: t('settings.notifications'), icon: Bell },
         { id: 'integrations', label: 'Integrationer', icon: Link },
         { id: 'billing', label: t('settings.billing'), icon: CreditCard },
@@ -130,7 +176,22 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
     return (
         <div className="max-w-6xl mx-auto h-full flex flex-col md:flex-row gap-8 animate-fadeIn pb-20">
             
-            {/* --- SIDEBAR MENU --- */}
+            {showDataModal && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-fadeIn">
+                    <div className="bg-white dark:bg-gray-900 w-full max-w-2xl rounded-3xl p-8 shadow-2xl relative overflow-hidden flex flex-col max-h-[80vh]">
+                        <button onClick={() => setShowDataModal(false)} className="absolute top-6 right-6 p-2 bg-gray-100 dark:bg-gray-800 rounded-full hover:bg-gray-200 transition-colors"><X size={20}/></button>
+                        <h2 className="font-serif-display text-2xl mb-2 text-gray-900 dark:text-white">Registerutdrag (Art. 15)</h2>
+                        <p className="text-sm text-gray-500 mb-6">Här är en sammanställning av personuppgifter vi behandlar om dig.</p>
+                        <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-950 p-6 rounded-xl font-mono text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap border border-gray-200 dark:border-gray-800 custom-scrollbar">
+                            {userDataJSON}
+                        </div>
+                        <div className="mt-6 flex justify-end">
+                            <button onClick={() => setShowDataModal(false)} className="bg-black dark:bg-white text-white dark:text-black px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-widest">Stäng</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <aside className="w-full md:w-64 flex-shrink-0">
                 <div className="bg-white dark:bg-gray-900 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-gray-800 sticky top-4">
                     <h2 className="text-xs font-bold text-gray-400 uppercase tracking-widest px-4 mb-4 mt-2">Inställningar</h2>
@@ -153,7 +214,6 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
                 </div>
             </aside>
 
-            {/* --- MAIN CONTENT AREA --- */}
             <main className="flex-1 min-w-0">
                 
                 {message && (
@@ -283,19 +343,44 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* SECURITY TAB */}
+                {/* SECURITY & GDPR TAB */}
                 {activeTab === 'security' && (
                     <div className="space-y-6">
                         <div className="bg-white dark:bg-gray-900 p-8 rounded-[2rem] border border-gray-100 dark:border-gray-800 shadow-sm">
-                            <h2 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-8">Säkerhet & Data</h2>
+                            <h2 className="font-serif-display text-3xl text-gray-900 dark:text-white mb-2">GDPR & Säkerhet</h2>
+                            <p className="text-sm text-gray-500 mb-8">Vi värnar om din integritet. Här hanterar du dina lagstadgade rättigheter.</p>
                             
                             <div className="space-y-6 mb-12">
+                                {/* Article 15 */}
+                                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center text-blue-500"><Eye size={20} /></div>
+                                        <div>
+                                            <h4 className="font-bold text-gray-900 dark:text-white">Rätten till tillgång (Art. 15)</h4>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Se exakt vilken data vi lagrar om dig.</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleViewData} className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-bold uppercase hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Visa Registerutdrag</button>
+                                </div>
+
+                                {/* Article 20 */}
+                                <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
+                                    <div className="flex items-center gap-4">
+                                        <div className="w-10 h-10 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center text-green-500"><Download size={20} /></div>
+                                        <div>
+                                            <h4 className="font-bold text-gray-900 dark:text-white">Dataportabilitet (Art. 20)</h4>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Ladda ner all din data i maskinläsbart format.</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={handleExportData} className="px-4 py-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-bold uppercase hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">Exportera (JSON)</button>
+                                </div>
+
                                 <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-xl">
                                     <div className="flex items-center gap-4">
                                         <div className="w-10 h-10 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center text-gray-500"><Globe size={20} /></div>
                                         <div>
                                             <h4 className="font-bold text-gray-900 dark:text-white">Publik Profil</h4>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">Gör din profil synlig för andra användare och investerare.</p>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Gör din profil synlig för andra användare.</p>
                                         </div>
                                     </div>
                                     <label className="relative inline-flex items-center cursor-pointer">
@@ -316,8 +401,8 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
                                     <div className="flex items-center gap-4">
                                         <div className="w-10 h-10 bg-white dark:bg-gray-900 rounded-full flex items-center justify-center text-gray-500"><Lock size={20} /></div>
                                         <div>
-                                            <h4 className="font-bold text-gray-900 dark:text-white">Lösenord</h4>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">Byt ditt lösenord via länk.</p>
+                                            <h4 className="font-bold text-gray-900 dark:text-white">Byt Lösenord</h4>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400">Skickar en återställningslänk till din e-post.</p>
                                         </div>
                                     </div>
                                     <button onClick={async () => {
@@ -327,12 +412,12 @@ const Settings: React.FC<SettingsProps> = ({ user }) => {
                                 </div>
                             </div>
 
-                            <h3 className="font-bold text-lg mb-4 text-red-500">Farozon</h3>
+                            <h3 className="font-bold text-lg mb-4 text-red-500">Farozon (Art. 17)</h3>
                             <div className="border border-red-100 dark:border-red-900 bg-red-50 dark:bg-red-900/10 rounded-xl p-6">
-                                <h4 className="font-bold text-red-700 dark:text-red-400 mb-2">Exportera Data</h4>
-                                <p className="text-xs text-red-600 dark:text-red-300 mb-4">Ladda ner all din data (idéer, chattar, CRM) i JSON-format.</p>
-                                <button onClick={handleExportData} className="px-4 py-2 bg-white dark:bg-red-900 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 rounded-lg text-xs font-bold uppercase hover:bg-red-50 dark:hover:bg-red-800 transition-colors flex items-center gap-2">
-                                    <Download size={16} /> Exportera Data
+                                <h4 className="font-bold text-red-700 dark:text-red-400 mb-2">Rätten att bli glömd</h4>
+                                <p className="text-xs text-red-600 dark:text-red-300 mb-4">Detta raderar PERMANENT ditt konto och all tillhörande data (chattar, filer, idéer). Åtgärden kan inte ångras.</p>
+                                <button onClick={handleDeleteAccount} className="px-4 py-2 bg-white dark:bg-red-900 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 rounded-lg text-xs font-bold uppercase hover:bg-red-50 dark:hover:bg-red-800 transition-colors flex items-center gap-2">
+                                    <Trash2 size={16} /> Radera Mitt Konto
                                 </button>
                             </div>
                         </div>
