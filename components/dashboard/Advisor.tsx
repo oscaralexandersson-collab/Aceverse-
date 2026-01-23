@@ -19,7 +19,7 @@ export const UF_KNOWLEDGE_BASE = `
 Du är den personliga AI-rådgivaren för ett UF-företag. Du har tillgång till realtidsdata från deras CRM, marknadsföring och idébank. 
 Ditt uppdrag är att ge proaktiv, analytisk och extremt personlig feedback baserat på deras exakta situation.
 
-## REGLER FÖR DATA-ANVÄNDNING
+## REGLER FOR DATA-ANVÄNDNING
 1. **Referera till handlingar:** Om de precis vunnit en affär, gratulera dem. Om de har inlägg som utkast, hjälp dem publicera.
 2. **Koppla till affärsmodell:** Använd deras valda bransch och affärstyp (B2B/B2C) för att ge relevanta tips.
 3. **GDPR:** Lagra aldrig känsliga personuppgifter.
@@ -73,12 +73,14 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [sessionToDelete, setSessionToDelete] = useState<ChatSession | null>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const hasHandledPrompt = useRef(false);
+    
+    // Rename state
     const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
-    const [editName, setEditName] = useState('');
+    const [editNameValue, setEditNameValue] = useState('');
 
     useEffect(() => { loadSessions(); setCurrentSessionId(null); }, [user.id, activeWorkspace?.id, viewScope]);
     useEffect(() => { if (currentSessionId) loadMessages(currentSessionId); else setMessages([]); }, [currentSessionId]);
+    
     useEffect(() => {
         if (!currentSessionId) return;
         const channel = supabase.channel(`session-${currentSessionId}`).on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages', filter: `session_id=eq.${currentSessionId}` }, (payload) => {
@@ -99,19 +101,6 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
         const member = members.find(m => m.user_id === msgUserId);
         if (member?.user) return { name: `${member.user.firstName} ${member.user.lastName?.[0] || ''}.`, isMe: false, initial: member.user.firstName?.[0] || '?' };
         return { name: 'Team', isMe: false, initial: 'T' };
-    };
-
-    const handleAutoStartSession = async (promptText: string) => {
-        setIsLoading(true);
-        try {
-            const visibility = viewScope === 'workspace' ? 'shared' : 'private';
-            const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
-            const newS = await db.createChatSession(user.id, 'Planering: ' + promptText.substring(0, 20) + '...', 'Default', workspaceId, visibility);
-            await db.addMessage(user.id, { role: 'user', text: promptText, session_id: newS.id });
-            setSessions(prev => [newS, ...prev]);
-            setCurrentSessionId(newS.id);
-            await generateAIResponse(promptText, newS.id, []);
-        } catch (e) { console.error(e); } finally { setIsLoading(false); }
     };
 
     const loadSessions = async () => {
@@ -202,52 +191,137 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
         } finally { setIsCreatingSession(false); }
     };
 
+    const startEditing = (e: React.MouseEvent, session: ChatSession) => {
+        e.stopPropagation();
+        setEditingSessionId(session.id);
+        setEditNameValue(session.name);
+    };
+
+    const saveRename = async () => {
+        if (!editingSessionId || !editNameValue.trim()) return;
+        try {
+            await db.updateChatSession(user.id, editingSessionId, editNameValue);
+            setSessions(prev => prev.map(s => s.id === editingSessionId ? { ...s, name: editNameValue } : s));
+            setEditingSessionId(null);
+        } catch (e) {
+            console.error(e);
+            alert("Kunde inte döpa om chatten.");
+        }
+    };
+
     return (
         <div className="flex h-[calc(100vh-64px)] w-full bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 animate-fadeIn">
             <DeleteConfirmModal isOpen={!!sessionToDelete} onClose={() => setSessionToDelete(null)} onConfirm={async () => { await db.deleteChatSession(user.id, sessionToDelete!.id); setSessions(prev => prev.filter(s => s.id !== sessionToDelete!.id)); if (currentSessionId === sessionToDelete!.id) setCurrentSessionId(null); setSessionToDelete(null); }} itemName={sessionToDelete?.name || ''} />
+            
+            {/* Sidebar */}
             <div className={`bg-gray-50/50 dark:bg-black/40 border-r border-gray-200 dark:border-gray-800 transition-all duration-500 flex flex-col ${isSidebarOpen ? 'w-80' : 'w-0 overflow-hidden opacity-0'}`}>
-                <div className="p-6 border-b border-gray-100 dark:border-gray-800"><h2 className="font-serif-display text-xl font-bold uppercase italic tracking-tight mb-4">UF-läraren</h2><div className="flex items-center gap-2 mb-4"><div className={`w-2 h-2 rounded-full ${viewScope === 'workspace' ? 'bg-blue-500' : 'bg-gray-400'}`}></div><span className="text-xs font-bold uppercase tracking-widest text-gray-500">{viewScope === 'workspace' ? `Team: ${activeWorkspace?.name}` : 'Privat Rum'}</span></div></div>
-                <div className="p-4"><button onClick={handleCreateSession} disabled={isCreatingSession} className="w-full py-3 bg-black dark:bg-white text-white dark:text-black rounded-xl font-bold text-xs uppercase tracking-widest hover:opacity-80 active:scale-95 transition-all flex items-center justify-center gap-2">{isCreatingSession ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}Ny Chatt</button></div>
-                <div className="overflow-y-auto flex-1 p-4 space-y-2">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800">
+                    <h2 className="font-serif-display text-xl font-bold uppercase italic tracking-tight mb-4">UF-läraren</h2>
+                    <div className="flex items-center gap-2 mb-4">
+                        <div className={`w-2 h-2 rounded-full ${viewScope === 'workspace' ? 'bg-blue-500' : 'bg-gray-400'}`}></div>
+                        <span className="text-xs font-bold uppercase tracking-widest text-gray-500">{viewScope === 'workspace' ? `Team: ${activeWorkspace?.name}` : 'Privat Rum'}</span>
+                    </div>
+                </div>
+                <div className="p-4">
+                    <button onClick={handleCreateSession} disabled={isCreatingSession} className="w-full py-3 bg-black dark:bg-white text-white dark:text-black rounded-xl font-bold text-xs uppercase tracking-widest hover:opacity-80 active:scale-95 transition-all flex items-center justify-center gap-2">
+                        {isCreatingSession ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}Ny Chatt
+                    </button>
+                </div>
+                <div className="overflow-y-auto flex-1 p-4 space-y-2 custom-scrollbar">
                     {sessions.map(s => (
-                        <div key={s.id} onClick={() => setCurrentSessionId(s.id)} className={`p-4 rounded-[1.5rem] cursor-pointer transition-all border group flex flex-col gap-1 ${currentSessionId === s.id ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-xl' : 'border-transparent hover:bg-white/60 dark:hover:bg-gray-800/30'}`}>
-                            <div className="flex justify-between items-center gap-2">
-                                <div className={`text-sm font-black truncate flex-1 ${currentSessionId === s.id ? 'text-gray-900 dark:text-white' : 'text-gray-500'}`}>{s.name}</div>
-                                <button onClick={(e) => { e.stopPropagation(); setSessionToDelete(s); }} className="text-gray-300 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
-                            </div>
+                        <div 
+                            key={s.id} 
+                            onClick={() => { if (editingSessionId !== s.id) setCurrentSessionId(s.id); }} 
+                            className={`p-4 rounded-[1.5rem] cursor-pointer transition-all border group relative ${currentSessionId === s.id ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-xl' : 'border-transparent hover:bg-white/60 dark:hover:bg-gray-800/30'}`}
+                        >
+                            {editingSessionId === s.id ? (
+                                <div className="flex items-center gap-2">
+                                    <input 
+                                        autoFocus
+                                        value={editNameValue}
+                                        onChange={(e) => setEditNameValue(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') setEditingSessionId(null); }}
+                                        className="bg-transparent border-b border-black dark:border-white text-sm font-black w-full outline-none py-0.5"
+                                    />
+                                    <button onClick={saveRename} className="p-1 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"><Check size={14}/></button>
+                                    <button onClick={() => setEditingSessionId(null)} className="p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"><XIcon size={14}/></button>
+                                </div>
+                            ) : (
+                                <div className="flex justify-between items-center gap-2">
+                                    <div className={`text-sm font-black truncate flex-1 ${currentSessionId === s.id ? 'text-gray-900 dark:text-white' : 'text-gray-500'}`}>
+                                        {s.name}
+                                    </div>
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                                        <button onClick={(e) => startEditing(e, s)} className="text-gray-400 hover:text-blue-500 p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-lg transition-colors"><Pencil size={12}/></button>
+                                        <button onClick={(e) => { e.stopPropagation(); setSessionToDelete(s); }} className="text-gray-400 hover:text-red-500 p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-lg transition-colors"><Trash2 size={12}/></button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ))}
                 </div>
             </div>
+
+            {/* Main Chat Area */}
             <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 relative overflow-hidden">
                 <div className="h-16 border-b border-gray-100 dark:border-gray-800 flex items-center px-6 gap-6 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl z-20">
                     <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 text-gray-400 hover:text-black dark:hover:text-white">{isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}</button>
-                    <div className="flex items-center gap-3 px-5 py-2 bg-gray-50 dark:bg-gray-800 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] italic"><ShieldCheck size={14} className="text-green-500" /> Deep Context Mode Active</div>
+                    <div className="flex items-center gap-3 px-5 py-2 bg-gray-50 dark:bg-gray-800 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] italic">
+                        <ShieldCheck size={14} className="text-green-500" /> Deep Context Mode Active
+                    </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-10 custom-scrollbar">
-                    {!currentSessionId && <div className="h-full flex flex-col items-center justify-center text-center opacity-30"><MessageSquare size={48} className="mb-4" /><p className="font-black uppercase tracking-[0.4em]">Välj en chatt för att börja</p></div>}
+                    {!currentSessionId && (
+                        <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
+                            <MessageSquare size={48} className="mb-4" />
+                            <p className="font-black uppercase tracking-[0.4em]">Välj en chatt för att börja</p>
+                        </div>
+                    )}
                     <div className="max-w-4xl mx-auto space-y-10">
                         {messages.map((msg) => {
                             const sender = getSenderInfo(msg.user_id);
                             return (
                                 <div key={msg.id} className={`flex gap-6 ${sender.isMe ? 'flex-row-reverse' : ''} animate-slideUp`}>
-                                    <div className={`w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg border-2 shrink-0 ${msg.role === 'ai' ? 'bg-black text-white border-white/10 dark:bg-white dark:text-black' : sender.isMe ? 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-400' : 'bg-blue-100 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400'}`}>{msg.role === 'ai' ? <Zap size={22} fill="currentColor"/> : sender.isMe ? 'Du' : <span className="text-xs font-bold">{sender.initial}</span>}</div>
+                                    <div className={`w-12 h-12 rounded-[1.2rem] flex items-center justify-center shadow-lg border-2 shrink-0 ${msg.role === 'ai' ? 'bg-black text-white border-white/10 dark:bg-white dark:text-black' : sender.isMe ? 'bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 text-gray-400' : 'bg-blue-100 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 text-blue-600 dark:text-blue-400'}`}>
+                                        {msg.role === 'ai' ? <Zap size={22} fill="currentColor"/> : sender.isMe ? 'Du' : <span className="text-xs font-bold">{sender.initial}</span>}
+                                    </div>
                                     <div className={`max-w-[85%] flex flex-col ${sender.isMe ? 'items-end' : 'items-start'}`}>
                                         {!sender.isMe && msg.role !== 'ai' && <span className="text-[10px] font-bold text-gray-400 mb-1 ml-2">{sender.name}</span>}
-                                        <div className={`p-8 rounded-[2rem] shadow-xl text-[15px] font-medium tracking-tight ${msg.role === 'ai' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-none' : sender.isMe ? 'bg-black text-white rounded-tr-none font-bold' : 'bg-blue-50 dark:bg-blue-950/40 text-gray-900 dark:text-white rounded-tl-none border border-blue-100 dark:border-blue-900'}`}>{msg.role === 'ai' ? <MarkdownRenderer text={msg.text} /> : msg.text}</div>
+                                        <div className={`p-8 rounded-[2rem] shadow-xl text-[15px] font-medium tracking-tight ${msg.role === 'ai' ? 'bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-tl-none' : sender.isMe ? 'bg-black text-white rounded-tr-none font-bold' : 'bg-blue-50 dark:bg-blue-950/40 text-gray-900 dark:text-white rounded-tl-none border border-blue-100 dark:border-blue-900'}`}>
+                                            {msg.role === 'ai' ? <MarkdownRenderer text={msg.text} /> : msg.text}
+                                        </div>
                                     </div>
                                 </div>
                             );
                         })}
-                        {isLoading && <div className="flex gap-6 animate-pulse"><div className="w-12 h-12 rounded-[1.2rem] bg-black dark:bg-white flex items-center justify-center shadow-xl"><Zap size={22} className="text-white dark:text-black" /></div><div className="p-8 rounded-[2rem] bg-gray-100 dark:bg-gray-800 w-full max-w-md border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-[0.4em] italic flex items-center gap-4"><Loader2 size={16} className="animate-spin" /> Analyserar kontext...</div></div>}
+                        {isLoading && (
+                            <div className="flex gap-6 animate-pulse">
+                                <div className="w-12 h-12 rounded-[1.2rem] bg-black dark:bg-white flex items-center justify-center shadow-xl">
+                                    <Zap size={22} className="text-white dark:text-black" />
+                                </div>
+                                <div className="p-8 rounded-[2rem] bg-gray-100 dark:bg-gray-800 w-full max-w-md border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-[0.4em] italic flex items-center gap-4">
+                                    <Loader2 size={16} className="animate-spin" /> Analyserar kontext...
+                                </div>
+                            </div>
+                        )}
                         <div ref={scrollRef} />
                     </div>
                 </div>
                 <div className="p-10 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800">
                     <form onSubmit={handleSend} className="max-w-4xl mx-auto">
                         <div className="relative flex items-end gap-2 p-1.5 bg-gray-50 dark:bg-gray-800 rounded-[2.5rem] border-2 border-transparent focus-within:border-black/5 dark:focus-within:border-white/5 transition-all duration-300 shadow-inner group">
-                            <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} placeholder={currentSessionId ? "Ställ en fråga om ditt CRM, sälj eller inlägg..." : "Välj en chatt..."} disabled={!currentSessionId} className="flex-1 bg-transparent border-none focus:ring-0 resize-none py-4 px-6 text-base font-bold italic text-gray-900 dark:text-white placeholder:text-gray-400 outline-none rounded-[2rem]" rows={1} />
-                            <button type="submit" disabled={!input.trim() || isLoading || !currentSessionId} className="h-14 w-14 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 transition-all disabled:opacity-20 shrink-0 mb-1 mr-1"><ArrowUp size={24} strokeWidth={3} /></button>
+                            <textarea 
+                                value={input} 
+                                onChange={(e) => setInput(e.target.value)} 
+                                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} 
+                                placeholder={currentSessionId ? "Ställ en fråga om ditt CRM, sälj eller inlägg..." : "Välj en chatt..."} 
+                                disabled={!currentSessionId} 
+                                className="flex-1 bg-transparent border-none focus:ring-0 resize-none py-4 px-6 text-base font-bold italic text-gray-900 dark:text-white placeholder:text-gray-400 outline-none rounded-[2rem]" 
+                                rows={1} 
+                            />
+                            <button type="submit" disabled={!input.trim() || isLoading || !currentSessionId} className="h-14 w-14 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 transition-all disabled:opacity-20 shrink-0 mb-1 mr-1">
+                                <ArrowUp size={24} strokeWidth={3} />
+                            </button>
                         </div>
                     </form>
                 </div>
