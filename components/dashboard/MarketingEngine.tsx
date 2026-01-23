@@ -6,7 +6,7 @@ import {
     CheckCircle2, Target, Image as ImageIcon,
     PanelLeftClose, PanelLeftOpen, Trash2, 
     Zap, Search, Frame, ArrowLeft, Trophy, Newspaper,
-    ShoppingBag, Calendar, ArrowRightCircle, Check, Send
+    ShoppingBag, Calendar, ArrowRightCircle, Check, Send, Pencil, MessageSquare
 } from 'lucide-react';
 import { User, MarketingCampaign, CampaignAsset, Deal, SalesEvent, UfEvent } from '../../types';
 import { db } from '../../services/db';
@@ -19,8 +19,8 @@ interface MarketingEngineProps {
     initialContext?: any;
 }
 
-type WizardStep = 'choice' | 'results' | 'generating' | 'editor';
-type ContentCategory = 'DEAL' | 'SALES_MILESTONE' | 'EVENT';
+type WizardStep = 'choice' | 'results' | 'manual_input' | 'generating' | 'editor';
+type ContentCategory = 'DEAL' | 'SALES_MILESTONE' | 'EVENT' | 'OTHER';
 
 const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext }) => {
     const { activeWorkspace, viewScope } = useWorkspace();
@@ -30,6 +30,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
     const [category, setCategory] = useState<ContentCategory | null>(null);
     const [foundItems, setFoundItems] = useState<any[]>([]);
     const [selectedItem, setSelectedItem] = useState<any | null>(null);
+    const [manualTopic, setManualTopic] = useState('');
     
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [campaigns, setCampaigns] = useState<MarketingCampaign[]>([]);
@@ -81,6 +82,12 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
     // --- STEP 1: Scan for data ---
     const scanSystem = async (cat: ContentCategory) => {
         setCategory(cat);
+        
+        if (cat === 'OTHER') {
+            setStep('manual_input');
+            return;
+        }
+
         setStep('results');
         const data = await db.getUserData(user.id);
         const filterScope = (item: any) => {
@@ -114,7 +121,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
     };
 
     // --- STEP 2: Generate Content ---
-    const generateContent = async (item: any) => {
+    const generateContent = async (item: any, isManual: boolean = false) => {
         setSelectedItem(item);
         setStep('generating');
         
@@ -125,8 +132,8 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
 
             UPPGIFT:
             Skriv ett LinkedIn-inlägg om följande ämne baserat på data från vårt UF-företag (${user.company}).
-            ÄMNE: ${item.displayTitle}. 
-            DETALJER: ${item.detail}.
+            ÄMNE: ${isManual ? manualTopic : item.displayTitle}. 
+            DETALJER: ${isManual ? 'Användaren vill skriva om detta ämne specifikt.' : item.detail}.
             BRANSCH: ${user.industry || 'Entreprenörskap'}.
 
             STIL OCH STRUKTUR (OBLIGATORISKT):
@@ -135,7 +142,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
             3. Ta en tydlig värdeposition tidigt.
             4. Använd informationen i ÄMNE som ett konkret exempel, scenario eller beslut.
             5. Lyft sedan perspektivet till ett större system-, etik- eller samhällsplan.
-            6. AVSLUTA MED EN TYDLIG CTA (Call to Action). Uppmana läsaren till en specifik tanke eller handling relaterad till era värderingar (t.ex. "Följ vår resa mot en mer hållbar bransch" eller "Hör av dig om du delar vår vision för lokalt hantverk").
+            6. AVSLUTA MED EN TYDLIG CTA (Call to Action). Uppmana läsaren till en specifik tanke eller handling relaterad till era värderingar.
             7. Avsluta med en kompromisslös slutsats efter CTA:n.
             8. Längd: 4–8 korta stycken. Max ~150 ord.
             9. Avsluta med 3–5 korta hashtags som speglar värderingar, inte trender.
@@ -149,7 +156,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
               "headline": "En slagkraftig rubrik",
               "body": "Själva texten med korrekt formatering",
               "hashtags": ["värdering1", "värdering2", "..."],
-              "cta": "Själva CTA-texten (om den inte redan är inbakad i body)",
+              "cta": "Själva CTA-texten",
               "image_suggestion": "Beskrivning av bild"
             }`;
 
@@ -175,9 +182,9 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
 
             const campaign: MarketingCampaign = {
                 id: crypto.randomUUID(),
-                name: item.displayTitle,
+                name: isManual ? (manualTopic.substring(0, 25) + '...') : item.displayTitle,
                 brief: { 
-                    goal: 'Principfast kommunikation', 
+                    goal: isManual ? 'Anpassat inlägg' : 'Värderingsdriven kommunikation', 
                     audience: 'Nätverk/Värderingsdrivna följare', 
                     timeframe: 'Nu', 
                     constraints: 'Inga emojis, inga belopp' 
@@ -194,6 +201,7 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
             setActiveCampaign(campaign);
             setActiveAsset(newAsset);
             setStep('editor');
+            setManualTopic('');
 
         } catch (e) {
             console.error("Generation failed:", e);
@@ -257,35 +265,69 @@ const MarketingEngine: React.FC<MarketingEngineProps> = ({ user, initialContext 
 
                 {/* --- STEP: CHOICE --- */}
                 {step === 'choice' && (
-                    <div className="p-8 md:p-20 max-w-5xl mx-auto w-full animate-fadeIn">
+                    <div className="p-8 md:p-20 max-w-7xl mx-auto w-full animate-fadeIn">
                         <div className="mb-16">
                             <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.4em] mb-4 block">Marketing Engine</span>
                             <h1 className="font-serif-display text-6xl mb-4 text-gray-900 dark:text-white leading-tight">Vad vill ni lägga upp <br/>för något idag?</h1>
-                            <p className="text-gray-500 text-lg max-w-xl">Välj en kategori så letar jag igenom ert CRM efter de bästa nyheterna att dela med ert nätverk.</p>
+                            <p className="text-gray-500 text-lg max-w-xl">Välj en kategori så letar jag igenom ert CRM efter nyheter, eller skriv ett helt eget ämne.</p>
                         </div>
 
-                        <div className="grid md:grid-cols-3 gap-8">
+                        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
                             <ChoiceCard 
-                                icon={<Trophy size={32}/>} 
-                                title="Ny Affär / Samarbete" 
-                                desc="Berätta om en kund ni precis signat eller något spännande på gång." 
+                                icon={<Trophy size={28}/>} 
+                                title="Ny Affär" 
+                                desc="Berätta om en kund ni precis signat." 
                                 onClick={() => scanSystem('DEAL')}
                                 color="blue"
                             />
                             <ChoiceCard 
-                                icon={<ShoppingBag size={32}/>} 
+                                icon={<ShoppingBag size={28}/>} 
                                 title="Sälj-milstolpe" 
-                                desc="Fira att ni nått en milstolpe i antal kunder eller total omsättning." 
+                                desc="Fira att ni nått säljmål." 
                                 onClick={() => scanSystem('SALES_MILESTONE')}
                                 color="green"
                             />
                             <ChoiceCard 
-                                icon={<Calendar size={32}/>} 
-                                title="Kommande Händelse" 
-                                desc="Peppa inför en mässa, pitch-tävling eller produktlansering." 
+                                icon={<Calendar size={28}/>} 
+                                title="Händelse" 
+                                desc="Peppa inför mässa eller pitch." 
                                 onClick={() => scanSystem('EVENT')}
                                 color="purple"
                             />
+                            <ChoiceCard 
+                                icon={<MessageSquare size={28}/>} 
+                                title="Övrigt" 
+                                desc="Skriv om valfritt ämne med AI-hjälp." 
+                                onClick={() => scanSystem('OTHER')}
+                                color="gray"
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {/* --- STEP: MANUAL INPUT --- */}
+                {step === 'manual_input' && (
+                    <div className="p-8 md:p-20 max-w-3xl mx-auto w-full animate-fadeIn">
+                        <button onClick={() => setStep('choice')} className="flex items-center gap-2 text-xs font-bold uppercase text-gray-400 mb-8 hover:text-black dark:hover:text-white transition-colors">
+                            <ArrowLeft size={16}/> Tillbaka
+                        </button>
+                        <h2 className="font-serif-display text-4xl mb-4">Vad ska inlägget handla om?</h2>
+                        <p className="text-gray-500 mb-8 font-medium">Beskriv kort vad du vill förmedla så skapar jag ett inlägg i er karaktäristiska stil.</p>
+                        
+                        <div className="space-y-6">
+                            <textarea 
+                                value={manualTopic}
+                                onChange={(e) => setManualTopic(e.target.value)}
+                                placeholder="T.ex. Våra tankar om hållbar konsumtion, eller varför vi valde att starta just detta UF-företag..."
+                                className="w-full min-h-[150px] p-6 bg-gray-50 dark:bg-gray-900 border-2 border-transparent focus:border-black dark:focus:border-white rounded-3xl outline-none text-lg font-medium transition-all dark:text-white shadow-inner"
+                            />
+                            <button 
+                                onClick={() => generateContent({}, true)}
+                                disabled={!manualTopic.trim()}
+                                className="w-full py-5 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black uppercase tracking-widest text-sm flex items-center justify-center gap-2 hover:opacity-90 transition-all shadow-xl disabled:opacity-30"
+                            >
+                                <Sparkles size={18} /> Skapa Inlägg
+                            </button>
                         </div>
                     </div>
                 )}
@@ -432,21 +474,22 @@ const ChoiceCard = ({ icon, title, desc, onClick, color }: any) => {
     const colors: any = {
         blue: "bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400",
         green: "bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400",
-        purple: "bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400"
+        purple: "bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400",
+        gray: "bg-gray-50 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
     };
 
     return (
         <button 
             onClick={onClick}
-            className="p-10 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-[3.5rem] text-left hover:shadow-2xl hover:-translate-y-2 transition-all group relative overflow-hidden h-full"
+            className="p-8 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-[3rem] text-left hover:shadow-2xl hover:-translate-y-2 transition-all group relative overflow-hidden h-full flex flex-col"
         >
-            <div className={`w-20 h-20 rounded-3xl flex items-center justify-center mb-8 transition-transform group-hover:scale-110 ${colors[color]}`}>
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-6 transition-transform group-hover:scale-110 ${colors[color]}`}>
                 {icon}
             </div>
-            <h3 className="text-2xl font-bold mb-4 leading-tight">{title}</h3>
-            <p className="text-gray-500 text-sm leading-relaxed">{desc}</p>
-            <div className="mt-8 flex items-center gap-2 text-xs font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-                Skanna systemet <ArrowRight size={14} />
+            <h3 className="text-xl font-bold mb-2 leading-tight">{title}</h3>
+            <p className="text-gray-500 text-xs leading-relaxed flex-1">{desc}</p>
+            <div className="mt-6 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                Starta flöde <ArrowRight size={14} />
             </div>
         </button>
     );
