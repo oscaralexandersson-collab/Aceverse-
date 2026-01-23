@@ -219,7 +219,8 @@ function AppContent() {
       <PageTransition stage={transitionStage} />
       {showNav && <Navbar currentPage={currentPage} onNavigate={handleNavigation} user={currentUser} />}
       <main className="flex-1">{renderPage()}</main>
-      {showNav && <Footer currentPage={currentPage} onNavigate={handleNavigation} />}
+      {/* user property passed to satisfy NavProps for Footer */}
+      {showNav && <Footer currentPage={currentPage} onNavigate={handleNavigation} user={currentUser} />}
       {currentUser && <GlobalChatbot user={currentUser} />}
     </div>
   );

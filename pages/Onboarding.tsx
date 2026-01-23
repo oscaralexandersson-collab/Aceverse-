@@ -9,7 +9,7 @@ interface OnboardingProps {
   onComplete: (updatedUser: User) => void;
 }
 
-type Step = 'intro' | 'company' | 'industry' | 'stage' | 'completed';
+type Step = 'intro' | 'company' | 'industry' | 'type' | 'stage' | 'completed';
 
 const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -22,6 +22,7 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
   const [data, setData] = useState({
     company: user.company === 'My Startup' ? '' : user.company || '',
     industry: '',
+    businessType: 'B2B',
     stage: 'Ide'
   });
 
@@ -70,11 +71,16 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
           setCurrentStep('industry');
         } else if (currentStep === 'industry') {
           setData(prev => ({ ...prev, industry: text }));
+          addMessage('ai', 'Spännande! Säljer ni främst till företag (B2B) eller privatpersoner (B2C)?');
+          setIsTyping(false);
+          setCurrentStep('type');
+        } else if (currentStep === 'type') {
+          const type = text.toUpperCase().includes('FÖRETAG') || text.toUpperCase().includes('B2B') ? 'B2B' : 'B2C';
+          setData(prev => ({ ...prev, businessType: type }));
           addMessage('ai', 'Uppfattat. Var i UF-resan befinner ni er just nu?');
           setIsTyping(false);
           setCurrentStep('stage');
         } else if (currentStep === 'stage') {
-          // RÄTTAT: Från "skadar" till "skapar"
           addMessage('ai', 'Tack! Jag skapar din GDPR-säkra arbetsyta nu...');
           
           const updatedUser = await db.completeOnboarding(user.id, { ...data, stage: text });
@@ -83,10 +89,11 @@ const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
           if (updatedUser) {
             onComplete(updatedUser);
           } else {
-            // Om getCurrentUser returnerar null av någon anledning, skapa en manuell profil för att inte fastna
             onComplete({
                 ...user,
                 company: data.company,
+                industry: data.industry,
+                businessType: data.businessType as any,
                 onboardingCompleted: true
             });
           }

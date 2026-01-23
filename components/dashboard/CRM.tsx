@@ -34,21 +34,17 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const [points, setPoints] = useState(0);
     const [badges, setBadges] = useState<Badge[]>([]);
 
-    // Drag & Drop State
     const [draggedDealId, setDraggedDealId] = useState<string | null>(null);
 
-    // Modal State
-    const [showSaleModal, setShowSaleModal] = useState(false); // B2C
-    const [showDealModal, setShowDealModal] = useState(false); // B2B
+    const [showSaleModal, setShowSaleModal] = useState(false);
+    const [showDealModal, setShowDealModal] = useState(false);
     const [showContactModal, setShowContactModal] = useState(false);
-    const [showEventModal, setShowEventModal] = useState(false); // Calendar
+    const [showEventModal, setShowEventModal] = useState(false);
 
-    // Edit State
-    const [editingSale, setEditingSale] = useState<SalesEvent | null>(null);
+    const [editingSale, setEditingSale] = useState<SalesEvent | any>(null);
     const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
 
-    // Mail State
     const [recipients, setRecipients] = useState<MailRecipient[]>([]);
     const [selectedRecipient, setSelectedRecipient] = useState<MailRecipient | null>(null);
     const [mailTemplate, setMailTemplate] = useState<MailTemplateType>('COLD_INTRO');
@@ -68,18 +64,10 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         setIsLoading(true);
         try {
             const data = await db.getUserData(user.id);
-            
-            // --- ROBUST SCOPE FILTERING ---
             const filterScope = (item: any) => {
                 const itemId = item.workspace_id;
-                
-                if (viewScope === 'personal') {
-                    // Show items that have NO workspace ID (null, undefined, or empty string)
-                    return itemId === null || itemId === undefined || itemId === '';
-                } else {
-                    // Show items ONLY if they match the active workspace ID
-                    return activeWorkspace?.id && itemId === activeWorkspace.id;
-                }
+                if (viewScope === 'personal') return itemId === null || itemId === undefined || itemId === '';
+                return activeWorkspace?.id && itemId === activeWorkspace.id;
             };
 
             const filteredContacts = data.contacts.filter(filterScope);
@@ -96,74 +84,33 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             setPoints(data.points);
             setBadges(data.badges);
             
-            // Map recipients
             const mailRecipients: MailRecipient[] = [
                 ...filteredContacts.map(c => ({
-                    id: c.id,
-                    origin: 'CONTACT' as const,
-                    name: c.name,
-                    email: c.email,
-                    company: c.company,
+                    id: c.id, origin: 'CONTACT' as const, name: c.name, email: c.email, company: c.company,
                     lastInteraction: c.last_interaction_at ? new Date(c.last_interaction_at).toLocaleDateString() : undefined
                 })),
                 ...filteredDeals.map(d => ({
-                    id: d.id,
-                    origin: 'DEAL' as const,
-                    name: d.title,
-                    company: d.company,
-                    context: `Deal Stage: ${d.stage}, Value: ${d.value}`,
+                    id: d.id, origin: 'DEAL' as const, name: d.title, company: d.company, context: `Deal Stage: ${d.stage}, Value: ${d.value}`,
                 }))
             ];
             setRecipients(mailRecipients);
-
             const newRecs = await db.getRecommendations(user.id);
             setRecs(newRecs);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setIsLoading(false);
-        }
+        } catch (e) { console.error(e); } finally { setIsLoading(false); }
     };
 
-    // ... (rest of the component actions remain exactly the same)
-    // Keep all handlers (handleDragStart, handleDrop, handleSaveSale, etc.) exactly as previously implemented
-    
-    // --- DRAG AND DROP HANDLERS ---
-    const handleDragStart = (e: React.DragEvent, id: string) => {
-        setDraggedDealId(id);
-        e.dataTransfer.setData('dealId', id);
-        e.dataTransfer.effectAllowed = 'move';
-        e.currentTarget.classList.add('opacity-50');
-    };
-
-    const handleDragEnd = (e: React.DragEvent) => {
-        setDraggedDealId(null);
-        e.currentTarget.classList.remove('opacity-50');
-    };
-
-    const handleDragOver = (e: React.DragEvent) => {
-        e.preventDefault(); 
-    };
-
+    const handleDragStart = (e: React.DragEvent, id: string) => { setDraggedDealId(id); e.dataTransfer.setData('dealId', id); e.dataTransfer.effectAllowed = 'move'; e.currentTarget.classList.add('opacity-50'); };
+    const handleDragEnd = (e: React.DragEvent) => { setDraggedDealId(null); e.currentTarget.classList.remove('opacity-50'); };
+    const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); };
     const handleDrop = async (e: React.DragEvent, newStage: DealStage) => {
         e.preventDefault();
         const dealId = e.dataTransfer.getData('dealId');
         if (!dealId) return;
-
-        setDeals(prevDeals => prevDeals.map(deal => 
-            deal.id === dealId ? { ...deal, stage: newStage } : deal
-        ));
+        setDeals(prevDeals => prevDeals.map(deal => deal.id === dealId ? { ...deal, stage: newStage } : deal));
         setDraggedDealId(null);
-
-        try {
-            await db.updateDeal(user.id, dealId, { stage: newStage });
-        } catch (err) {
-            console.error("Failed to move deal", err);
-            loadData();
-        }
+        try { await db.updateDeal(user.id, dealId, { stage: newStage }); } catch (err) { console.error("Failed to move deal", err); loadData(); }
     };
 
-    // --- ACTIONS ---
     const handleSaveSale = async (e: React.FormEvent) => {
         e.preventDefault();
         const form = e.target as HTMLFormElement;
@@ -174,154 +121,70 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             product_name: formData.get('product') as string,
             quantity: Number(formData.get('qty')),
             amount: amount,
+            customer_count: Number(formData.get('customers') || 1),
             channel: formData.get('channel') as string,
             workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null
         };
 
         try {
-            if (editingSale) {
-                await db.updateSale(user.id, editingSale.id, saleData);
-            } else {
-                await db.logSale(user.id, saleData);
-            }
-            setShowSaleModal(false);
-            setEditingSale(null);
-            loadData();
-        } catch (error) {
-            console.error("Save sale error:", error);
-            alert("Kunde inte spara försäljningen.");
-        }
+            if (editingSale) { await db.updateSale(user.id, editingSale.id, saleData); } 
+            else { await db.logSale(user.id, saleData); }
+            setShowSaleModal(false); setEditingSale(null); loadData();
+        } catch (error) { console.error("Save sale error:", error); alert("Kunde inte spara försäljningen."); }
     };
 
     const handleSaveDeal = async (e: React.FormEvent) => {
         e.preventDefault();
         const form = e.target as HTMLFormElement;
         const formData = new FormData(form);
-        
-        const dealData = {
-            title: formData.get('title') as string,
-            company: formData.get('company') as string,
-            value: Number(formData.get('value')),
-            stage: formData.get('stage') as any,
-            workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null
-        };
-
+        const dealData = { title: formData.get('title') as string, company: formData.get('company') as string, value: Number(formData.get('value')), stage: formData.get('stage') as any, workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null };
         try {
-            if (editingDeal) {
-                await db.updateDeal(user.id, editingDeal.id, dealData);
-            } else {
-                await db.addDeal(user.id, dealData);
-            }
-            setShowDealModal(false);
-            setEditingDeal(null);
-            loadData();
-        } catch (error) {
-            console.error("Save deal error:", error);
-            alert("Kunde inte spara affären.");
-        }
+            if (editingDeal) { await db.updateDeal(user.id, editingDeal.id, dealData); } 
+            else { await db.addDeal(user.id, dealData); }
+            setShowDealModal(false); setEditingDeal(null); loadData();
+        } catch (error) { console.error("Save deal error:", error); alert("Kunde inte spara affären."); }
     };
 
     const handleAddEvent = async (e: React.FormEvent) => {
         e.preventDefault();
         const form = e.target as HTMLFormElement;
         const formData = new FormData(form);
-
-        try {
-            await db.addUfEvent(user.id, {
-                title: formData.get('title') as string,
-                date_at: new Date(formData.get('date') as string).toISOString(),
-                type: formData.get('type') as any,
-                workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null
-            });
-            setShowEventModal(false);
-            loadData();
-        } catch (error) {
-            console.error("Save event error:", error);
-            alert("Kunde inte spara händelsen.");
-        }
+        try { await db.addUfEvent(user.id, { title: formData.get('title') as string, date_at: new Date(formData.get('date') as string).toISOString(), type: formData.get('type') as any, workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null }); setShowEventModal(false); loadData(); } 
+        catch (error) { console.error("Save event error:", error); alert("Kunde inte spara händelsen."); }
     };
 
     const handleSaveContact = async (e: React.FormEvent) => {
         e.preventDefault();
         const form = e.target as HTMLFormElement;
         const formData = new FormData(form);
-        
-        const contactData = {
-            name: formData.get('name') as string,
-            type: formData.get('type') as any,
-            company: formData.get('company') as string,
-            email: formData.get('email') as string,
-            phone: formData.get('phone') as string,
-            website: formData.get('website') as string,
-            linkedin: formData.get('linkedin') as string,
-            workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null
-        };
-
+        const contactData = { name: formData.get('name') as string, type: formData.get('type') as any, company: formData.get('company') as string, email: formData.get('email') as string, phone: formData.get('phone') as string, website: formData.get('website') as string, linkedin: formData.get('linkedin') as string, workspace_id: viewScope === 'workspace' && activeWorkspace ? activeWorkspace.id : null };
         try {
-            if (editingContact) {
-                await db.updateContact(user.id, editingContact.id, contactData);
-            } else {
-                await db.addContact(user.id, contactData);
-            }
-            setShowContactModal(false);
-            setEditingContact(null);
-            loadData();
-        } catch (error) {
-            console.error("Save contact error:", error);
-            alert("Kunde inte spara kontakten.");
-        }
+            if (editingContact) { await db.updateContact(user.id, editingContact.id, contactData); } 
+            else { await db.addContact(user.id, contactData); }
+            setShowContactModal(false); setEditingContact(null); loadData();
+        } catch (error) { console.error("Save contact error:", error); alert("Kunde inte spara kontakten."); }
     };
 
     const handleGenerateMail = async () => {
         if (!selectedRecipient) return;
         setIsGeneratingMail(true);
         try {
-            const response = await db.generateAiEmail({
-                recipient: selectedRecipient,
-                template: mailTemplate,
-                tone: mailTone,
-                extraContext: mailContext,
-                meetingTime: meetingTime,
-                senderName: `${user.firstName} ${user.lastName}`,
-                senderCompany: user.company || 'Vårt UF-företag'
-            });
-            setGeneratedSubject(response.subject);
-            setGeneratedBody(response.body);
-        } catch (e) {
-            console.error(e);
-            alert("Kunde inte generera mailet.");
-        } finally {
-            setIsGeneratingMail(false);
-        }
+            const response = await db.generateAiEmail({ recipient: selectedRecipient, template: mailTemplate, tone: mailTone, extraContext: mailContext, meetingTime: meetingTime, senderName: `${user.firstName} ${user.lastName}`, senderCompany: user.company || 'Vårt UF-företag' });
+            setGeneratedSubject(response.subject); setGeneratedBody(response.body);
+        } catch (e) { console.error(e); alert("Kunde inte generera mailet."); } finally { setIsGeneratingMail(false); }
     };
 
     const filteredRecipients = useMemo(() => {
         if (!searchTerm) return recipients;
-        return recipients.filter(r => 
-            r.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-            (r.company && r.company.toLowerCase().includes(searchTerm.toLowerCase()))
-        );
+        return recipients.filter(r => r.name.toLowerCase().includes(searchTerm.toLowerCase()) || (r.company && r.company.toLowerCase().includes(searchTerm.toLowerCase())));
     }, [recipients, searchTerm]);
 
-    const openEditSale = (sale: SalesEvent) => {
-        setEditingSale(sale);
-        setShowSaleModal(true);
-    };
-
-    const openEditDeal = (deal: Deal) => {
-        setEditingDeal(deal);
-        setShowDealModal(true);
-    };
-
-    const openEditContact = (contact: Contact) => {
-        setEditingContact(contact);
-        setShowContactModal(true);
-    };
+    const openEditSale = (sale: SalesEvent) => { setEditingSale(sale); setShowSaleModal(true); };
+    const openEditDeal = (deal: Deal) => { setEditingDeal(deal); setShowDealModal(true); };
+    const openEditContact = (contact: Contact) => { setEditingContact(contact); setShowContactModal(true); };
 
     const getMainAction = () => {
-        if (activeTab === 'deals') {
-            return { label: 'Ny Affär (B2B)', action: () => { setEditingDeal(null); setShowDealModal(true); }, icon: <Briefcase size={16}/> };
-        }
+        if (activeTab === 'deals') return { label: 'Ny Affär (B2B)', action: () => { setEditingDeal(null); setShowDealModal(true); }, icon: <Briefcase size={16}/> };
         return { label: 'Ny Försäljning (B2C)', action: () => { setEditingSale(null); setShowSaleModal(true); }, icon: <Plus size={16}/> };
     };
 
@@ -330,11 +193,9 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const getB2BStats = () => {
         const wonDeals = deals.filter(d => d.stage === 'WON');
         const activeDeals = deals.filter(d => d.stage !== 'WON' && d.stage !== 'LOST');
-        
         const wonRevenue = wonDeals.reduce((sum, d) => sum + (d.value || 0), 0);
         const pipelineValue = activeDeals.reduce((sum, d) => sum + (d.value || 0), 0);
         const winRate = deals.length > 0 ? Math.round((wonDeals.length / deals.length) * 100) : 0;
-
         return { wonRevenue, pipelineValue, winRate, activeCount: activeDeals.length };
     };
 
@@ -342,7 +203,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
     return (
         <div className="flex flex-col h-full gap-6 animate-fadeIn pb-20">
-            {/* ... Render logic remains exactly same as existing file ... */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 border-b border-gray-100 dark:border-gray-800 pb-6">
                 <div>
                     <h1 className="font-serif-display text-4xl text-gray-900 dark:text-white mb-2">CRM & Sälj</h1>
@@ -416,7 +276,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                             <StatBox label="Omsättning idag" value={`${sales.filter(s => new Date(s.occurred_at).toDateString() === new Date().toDateString()).reduce((acc,s) => acc+s.amount, 0)} kr`} />
                             <StatBox label="Totalt sålt" value={`${sales.reduce((acc,s) => acc+s.amount, 0)} kr`} />
-                            <StatBox label="Antal köp" value={sales.length.toString()} />
+                            <StatBox label="Antal kunder" value={sales.reduce((acc,s) => acc+(s.customer_count || 1), 0).toString()} />
                             <StatBox label="Snittorder" value={`${Math.round(sales.length ? sales.reduce((acc,s) => acc+s.amount, 0)/sales.length : 0)} kr`} />
                         </div>
                         <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 overflow-hidden">
@@ -429,6 +289,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                     <tr>
                                         <th className="px-6 py-4">Produkt</th>
                                         <th className="px-6 py-4">Kanal</th>
+                                        <th className="px-6 py-4">Kunder</th>
                                         <th className="px-6 py-4">Datum</th>
                                         <th className="px-6 py-4 text-right">Belopp</th>
                                         <th className="px-6 py-4 text-right">Åtgärd</th>
@@ -439,6 +300,7 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                         <tr key={s.id} className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                             <td className="px-6 py-4 font-bold">{s.product_name} <span className="text-gray-400 text-xs font-normal">x{s.quantity}</span></td>
                                             <td className="px-6 py-4"><span className="bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-[10px] font-bold uppercase">{s.channel}</span></td>
+                                            <td className="px-6 py-4 font-bold">{s.customer_count || 1}</td>
                                             <td className="px-6 py-4 text-gray-500">{new Date(s.occurred_at).toLocaleDateString()}</td>
                                             <td className="px-6 py-4 text-right font-mono font-bold">{s.amount} kr</td>
                                             <td className="px-6 py-4 text-right">
@@ -534,7 +396,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
                 {activeTab === 'mail' && (
                     <div className="grid lg:grid-cols-2 gap-8 h-full">
-                        {/* Mail content preserved */}
                         <div className="space-y-6 overflow-y-auto pr-2">
                             <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl border border-gray-100 dark:border-gray-800">
                                 <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-6">{t('dashboard.crmContent.mail.recipient')}</h3>
@@ -562,7 +423,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                         </div>
                                     </div>
                                 )}
-                                {/* Other mail inputs */}
                                 <div className="grid grid-cols-2 gap-4 mb-4">
                                     <div>
                                         <label className="text-xs font-bold text-gray-500 mb-2 block uppercase">{t('dashboard.crmContent.mail.templates.label')}</label>
@@ -644,7 +504,6 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                 )}
             </div>
 
-            {/* Modals are kept unchanged */}
             {showSaleModal && (
                 <div className="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fadeIn">
                     <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-3xl p-8 animate-slideUp relative">
@@ -652,10 +511,17 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                         <h2 className="font-serif-display text-2xl mb-6">{editingSale ? 'Redigera Försäljning' : 'Logga Försäljning (B2C)'}</h2>
                         <form onSubmit={handleSaveSale} className="space-y-4">
                             <input name="product" defaultValue={editingSale?.product_name} placeholder="Produktnamn" required className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
-                            <div className="flex gap-4">
-                                <input name="qty" type="number" placeholder="Antal" defaultValue={editingSale?.quantity || 1} className="w-1/3 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
-                                <input name="price" type="number" placeholder="Pris (st)" defaultValue={editingSale ? editingSale.amount / editingSale.quantity : ''} required className="flex-1 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-gray-400 mb-1 ml-2">Antal varor</label>
+                                    <input name="qty" type="number" placeholder="Antal varor" defaultValue={editingSale?.quantity || 1} className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-gray-400 mb-1 ml-2">Antal kunder</label>
+                                    <input name="customers" type="number" placeholder="Antal kunder" defaultValue={editingSale?.customer_count || 1} className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
+                                </div>
                             </div>
+                            <input name="price" type="number" placeholder="Pris (per vara)" defaultValue={editingSale ? editingSale.amount / editingSale.quantity : ''} required className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold dark:text-white"/>
                             <select name="channel" defaultValue={editingSale?.channel} className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-xl outline-none font-bold text-gray-500 dark:text-gray-400">
                                 <option value="FAIR">Mässa</option>
                                 <option value="WEB">Webbshop</option>

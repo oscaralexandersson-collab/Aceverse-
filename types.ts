@@ -1,18 +1,6 @@
 
 export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'about' | 'contact' | 'login' | 'dashboard' | 'onboarding' | 'careers';
 
-export interface NavItem {
-  label: string;
-  page: Page;
-  hasDropdown?: boolean;
-}
-
-export interface NavProps {
-  currentPage: Page;
-  onNavigate: (page: Page) => void;
-  user?: User | null;
-}
-
 export interface PageProps {
   onNavigate: (page: Page) => void;
 }
@@ -23,12 +11,26 @@ export interface User {
   firstName: string;
   lastName: string;
   company?: string;
+  industry?: string;
+  businessType?: 'B2B' | 'B2C' | 'Hybrid';
   bio?: string;
   avatar?: string;
   onboardingCompleted: boolean;
   plan: 'free' | 'pro' | 'enterprise';
   createdAt: string;
   companyReport?: CompanyReport;
+}
+
+export interface NavProps {
+  currentPage: Page;
+  onNavigate: (page: Page) => void;
+  user: User | null;
+}
+
+export interface NavItem {
+  label: string;
+  page: Page;
+  hasDropdown: boolean;
 }
 
 export interface UserData {
@@ -56,9 +58,24 @@ export interface UserData {
   notifications?: Notification[];
   teamMessages?: TeamMessage[];
   channels?: Channel[];
+  tasks?: Task[];
 }
 
 export type DashboardView = 'overview' | 'ideas' | 'advisor' | 'marketing' | 'crm' | 'pitch' | 'settings' | 'report' | 'team';
+
+export interface Task {
+  id: string;
+  user_id: string;
+  workspace_id?: string | null;
+  title: string;
+  description: string;
+  due_date?: string;
+  status: 'pending' | 'completed';
+  linked_tool?: DashboardView;
+  task_type?: 'GENERATE_MARKETING' | 'UPDATE_PLAN' | 'PITCH_PRACTICE';
+  metadata?: any; 
+  created_at: string;
+}
 
 export interface Channel {
   id: string;
@@ -70,11 +87,12 @@ export interface Channel {
 export interface TeamMessage {
   id: string;
   workspace_id: string;
-  channel_id?: string; // Optional for backward compatibility/system messages
+  channel_id?: string; 
   user_id: string;
   content: string;
   created_at: string;
-  user?: User; // Joined user data
+  user?: User; 
+  is_system?: boolean;
 }
 
 export interface UfEvent {
@@ -89,9 +107,11 @@ export interface Recommendation {
   id: string;
   title: string;
   description: string;
-  kind: 'UF_EVENT' | 'DEADLINE' | 'ACTION';
+  kind: 'UF_EVENT' | 'DEADLINE' | 'ACTION' | 'AI_TASK';
   ctaLabel: string;
   ctaAction: () => void;
+  linked_tool?: DashboardView;
+  metadata?: any;
 }
 
 export interface Contact {
@@ -129,6 +149,7 @@ export interface SalesEvent {
   channel: string;
   occurred_at: string;
   workspace_id?: string | null;
+  customer_count?: number;
 }
 
 export interface SustainabilityLog {
@@ -251,16 +272,9 @@ export interface Notification {
   title: string;
   message: string;
   link?: string;
+  metadata?: any;
   read: boolean;
   created_at: string;
-}
-
-export interface Invoice {
-  id: string;
-  date: string;
-  amount: number;
-  status: 'PAID' | 'PENDING';
-  pdf_url?: string;
 }
 
 export interface UserSettings {
@@ -313,6 +327,7 @@ export interface MarketingCampaign {
   assets: CampaignAsset[];
   dateCreated: string;
   workspace_id?: string | null;
+  status: 'DRAFT' | 'PUBLISHED';
 }
 
 export interface CampaignIdea {
@@ -328,6 +343,7 @@ export interface CampaignAsset {
     headline: string;
     body: string;
     hashtags: string[];
+    cta?: string;
   };
   metrics?: {
     ctr: string;

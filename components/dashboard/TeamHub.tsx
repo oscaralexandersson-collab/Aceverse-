@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
     Send, Video, Phone, PhoneOff, Hash, Plus, Trash2, Edit2, Check, 
-    Search, Bell, Info, Loader2, X, MoreVertical, AtSign
+    Search, Bell, Info, Loader2, X, MoreVertical, AtSign, Sparkles, Zap
 } from 'lucide-react';
 import { User, TeamMessage, Channel, WorkspaceMember } from '../../types';
 import { db } from '../../services/db';
@@ -75,7 +75,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
                 filter: `workspace_id=eq.${activeWorkspace.id}` 
             }, (payload) => {
                 const newMsg = payload.new as TeamMessage;
-                // Only notify if it's NOT my message and I'm either not in this channel OR the window isn't focused
                 if (newMsg.user_id !== user.id) {
                     if (!activeChannel || newMsg.channel_id !== activeChannel.id) {
                         setUnreadCount(prev => prev + 1);
@@ -109,11 +108,9 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
             }, async (payload) => {
                 const newMsg = payload.new as TeamMessage;
                 
-                // --- CRITICAL: HYDRATE USER DATA IMMEDIATELY ---
                 let senderUser = members.find(m => m.user_id === newMsg.user_id)?.user;
                 
-                // Fallback if member isn't in context yet (rare but possible)
-                if (!senderUser) {
+                if (!senderUser && !newMsg.is_system) {
                     const { data } = await supabase.from('profiles').select('*').eq('id', newMsg.user_id).single();
                     if (data) {
                         senderUser = {
@@ -158,17 +155,14 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
     };
 
-    // --- INPUT HANDLING & MENTIONS ---
     const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         const val = e.target.value;
         setInput(val);
 
-        // Mention Detection
         const cursorPos = e.target.selectionStart;
         const textBeforeCursor = val.slice(0, cursorPos);
         const lastAt = textBeforeCursor.lastIndexOf('@');
         
-        // If @ exists and no space between @ and cursor
         if (lastAt !== -1 && !textBeforeCursor.slice(lastAt + 1).includes(' ')) {
             const query = textBeforeCursor.slice(lastAt + 1);
             setMentionQuery(query);
@@ -194,18 +188,15 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
         const lastAt = textBefore.lastIndexOf('@');
         
         const prefix = input.slice(0, lastAt);
-        // Use first name for mention display
         const mentionName = member.user.firstName; 
         
         const newValue = `${prefix}@${mentionName} ${textAfter}`;
         setInput(newValue);
         setMentionQuery(null);
         
-        // Restore focus and move cursor
         setTimeout(() => {
             if (inputRef.current) {
                 inputRef.current.focus();
-                // inputRef.current.setSelectionRange(prefix.length + mentionName.length + 2, prefix.length + mentionName.length + 2);
             }
         }, 10);
     };
@@ -242,7 +233,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
         setIsSending(true);
         setMentionQuery(null);
 
-        // Optimistic UI update
         const optimisticId = 'temp-' + Date.now();
         const optimistic: TeamMessage = {
             id: optimisticId,
@@ -269,7 +259,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
         }
     };
 
-    // ... (Existing handleCreateChannel, handleStartEdit, handleSaveRename, confirmDeleteChannel, executeDeleteChannel logic)
     const handleCreateChannel = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!newChannelName.trim() || !activeWorkspace) return;
@@ -311,15 +300,13 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
         } catch(e) { console.error(e); alert("Fel vid radering av kanal."); } finally { setChannelToDelete(null); }
     };
 
-    // --- JITSI VIDEO CALL ---
     useEffect(() => {
         if (!isCallActive || !activeWorkspace) return;
         const domain = "meet.jit.si";
         const room = `Aceverse-${activeWorkspace.id}`;
 
         const initJitsi = (d: string, r: string) => {
-            // @ts-ignore
-            const api = new window.JitsiMeetExternalAPI(d, {
+            const api = new (window as any).JitsiMeetExternalAPI(d, {
                 roomName: r,
                 parentNode: document.getElementById('jitsi-container'),
                 width: '100%', height: '100%',
@@ -330,8 +317,7 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
             setJitsiApi(api);
         };
 
-        // @ts-ignore
-        if (!window.JitsiMeetExternalAPI) {
+        if (!(window as any).JitsiMeetExternalAPI) {
             const script = document.createElement("script");
             script.src = "https://meet.jit.si/external_api.js";
             script.async = true;
@@ -377,7 +363,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
                     </div>
 
                     <div className="space-y-6">
-                        {/* CHANNELS */}
                         <div>
                             <div className="flex items-center justify-between px-2 mb-2 group">
                                 <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Kanaler</span>
@@ -418,7 +403,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
                                                     <span className="truncate">{ch.name}</span>
                                                 </button>
                                                 
-                                                {/* Actions Overlay */}
                                                 {ch.name !== 'allmänt' && (
                                                     <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 flex gap-1 bg-gray-100 dark:bg-gray-800 rounded p-0.5 shadow-sm transition-opacity">
                                                         <button 
@@ -444,7 +428,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
                             </div>
                         </div>
 
-                        {/* MEMBERS */}
                         <div>
                             <div className="px-2 mb-2"><span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Team ({members.length})</span></div>
                             <div className="space-y-1">
@@ -476,51 +459,58 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
 
             {/* --- MAIN CHAT AREA --- */}
             <div className="flex-1 flex flex-col relative bg-white dark:bg-black">
-                {/* Header */}
                 <div className="h-16 px-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0 bg-white/80 dark:bg-black/80 backdrop-blur-md z-10">
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-2 text-gray-900 dark:text-white">
                             <Hash size={20} className="text-gray-400"/>
                             <h3 className="font-bold text-lg">{activeChannel?.name || 'Välj kanal'}</h3>
                         </div>
-                        {activeChannel?.name === 'allmänt' && <span className="bg-gray-100 dark:bg-gray-800 text-gray-500 text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wide">Default</span>}
                     </div>
                     
                     <div className="flex items-center gap-2">
                         <button onClick={() => setIsCallActive(!isCallActive)} className={`p-2 rounded-full transition-all ${isCallActive ? 'bg-red-500 text-white shadow-lg shadow-red-500/30' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}>
                             {isCallActive ? <PhoneOff size={18} /> : <Video size={20} />}
                         </button>
-                        <div className="h-4 w-px bg-gray-200 dark:bg-gray-800 mx-2"></div>
-                        <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500"><Search size={20}/></button>
-                        <button className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500"><Info size={20}/></button>
                     </div>
                 </div>
 
-                {/* Call Embed */}
                 <div className={`transition-all duration-300 ease-in-out bg-black ${isCallActive ? 'h-64' : 'h-0 overflow-hidden'}`}>
                     <div id="jitsi-container" className="w-full h-full"></div>
                 </div>
 
-                {/* Messages List */}
                 <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-2 custom-scrollbar relative">
                     {messages.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-gray-300 dark:text-gray-700 pb-20">
                             <Hash size={64} strokeWidth={1} className="mb-4 opacity-50"/>
                             <p className="text-lg font-bold">Välkommen till #{activeChannel?.name}!</p>
-                            <p className="text-sm">Detta är början på konversationen.</p>
                         </div>
                     ) : (
                         messages.map((msg, i) => {
                             const isMe = msg.user_id === user.id;
+                            const isSystem = msg.is_system;
                             const prevMsg = messages[i-1];
                             const isNewDay = !prevMsg || new Date(msg.created_at).toDateString() !== new Date(prevMsg.created_at).toDateString();
-                            const isSequence = prevMsg && prevMsg.user_id === msg.user_id && (new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() < 120000);
+                            const isSequence = !isSystem && prevMsg && prevMsg.user_id === msg.user_id && (new Date(msg.created_at).getTime() - new Date(prevMsg.created_at).getTime() < 120000);
 
-                            // Detect mentions for highlighting
-                            const hasMention = msg.content.includes(`@${user.firstName}`);
+                            if (isSystem) {
+                                return (
+                                    <div key={msg.id} className="flex flex-col items-center py-8 px-12 animate-fadeIn">
+                                        <div className="bg-gradient-to-br from-black to-gray-800 dark:from-white dark:to-gray-100 p-8 rounded-[2.5rem] shadow-2xl border border-white/10 max-w-lg relative overflow-hidden group">
+                                            <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:rotate-12 transition-transform duration-700"><Sparkles size={64} className="text-blue-400" /></div>
+                                            <div className="flex items-center gap-3 mb-4">
+                                                <div className="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center text-white"><Zap size={18} fill="currentColor" /></div>
+                                                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-blue-400 dark:text-blue-600">Ace Intelligence</span>
+                                            </div>
+                                            <p className="text-white dark:text-black font-medium leading-relaxed italic text-base">
+                                                {msg.content}
+                                            </p>
+                                        </div>
+                                    </div>
+                                );
+                            }
 
                             return (
-                                <div key={msg.id} className={hasMention ? "bg-yellow-50 dark:bg-yellow-900/20 -mx-4 px-4 py-2 rounded-lg transition-colors" : ""}>
+                                <div key={msg.id} className={msg.content.includes(`@${user.firstName}`) ? "bg-yellow-50 dark:bg-yellow-900/20 -mx-4 px-4 py-2 rounded-lg transition-colors" : ""}>
                                     {isNewDay && renderDateSeparator(new Date(msg.created_at))}
                                     
                                     <div className={`flex gap-3 group ${isSequence ? 'mt-0.5' : 'mt-4'} ${isMe ? 'flex-row-reverse' : ''}`}>
@@ -547,12 +537,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
                                             }`}>
                                                 {msg.content}
                                             </div>
-                                            
-                                            {isMe && !isSequence && (
-                                                <span className="text-[9px] text-gray-300 dark:text-gray-600 mt-1 mr-1 opacity-0 group-hover:opacity-100 transition-opacity select-none">
-                                                    {new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                                                </span>
-                                            )}
                                         </div>
                                     </div>
                                 </div>
@@ -562,7 +546,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
                     <div ref={messagesEndRef} />
                 </div>
 
-                {/* Mention Popup */}
                 {mentionQuery !== null && filteredMembers.length > 0 && (
                     <div className="absolute bottom-24 left-6 z-50 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-800 w-64 overflow-hidden animate-slideUp">
                         <div className="bg-gray-50 dark:bg-gray-800 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-gray-500">Medlemmar</div>
@@ -585,7 +568,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
                     </div>
                 )}
 
-                {/* Input Area */}
                 <div className="p-4 bg-white dark:bg-black">
                     <form onSubmit={handleSendMessage} className="relative max-w-4xl mx-auto">
                         <div className="relative flex items-end gap-2 p-1.5 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl focus-within:border-black dark:focus-within:border-white focus-within:ring-1 focus-within:ring-black dark:focus-within:ring-white transition-all shadow-sm">
@@ -608,10 +590,6 @@ const TeamHub: React.FC<TeamHubProps> = ({ user }) => {
                                     {isSending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} className={input.trim() ? "ml-0.5" : ""} />}
                                 </button>
                             </div>
-                        </div>
-                        <div className="text-center mt-2 flex justify-center gap-4 text-[10px] text-gray-400">
-                            <span><strong>Shift + Enter</strong> för ny rad</span>
-                            <span><strong>@</strong> för att tagga</span>
                         </div>
                     </form>
                 </div>
