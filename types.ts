@@ -1,4 +1,5 @@
 
+
 export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'about' | 'contact' | 'login' | 'dashboard' | 'onboarding' | 'careers';
 
 export interface PageProps {
@@ -206,6 +207,8 @@ export interface Idea {
   current_phase: 'A' | 'B' | 'C';
   snapshot: {
     problem_statement: string;
+    // Fix: Added detailed_business_concept to Idea snapshot to resolve missing property error in IdeaLab
+    detailed_business_concept: string;
     icp: string;
     solution_hypothesis: string;
     uvp: string;

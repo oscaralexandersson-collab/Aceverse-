@@ -2,7 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { 
     ArrowUpRight, TrendingUp, Users, Mic, Clock, Loader2, Target, 
-    CheckCircle2, Sparkles, ChevronRight, Zap, Briefcase, Globe 
+    CheckCircle2, Sparkles, ChevronRight, Zap, Briefcase, Globe,
+    Plus, X, Calendar as CalendarIcon, AlertCircle, Check
 } from 'lucide-react';
 import { DashboardView, User, Recommendation, Task } from '../../types';
 import { db } from '../../services/db';
@@ -29,6 +30,12 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Task Modal State
+  const [showTaskModal, setShowTaskModal] = useState(false);
+  const [isSavingTask, setIsSavingTask] = useState(false);
+  const [newTask, setNewTask] = useState({ title: '', description: '', dueDate: '' });
+
   const { t } = useLanguage();
 
   const formatRelativeTime = (dateStr: string) => {
@@ -46,10 +53,6 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
     if (diffInDays < 7) return `${diffInDays}d`;
     return then.toLocaleDateString('sv-SE', { month: 'short', day: 'numeric' });
   };
-
-  useEffect(() => {
-    loadData();
-  }, [user.id, t, activeWorkspace, viewScope]);
 
   const loadData = async () => {
     setLoading(true);
@@ -76,7 +79,11 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
             ideaCount: filteredIdeas.length
         });
         setRecommendations(recs);
-        setTasks(filteredTasks);
+        setTasks(filteredTasks.sort((a,b) => {
+            if (!a.due_date) return 1;
+            if (!b.due_date) return -1;
+            return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+        }));
 
         const rawActivities: ActivityItem[] = [
             ...filteredSales.map(s => ({ action: "Ny försäljning", target: `${s.amount} kr`, time: formatRelativeTime(s.occurred_at), timestamp: new Date(s.occurred_at).getTime() })),
@@ -93,6 +100,10 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
         setLoading(false);
     }
   };
+
+  useEffect(() => {
+    loadData();
+  }, [user.id, t, activeWorkspace, viewScope]);
 
   const handleRecommendationClick = (rec: Recommendation) => {
       if (rec.linked_tool) {
@@ -116,10 +127,110 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
       await db.completeTask(taskId);
   };
 
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTask.title.trim()) return;
+    
+    setIsSavingTask(true);
+    try {
+        const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
+        const task = await db.createTask(user.id, workspaceId, {
+            title: newTask.title,
+            description: newTask.description,
+            due_date: newTask.dueDate ? new Date(newTask.dueDate).toISOString() : undefined,
+            status: 'pending'
+        });
+        setTasks(prev => [task, ...prev].sort((a,b) => {
+            if (!a.due_date) return 1;
+            if (!b.due_date) return -1;
+            return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+        }));
+        setShowTaskModal(false);
+        setNewTask({ title: '', description: '', dueDate: '' });
+    } catch (err) {
+        console.error(err);
+    } finally {
+        setIsSavingTask(false);
+    }
+  };
+
+  const isOverdue = (dateStr?: string) => {
+      if (!dateStr) return false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return new Date(dateStr) < today;
+  };
+
+  const isToday = (dateStr?: string) => {
+      if (!dateStr) return false;
+      return new Date(dateStr).toDateString() === new Date().toDateString();
+  };
+
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="animate-spin text-gray-400" /></div>;
 
   return (
     <div className="animate-fadeIn pb-24">
+      
+      {/* ADD TASK MODAL */}
+      {showTaskModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+              <div className="bg-white dark:bg-gray-900 w-full max-w-md rounded-[2.5rem] p-8 shadow-3xl animate-slideUp border border-gray-100 dark:border-gray-800">
+                  <div className="flex justify-between items-center mb-8">
+                      <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-black dark:bg-white rounded-xl flex items-center justify-center text-white dark:text-black">
+                              <Plus size={20} />
+                          </div>
+                          <h2 className="font-serif-display text-2xl">Ny Uppgift</h2>
+                      </div>
+                      <button onClick={() => setShowTaskModal(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors text-gray-400"><X size={24}/></button>
+                  </div>
+
+                  <form onSubmit={handleCreateTask} className="space-y-6">
+                      <div>
+                          <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2 ml-1">Titel *</label>
+                          <input 
+                              autoFocus 
+                              required 
+                              value={newTask.title} 
+                              onChange={e => setNewTask({...newTask, title: e.target.value})}
+                              placeholder="Vad behöver göras?" 
+                              className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl outline-none font-bold text-lg border-2 border-transparent focus:border-black dark:focus:border-white transition-all dark:text-white"
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2 ml-1">Beskrivning</label>
+                          <textarea 
+                              value={newTask.description} 
+                              onChange={e => setNewTask({...newTask, description: e.target.value})}
+                              placeholder="Detaljer (valfritt)..." 
+                              className="w-full p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl outline-none font-medium text-sm border-2 border-transparent focus:border-black dark:focus:border-white transition-all resize-none dark:text-white"
+                              rows={3}
+                          />
+                      </div>
+                      <div>
+                          <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2 ml-1">Deadline</label>
+                          <div className="relative">
+                              <CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                              <input 
+                                  type="date" 
+                                  value={newTask.dueDate} 
+                                  onChange={e => setNewTask({...newTask, dueDate: e.target.value})}
+                                  className="w-full p-4 pl-12 bg-gray-50 dark:bg-gray-800 rounded-2xl outline-none font-bold text-sm border-2 border-transparent focus:border-black dark:focus:border-white transition-all dark:text-white"
+                              />
+                          </div>
+                      </div>
+                      <button 
+                          type="submit" 
+                          disabled={isSavingTask || !newTask.title.trim()} 
+                          className="w-full py-5 bg-black dark:bg-white text-white dark:text-black rounded-2xl font-black uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-30 disabled:scale-100"
+                      >
+                          {isSavingTask ? <Loader2 className="animate-spin mx-auto" size={24} /> : 'Spara Uppgift'}
+                      </button>
+                  </form>
+              </div>
+          </div>
+      )}
+
       <div className="mb-8">
         <h1 className="font-serif-display text-4xl mb-2 text-gray-900 dark:text-white">
           {t('dashboard.overviewContent.greeting', {name: user.firstName})}
@@ -168,46 +279,67 @@ const Overview: React.FC<OverviewProps> = ({ user, setView, onPlanEvent }) => {
                           </div>
                           <h3 className="font-serif-display text-2xl">Action Center</h3>
                       </div>
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 bg-gray-50 dark:bg-gray-800 px-3 py-1 rounded-full">{tasks.length} Uppgifter</span>
+                      <div className="flex items-center gap-3">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 bg-gray-50 dark:bg-gray-800 px-3 py-1 rounded-full">{tasks.length} Uppgifter</span>
+                          <button onClick={() => setShowTaskModal(true)} className="p-2 bg-black dark:bg-white text-white dark:text-black rounded-full hover:scale-110 transition-transform shadow-lg">
+                              <Plus size={18} />
+                          </button>
+                      </div>
                   </div>
 
                   {tasks.length > 0 ? (
                       <div className="space-y-3">
-                          {tasks.map(task => (
-                              <div 
-                                key={task.id} 
-                                onClick={() => handleTaskClick(task)}
-                                className="group flex items-center justify-between p-5 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-transparent hover:border-blue-200 dark:hover:border-blue-900 transition-all cursor-pointer"
-                              >
-                                  <div className="flex items-start gap-4">
-                                      <button 
-                                          onClick={(e) => handleCompleteTask(e, task.id)}
-                                          className="w-6 h-6 rounded-full border-2 border-gray-200 dark:border-gray-700 mt-1 flex items-center justify-center hover:border-blue-500 transition-colors"
-                                      >
-                                          <CheckCircle2 size={14} className="text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                      </button>
-                                      <div>
-                                          <h4 className="font-bold text-gray-900 dark:text-white text-sm">{task.title}</h4>
-                                          <p className="text-xs text-gray-500 dark:text-gray-400">{task.description}</p>
-                                      </div>
-                                  </div>
-                                  <div className="flex items-center gap-3">
-                                      {task.task_type === 'GENERATE_MARKETING' && (
-                                          <span className="text-[9px] font-black uppercase tracking-widest text-blue-500 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">AI Generera</span>
-                                      )}
-                                      {task.linked_tool && (
-                                          <div className="p-2 text-gray-400 hover:text-black dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-lg transition-all">
-                                              <ArrowUpRight size={18} />
-                                          </div>
-                                      )}
-                                  </div>
-                              </div>
-                          ))}
+                          {tasks.map(task => {
+                              const overdue = isOverdue(task.due_date);
+                              const today = isToday(task.due_date);
+                              
+                              return (
+                                <div 
+                                    key={task.id} 
+                                    onClick={() => handleTaskClick(task)}
+                                    className="group flex items-center justify-between p-5 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-transparent hover:border-black dark:hover:border-white transition-all cursor-pointer relative overflow-hidden"
+                                >
+                                    {overdue && <div className="absolute top-0 left-0 w-1 h-full bg-red-500 animate-pulse"></div>}
+                                    <div className="flex items-start gap-4">
+                                        <button 
+                                            onClick={(e) => handleCompleteTask(e, task.id)}
+                                            className="w-7 h-7 rounded-full border-2 border-gray-300 dark:border-gray-600 mt-1 flex items-center justify-center hover:border-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-all group/btn"
+                                        >
+                                            <Check size={16} className="text-green-500 opacity-0 group-hover/btn:opacity-100 scale-75 group-hover/btn:scale-100 transition-all" />
+                                        </button>
+                                        <div>
+                                            <h4 className={`font-bold text-gray-900 dark:text-white text-sm ${overdue ? 'text-red-600 dark:text-red-400' : ''}`}>{task.title}</h4>
+                                            {task.description && <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1">{task.description}</p>}
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        {task.due_date && (
+                                            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                                                overdue ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' : 
+                                                today ? 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' :
+                                                'bg-white dark:bg-gray-700 text-gray-400 border border-black/5'
+                                            }`}>
+                                                <CalendarIcon size={10} />
+                                                {today ? 'Idag' : overdue ? 'Försenad' : new Date(task.due_date).toLocaleDateString()}
+                                            </div>
+                                        )}
+                                        {task.linked_tool && (
+                                            <div className="p-2 text-gray-400 hover:text-black dark:hover:text-white hover:bg-white dark:hover:bg-gray-700 rounded-lg transition-all">
+                                                <ArrowUpRight size={18} />
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                              );
+                          })}
                       </div>
                   ) : (
-                      <div className="text-center py-12 border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-3xl">
-                          <CheckCircle2 size={40} className="mx-auto mb-4 text-green-500 opacity-20" />
-                          <p className="text-sm font-bold text-gray-400 uppercase tracking-widest">Allt klart för idag!</p>
+                      <div className="text-center py-20 border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-[2.5rem]">
+                          <div className="w-16 h-16 bg-green-50 dark:bg-green-900/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                              <CheckCircle2 size={32} className="text-green-500" />
+                          </div>
+                          <p className="text-sm font-black uppercase tracking-[0.2em] text-gray-400">Allt klart för idag!</p>
+                          <button onClick={() => setShowTaskModal(true)} className="mt-4 text-xs font-bold text-black dark:text-white underline underline-offset-4 hover:opacity-70 transition-opacity">Lägg till något nytt</button>
                       </div>
                   )}
               </section>

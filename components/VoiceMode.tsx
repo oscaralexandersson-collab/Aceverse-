@@ -1,4 +1,5 @@
 
+
 import React, { useEffect, useRef, useState } from 'react';
 import { X, Mic, MicOff, PhoneOff, Sparkles, AlertCircle, Wifi, Volume2, ShieldCheck, Check, Info } from 'lucide-react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
@@ -120,7 +121,8 @@ export const VoiceMode: React.FC<VoiceModeProps> = ({ isOpen, onClose, systemIns
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
             
             sessionPromiseRef.current = ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+                // Fix: Updated model to gemini-2.5-flash-native-audio-preview-12-2025 as per developer guidelines
+                model: 'gemini-2.5-flash-native-audio-preview-12-2025',
                 config: {
                     responseModalities: [Modality.AUDIO],
                     speechConfig: {
