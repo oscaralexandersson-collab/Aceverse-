@@ -139,6 +139,8 @@ function AppContent() {
     if (newPage === currentPage || isTransitioning) return;
     setIsTransitioning(true);
     setTransitionStage('in');
+    
+    // Increased duration before switch to allow longer transition to be visible (800ms)
     setTimeout(() => {
       setCurrentPage(newPage);
       window.scrollTo(0, 0);
@@ -146,8 +148,8 @@ function AppContent() {
       setTimeout(() => {
         setTransitionStage('idle');
         setIsTransitioning(false);
-      }, 600);
-    }, 600);
+      }, 900); // Wait for the 1000ms animation to finish
+    }, 800);
   };
 
   const handleLogin = (user: User) => {
@@ -172,8 +174,8 @@ function AppContent() {
         setTimeout(() => {
             setTransitionStage('idle');
             setIsTransitioning(false);
-        }, 600);
-    }, 600);
+        }, 900);
+    }, 800);
   };
 
   const renderPage = () => {

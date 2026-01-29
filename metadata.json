@@ -1,6 +1,6 @@
 {
   "name": "Aceverse",
-  "description": "AI-medgrundaren för unga entreprenörer. Validera idéer, hitta leads och skapa vinnande pitchar med Aceverse.",
+  "description": "Entrepreneurial Intelligence at your fingertips. AI-medgrundaren för unga entreprenörer. Validera idéer, hitta leads och skapa vinnande pitchar med Aceverse.",
   "requestFramePermissions": [
     "microphone"
   ]
