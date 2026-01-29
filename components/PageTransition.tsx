@@ -42,13 +42,14 @@ const PageTransition: React.FC<Props> = ({ stage }) => {
     >
       <div className="flex-1 bg-black relative flex items-center justify-center overflow-hidden">
         
-        {/* Subtle texture/noise */}
+        {/* Subtle texture/noise - kept low opacity for texture */}
         <div className="absolute inset-0 opacity-[0.15] bg-[url('https://grainy-gradients.vercel.app/noise.svg')]"></div>
 
-        {/* Ambient Storm Background */}
+        {/* Ambient Storm Background - MONOCHROME */}
         <div className="absolute inset-0 w-full h-full pointer-events-none">
-            <div className="absolute top-[-20%] left-[-10%] w-[100vw] h-[100vw] bg-blue-500/10 blur-[150px] rounded-full animate-storm-flash"></div>
-            <div className="absolute bottom-[-20%] right-[-10%] w-[80vw] h-[80vw] bg-indigo-500/5 blur-[120px] rounded-full animate-storm-flash" style={{ animationDelay: '2s' }}></div>
+            {/* Changed from blue/indigo to white/gray for strict black & white theme */}
+            <div className="absolute top-[-20%] left-[-10%] w-[100vw] h-[100vw] bg-zinc-800/10 blur-[150px] rounded-full animate-storm-flash"></div>
+            <div className="absolute bottom-[-20%] right-[-10%] w-[80vw] h-[80vw] bg-white/5 blur-[120px] rounded-full animate-storm-flash" style={{ animationDelay: '2s' }}></div>
 
             <svg className="absolute inset-0 w-full h-full opacity-40">
                 <defs>
@@ -88,14 +89,14 @@ const PageTransition: React.FC<Props> = ({ stage }) => {
         {/* Content Container */}
         <div className={`relative z-10 flex flex-col items-center justify-center text-center px-12 transition-all duration-1000 ${stage === 'in' ? 'opacity-100 scale-100 translate-y-0 delay-200' : 'opacity-0 scale-95 translate-y-4'}`}>
             
-            {/* The Slogan with premium gradient */}
-            <h2 className="text-2xl md:text-4xl lg:text-5xl font-sans font-semibold tracking-tight text-transparent bg-clip-text bg-gradient-to-b from-white to-gray-500 max-w-4xl mx-auto mb-16 leading-[1.1]">
+            {/* The Slogan - Pure White Text */}
+            <h2 className="text-2xl md:text-4xl lg:text-5xl font-sans font-semibold tracking-tight text-white max-w-4xl mx-auto mb-16 leading-[1.1]">
               Entrepreneurial Intelligence <br className="hidden md:block" /> at your fingertips
             </h2>
 
             {/* Hybrid Signature: Sharp 'A' + Pacifico 'ceverse' + Underline Strike */}
             <div className="relative mt-4 group">
-                <svg width="460" height="180" viewBox="0 0 460 180" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white opacity-95 drop-shadow-[0_0_25px_rgba(255,255,255,0.4)]">
+                <svg width="460" height="180" viewBox="0 0 460 180" fill="none" xmlns="http://www.w3.org/2000/svg" className="text-white opacity-100 drop-shadow-[0_0_25px_rgba(255,255,255,0.4)]">
                     <style>
                         {`
                         .signature-path {
@@ -156,13 +157,13 @@ const PageTransition: React.FC<Props> = ({ stage }) => {
                     />
                     
                     {/* Branding Tag */}
-                    <text x="230" y="165" textAnchor="middle" fill="currentColor" fillOpacity="0.2" fontSize="10" fontWeight="bold" letterSpacing="0.7em" className="font-sans uppercase animate-[fadeIn_0.5s_ease-out_forwards]" style={{ opacity: 0, animationDelay: '0.95s' }}>A C E V E R S E</text>
+                    <text x="230" y="165" textAnchor="middle" fill="currentColor" fillOpacity="0.3" fontSize="10" fontWeight="bold" letterSpacing="0.7em" className="font-sans uppercase animate-[fadeIn_0.5s_ease-out_forwards]" style={{ opacity: 0, animationDelay: '0.95s' }}>A C E V E R S E</text>
                 </svg>
             </div>
             
-            {/* Minimal Progress indicator */}
-            <div className="mt-20 w-48 h-[1px] bg-white/5 overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-transparent via-white/40 to-transparent animate-[loadingBar_2s_ease-in-out_infinite]"></div>
+            {/* Minimal Progress indicator - White */}
+            <div className="mt-20 w-48 h-[1px] bg-white/10 overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-transparent via-white to-transparent animate-[loadingBar_2s_ease-in-out_infinite]"></div>
             </div>
         </div>
 

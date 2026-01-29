@@ -59,6 +59,10 @@
               'draw-v': 'drawV 1s ease-out forwards',
               'dashboard-tilt': 'dashboardTilt 1.5s cubic-bezier(0.2, 0.8, 0.2, 1) forwards',
               'slideInRight': 'slideInRight 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              'slide-cycle': 'slideCycle 12s infinite',
+              'projector': 'projector 4s infinite alternate',
+              'build-up': 'buildUp 0.5s ease-out forwards',
+              'typing': 'typing 2s steps(40, end)'
             },
             keyframes: {
               fadeIn: {
@@ -129,6 +133,24 @@
                   opacity: '1', 
                   transform: 'translate3d(0, 0, 0) rotateX(0) rotateY(0) rotateZ(0)',
                 }
+              },
+              slideCycle: {
+                '0%, 30%': { opacity: '1', transform: 'translateX(0)' },
+                '33%, 63%': { opacity: '0', transform: 'translateX(-100%)' },
+                '66%, 96%': { opacity: '0', transform: 'translateX(-200%)' },
+                '100%': { opacity: '0', transform: 'translateX(0)' }
+              },
+              projector: {
+                '0%': { opacity: '0.3', transform: 'scaleX(0.95)' },
+                '100%': { opacity: '0.6', transform: 'scaleX(1.05)' }
+              },
+              buildUp: {
+                '0%': { opacity: '0', transform: 'translateY(10px)' },
+                '100%': { opacity: '1', transform: 'translateY(0)' }
+              },
+              typing: {
+                'from': { width: '0' },
+                'to': { width: '100%' }
               }
             }
           }

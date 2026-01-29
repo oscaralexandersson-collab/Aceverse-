@@ -1,229 +1,213 @@
 
-import React, { useState, useEffect } from 'react';
-import { ArrowRight, Lightbulb, Users, Mic, CheckCircle2, Search, BarChart3, User, Mail, Target, TrendingUp, Zap } from 'lucide-react';
+import React from 'react';
+import { ArrowRight, Brain, Users, BookOpen, CheckCircle2, Zap, Plus } from 'lucide-react';
 import { PageProps } from '../types';
-import { useLanguage } from '../contexts/LanguageContext';
 import RevealOnScroll from './RevealOnScroll';
 
 const FeatureSection: React.FC<Partial<PageProps>> = ({ onNavigate }) => {
-  const { t } = useLanguage();
-
-  const features = [
-    {
-      category: t('features.f1.cat'),
-      title: t('features.f1.title'),
-      description: t('features.f1.desc'),
-      icon: <Lightbulb className="w-5 h-5" />,
-      link: t('features.f1.link'),
-      // CONCEPT: "Validation Scanner" - Neutral Theme
-      renderVisual: () => (
-        <div className="w-full h-full bg-[#f9f9f8] dark:bg-gray-900 relative overflow-hidden flex items-center justify-center transition-colors">
-             {/* Grid Background */}
-             <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.03)_1px,transparent_1px)] dark:bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:40px_40px]"></div>
-             
-             {/* Central Hypothesis Object */}
-             <div className="relative w-32 h-32 flex items-center justify-center">
-                 {/* The Core */}
-                 <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 dark:border-gray-700 flex items-center justify-center z-10 relative">
-                     <Lightbulb className="w-8 h-8 text-gray-900 dark:text-white" strokeWidth={1.5} />
-                     {/* Validation Checkmark appearing */}
-                     <div className="absolute -bottom-2 -right-2 bg-black dark:bg-white text-white dark:text-black rounded-full p-1 shadow-md animate-[bounce_2s_infinite] opacity-0" style={{ animation: 'bounce 2s infinite, fadeIn 2s forwards 1s' }}>
-                        <CheckCircle2 size={12} />
-                     </div>
-                 </div>
-
-                 {/* Scanning Rings - Neutral */}
-                 <div className="absolute inset-0 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-full animate-[spin_10s_linear_infinite]"></div>
-                 <div className="absolute inset-2 border border-gray-200 dark:border-gray-700 rounded-full animate-[spin_8s_linear_infinite_reverse]"></div>
-
-                 {/* Scanning Beam - White/Gray */}
-                 <div className="absolute inset-x-[-50%] h-1 bg-gradient-to-r from-transparent via-gray-400/30 to-transparent blur-sm animate-scan z-20 top-0"></div>
-             </div>
-
-             {/* Data Points being analyzed - Neutral */}
-             <div className="absolute w-full h-full pointer-events-none">
-                 {[...Array(6)].map((_, i) => (
-                    <div 
-                        key={i} 
-                        className="absolute flex items-center gap-2 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm px-2 py-1 rounded border border-gray-100 dark:border-gray-700 shadow-sm text-[10px] font-mono animate-float"
-                        style={{
-                            top: `${20 + Math.random() * 60}%`,
-                            left: `${10 + Math.random() * 80}%`,
-                            animationDelay: `${i * 0.5}s`,
-                            animationDuration: `${3 + Math.random() * 2}s`
-                        }}
-                    >
-                        {/* i % 2 === 0 ? 'Risk' (Gray) : 'Valid' (Black) */}
-                        <div className={`w-1.5 h-1.5 rounded-full ${i % 2 === 0 ? 'bg-gray-300 dark:bg-gray-600' : 'bg-black dark:bg-white'}`}></div>
-                        <span className={`${i % 2 === 0 ? 'text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-white font-medium'}`}>{i % 2 === 0 ? 'Risk' : 'Valid'}</span>
-                    </div>
-                 ))}
-             </div>
-        </div>
-      )
-    },
-    {
-      category: t('features.f2.cat'),
-      title: t('features.f2.title'),
-      description: t('features.f2.desc'),
-      icon: <Users className="w-5 h-5" />,
-      link: t('features.f2.link'),
-      // CONCEPT: "Chaos to Order (The Funnel)" - Neutral Theme
-      renderVisual: () => (
-        <div className="w-full h-full bg-[#f9f9f8] dark:bg-gray-900 relative overflow-hidden flex flex-col items-center justify-center pt-8 transition-colors">
-             {/* The "Chaos" Area */}
-             <div className="absolute top-0 w-full h-1/2 overflow-visible">
-                 {[...Array(8)].map((_, i) => (
-                    <div 
-                        key={i}
-                        className="absolute w-8 h-8 bg-white dark:bg-gray-800 rounded-full flex items-center justify-center shadow-sm border border-gray-200 dark:border-gray-700"
-                        style={{
-                            left: '50%',
-                            top: '20%',
-                            '--sx': `${(Math.random() - 0.5) * 300}px`,
-                            '--sy': `${(Math.random() - 0.5) * 200}px`,
-                            animation: `funnel 4s ease-in-out infinite`,
-                            animationDelay: `${i * 0.5}s`
-                        } as React.CSSProperties}
-                    >
-                        {i % 2 === 0 ? <User size={14} className="text-gray-400 dark:text-gray-500" /> : <Mail size={14} className="text-gray-400 dark:text-gray-500" />}
-                    </div>
-                 ))}
-             </div>
-
-             {/* The "Order" Area (The CRM List) */}
-             <div className="relative z-10 w-56 bg-white dark:bg-gray-800 rounded-xl shadow-[0_20px_40px_-12px_rgba(0,0,0,0.08)] p-4 flex flex-col gap-2 mt-8 transform rotate-x-12 perspective-1000 border border-gray-100 dark:border-gray-700">
-                 <div className="flex items-center justify-between border-b border-gray-50 dark:border-gray-700 pb-2 mb-1">
-                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pipeline</span>
-                     <span className="w-1.5 h-1.5 bg-black dark:bg-white rounded-full animate-pulse"></span>
-                 </div>
-                 
-                 {/* List Items appearing */}
-                 {[...Array(3)].map((_, i) => (
-                     <div 
-                        key={i} 
-                        className="flex items-center gap-3 p-2.5 bg-gray-50 dark:bg-gray-700/50 rounded-lg animate-build-up"
-                        style={{ animationDelay: `${2 + i * 0.5}s`, animationFillMode: 'both', animationIterationCount: 'infinite', animationDirection: 'alternate' }}
-                     >
-                        <div className="w-6 h-6 bg-white dark:bg-gray-700 rounded-full flex items-center justify-center text-black dark:text-white font-serif font-bold text-[9px] shadow-sm border border-gray-100 dark:border-gray-600">{String.fromCharCode(65+i)}</div>
-                        <div className="flex-1 space-y-1.5">
-                            <div className="w-20 h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full"></div>
-                            <div className="w-12 h-1 bg-gray-100 dark:bg-gray-600 rounded-full"></div>
-                        </div>
-                        <div className="text-[9px] font-medium text-black dark:text-white bg-gray-200 dark:bg-gray-600 px-1.5 py-0.5 rounded">100%</div>
-                     </div>
-                 ))}
-             </div>
-        </div>
-      )
-    },
-    {
-      category: t('features.f3.cat'),
-      title: t('features.f3.title'),
-      description: t('features.f3.desc'),
-      icon: <Mic className="w-5 h-5" />,
-      link: t('features.f3.link'),
-      // CONCEPT: "The Live Stage" (Pitch Simulation) - Neutral Theme
-      renderVisual: () => (
-        <div className="w-full h-full bg-[#f9f9f8] dark:bg-gray-900 relative overflow-hidden flex flex-col items-center justify-end perspective-1000 transition-colors">
-            {/* The Projector Light Beam - Neutral White */}
-            <div className="absolute bottom-[-50px] left-1/2 -translate-x-1/2 w-64 h-full bg-gradient-to-t from-white via-white/40 to-transparent dark:from-white/10 dark:via-white/5 dark:to-transparent blur-3xl animate-projector origin-bottom pointer-events-none opacity-50"></div>
-
-            {/* The Floating Screen */}
-            <div className="relative mb-12 w-[85%] aspect-video bg-white dark:bg-gray-800 rounded-xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] overflow-hidden transform rotate-x-2 transition-transform hover:scale-105 duration-500 border border-gray-100 dark:border-gray-700">
-                {/* Slides Cycling Container */}
-                <div className="absolute inset-0 w-full h-full">
-                    {/* Slide 1: Problem */}
-                    <div className="absolute inset-0 p-6 flex flex-col items-center justify-center bg-white dark:bg-gray-800 animate-slide-cycle" style={{ animationDelay: '0s' }}>
-                        <div className="w-10 h-10 bg-gray-50 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
-                             <Target size={20} className="text-black dark:text-white" />
-                        </div>
-                        <h4 className="font-serif-display text-lg font-bold text-gray-900 dark:text-white mb-2">Problemet</h4>
-                        <div className="w-32 h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full mb-1.5"></div>
-                        <div className="w-20 h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full"></div>
-                    </div>
-
-                    {/* Slide 2: Solution */}
-                    <div className="absolute inset-0 p-6 flex flex-col items-center justify-center bg-white dark:bg-gray-800 animate-slide-cycle opacity-0 transform translate-x-full" style={{ animationDelay: '4s' }}>
-                         <div className="w-10 h-10 bg-gray-50 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
-                             <Zap size={20} className="text-black dark:text-white" />
-                        </div>
-                        <h4 className="font-serif-display text-lg font-bold text-gray-900 dark:text-white mb-2">Lösningen</h4>
-                        <div className="flex gap-2 mt-2">
-                            <div className="w-8 h-10 bg-gray-50 dark:bg-gray-700 rounded-md border border-gray-100 dark:border-gray-600"></div>
-                            <div className="w-8 h-10 bg-gray-100 dark:bg-gray-600 rounded-md border border-gray-200 dark:border-gray-500"></div>
-                            <div className="w-8 h-10 bg-gray-50 dark:bg-gray-700 rounded-md border border-gray-100 dark:border-gray-600"></div>
-                        </div>
-                    </div>
-
-                    {/* Slide 3: Growth */}
-                    <div className="absolute inset-0 p-6 flex flex-col items-center justify-center bg-white dark:bg-gray-800 animate-slide-cycle opacity-0 transform translate-x-full" style={{ animationDelay: '8s' }}>
-                         <div className="w-10 h-10 bg-gray-50 dark:bg-gray-700 rounded-full flex items-center justify-center mb-3">
-                             <TrendingUp size={20} className="text-black dark:text-white" />
-                        </div>
-                        <h4 className="font-serif-display text-lg font-bold text-gray-900 dark:text-white mb-2">Tillväxt</h4>
-                        <div className="w-full h-16 flex items-end justify-center gap-1.5 px-8 pb-2">
-                            <div className="w-6 h-[30%] bg-gray-200 dark:bg-gray-600 rounded-t-sm"></div>
-                            <div className="w-6 h-[50%] bg-gray-300 dark:bg-gray-500 rounded-t-sm"></div>
-                            <div className="w-6 h-[70%] bg-gray-400 dark:bg-gray-400 rounded-t-sm"></div>
-                            <div className="w-6 h-[100%] bg-black dark:bg-white rounded-t-sm shadow-lg"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* The Projector Device */}
-            <div className="absolute bottom-0 w-32 h-6 bg-gray-100 dark:bg-gray-800 rounded-t-2xl shadow-inner flex justify-center items-start pt-1.5 z-10">
-                <div className="w-12 h-3 bg-gray-300 dark:bg-gray-600 rounded-full blur-[2px]"></div>
-            </div>
-        </div>
-      )
-    }
-  ];
 
   return (
-    <section className="py-24 bg-white dark:bg-black relative overflow-hidden transition-colors duration-300">
+    <div id="features" className="bg-white dark:bg-black transition-colors duration-300 overflow-hidden">
       
-      {/* Decorative Background Blobs - Neutral */}
-      <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-[800px] h-[800px] bg-beige-50 dark:bg-gray-900 rounded-full blur-3xl opacity-60 animate-pulse-slow pointer-events-none"></div>
-      <div className="absolute bottom-0 left-0 translate-y-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-gray-50 dark:bg-gray-900 rounded-full blur-3xl opacity-60 animate-pulse-slow pointer-events-none" style={{ animationDelay: '4s' }}></div>
-
-      <div className="max-w-7xl mx-auto px-6 relative z-10">
-        <div className="mb-24">
+      {/* Intro Header */}
+      <section className="py-32 px-6">
+        <div className="max-w-7xl mx-auto">
           <RevealOnScroll>
-            <p className="text-sm font-medium tracking-widest text-gray-500 dark:text-gray-400 mb-6 uppercase">{t('features.tag')}</p>
-            <h2 className="font-serif-display text-5xl md:text-7xl leading-[1.0] text-gray-900 dark:text-white max-w-4xl whitespace-pre-line">
-              {t('features.title')}
-            </h2>
+            <div className="flex flex-col md:flex-row md:items-end justify-between gap-8 border-b border-black dark:border-white pb-12">
+                <h2 className="font-serif-display text-6xl md:text-8xl text-black dark:text-white leading-[0.9]">
+                  En plattform.<br/>
+                  Oändliga möjligheter.
+                </h2>
+                <p className="text-xl text-gray-500 max-w-md mb-2">
+                    Aceverse binder samman din data, dina mål och ditt team i ett enda sömlöst flöde.
+                </p>
+            </div>
           </RevealOnScroll>
         </div>
+      </section>
 
-        <div className="grid md:grid-cols-3 gap-8">
-          {features.map((feature, idx) => (
-            <RevealOnScroll key={idx} delay={idx * 150}>
-              <div 
-                className="group cursor-pointer"
-                onClick={() => onNavigate && onNavigate('login')}
-              >
-                {/* Borderless container with light gray background */}
-                <div className="relative aspect-[3/4] mb-8 overflow-hidden rounded-2xl transition-all duration-500 group-hover:shadow-2xl group-hover:-translate-y-2 bg-[#f9f9f8] dark:bg-gray-900">
-                  {/* Render the AI Animation Component */}
-                  {feature.renderVisual && feature.renderVisual()}
-                </div>
-                
-                <h3 className="text-2xl font-serif-display mb-3 group-hover:text-black dark:group-hover:text-white transition-colors text-gray-900 dark:text-white">{feature.category}</h3>
-                <p className="text-gray-600 dark:text-gray-400 mb-4 text-sm leading-relaxed pr-4 group-hover:text-gray-900 dark:group-hover:text-gray-300 transition-colors">
-                  {feature.description}
-                </p>
-                <div className="flex items-center gap-2 text-sm font-medium text-black dark:text-white group-hover:underline decoration-1 underline-offset-4 opacity-70 group-hover:opacity-100 transition-all">
-                  {feature.link} <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
-                </div>
-              </div>
-            </RevealOnScroll>
-          ))}
-        </div>
-      </div>
-    </section>
+      {/* Feature 1: Intelligence */}
+      <section className="py-24 px-6 border-b border-gray-100 dark:border-gray-900">
+          <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-20 items-center">
+              <RevealOnScroll>
+                  <div className="mb-6 w-12 h-12 flex items-center justify-center border border-black dark:border-white rounded-full">
+                      <Brain size={20} className="text-black dark:text-white"/>
+                  </div>
+                  <h3 className="font-serif-display text-4xl md:text-5xl mb-6 text-black dark:text-white">Entrepreneurial Intelligence.</h3>
+                  <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed mb-8">
+                      Aceverse är inte bara ett verktyg, det är en hjärna. Ditt CRM pratar med din Marknadsföring. Din Pitch-studio vet vad du säljer. Allt hänger ihop för att ge dig insikter som inget annat system kan.
+                  </p>
+                  <ul className="space-y-4">
+                      {['Kontextuellt minne', 'Automatisk data-delning', 'Proaktiva förslag'].map((item, i) => (
+                          <li key={i} className="flex items-center gap-3 text-sm font-bold text-black dark:text-white uppercase tracking-wide">
+                              <div className="w-1.5 h-1.5 bg-black dark:bg-white rounded-full"></div> {item}
+                          </li>
+                      ))}
+                  </ul>
+              </RevealOnScroll>
+              
+              <RevealOnScroll delay={200}>
+                  {/* Abstract Visual: Connected Nodes */}
+                  <div className="aspect-square bg-gray-50 dark:bg-zinc-900 rounded-[3rem] relative overflow-hidden flex items-center justify-center group">
+                      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.05)_0%,transparent_70%)] dark:bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05)_0%,transparent_70%)]"></div>
+                      
+                      {/* Central Hub */}
+                      <div className="w-24 h-24 bg-black dark:bg-white rounded-full z-10 flex items-center justify-center shadow-2xl relative">
+                          <Zap size={32} className="text-white dark:text-black animate-pulse"/>
+                      </div>
+
+                      {/* Satellites */}
+                      {[0, 90, 180, 270].map((deg, i) => (
+                          <div key={i} className="absolute w-full h-full flex items-center justify-center" style={{ transform: `rotate(${deg}deg)` }}>
+                              <div className="w-px h-32 bg-gradient-to-b from-transparent via-black/20 dark:via-white/20 to-transparent absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-full origin-bottom group-hover:h-40 transition-all duration-700"></div>
+                              <div className="absolute top-[15%] w-12 h-12 border border-black/10 dark:border-white/10 rounded-full flex items-center justify-center bg-white dark:bg-black group-hover:scale-110 transition-transform">
+                                  <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </RevealOnScroll>
+          </div>
+      </section>
+
+      {/* Feature 2: Compliance (Reversed Layout) */}
+      <section className="py-24 px-6 border-b border-gray-100 dark:border-gray-900">
+          <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-20 items-center">
+              <RevealOnScroll className="lg:order-2">
+                  <div className="mb-6 w-12 h-12 flex items-center justify-center border border-black dark:border-white rounded-full">
+                      <BookOpen size={20} className="text-black dark:text-white"/>
+                  </div>
+                  <h3 className="font-serif-display text-4xl md:text-5xl mb-6 text-black dark:text-white">Tränad på UF-Kriterier.</h3>
+                  <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed mb-8">
+                      Vår AI gissar inte. Den är tränad på UF:s officiella bedömningsmatriser och tävlingshandbok. Få feedback som faktiskt höjer ditt betyg och förbereder dig för juryn.
+                  </p>
+                  <button onClick={() => onNavigate && onNavigate('product')} className="group flex items-center gap-2 text-sm font-black uppercase tracking-widest text-black dark:text-white border-b-2 border-black dark:border-white pb-1 hover:opacity-70 transition-opacity">
+                      Läs om UF-läraren <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform"/>
+                  </button>
+              </RevealOnScroll>
+
+              <RevealOnScroll delay={200} className="lg:order-1">
+                  {/* Visual: Grading / Checkmarks */}
+                  <div className="aspect-[4/3] bg-gray-50 dark:bg-zinc-900 rounded-[3rem] p-12 relative overflow-hidden flex flex-col justify-center gap-4">
+                      {[1, 2, 3].map((_, i) => (
+                          <div key={i} className="flex items-center gap-4 p-4 bg-white dark:bg-black rounded-2xl border border-gray-100 dark:border-zinc-800 shadow-sm transform transition-all hover:scale-105 hover:border-black dark:hover:border-white">
+                              <div className="w-8 h-8 rounded-full bg-black dark:bg-white flex items-center justify-center text-white dark:text-black shrink-0">
+                                  <CheckCircle2 size={16} />
+                              </div>
+                              <div className="flex-1 h-2 bg-gray-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                  <div className="h-full bg-black dark:bg-white w-[80%]"></div>
+                              </div>
+                              <span className="text-xs font-bold font-mono">10/10</span>
+                          </div>
+                      ))}
+                  </div>
+              </RevealOnScroll>
+          </div>
+      </section>
+
+      {/* Feature 3: Teams */}
+      <section className="py-24 px-6">
+          <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-20 items-center">
+              <RevealOnScroll>
+                  <div className="mb-6 w-12 h-12 flex items-center justify-center border border-black dark:border-white rounded-full">
+                      <Users size={20} className="text-black dark:text-white"/>
+                  </div>
+                  <h3 className="font-serif-display text-4xl md:text-5xl mb-6 text-black dark:text-white">Teams Mode.</h3>
+                  <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed mb-8">
+                      UF är en lagsport. Arbeta i samma vy, dela leads, chatta och bygg bolaget tillsammans i realtid. Ingen hamnar efter, alla har samma information.
+                  </p>
+              </RevealOnScroll>
+
+              <RevealOnScroll delay={200}>
+                  {/* Visual: Collaboration (Replaced with Product Page Chat UI) */}
+                  <div className="relative h-[500px] w-full bg-white dark:bg-black rounded-[3rem] border-2 border-black dark:border-white p-6 overflow-hidden shadow-[10px_10px_0px_0px_rgba(0,0,0,1)] dark:shadow-[10px_10px_0px_0px_rgba(255,255,255,1)] flex flex-col">
+                      
+                      {/* Window Controls - Monochrome */}
+                      <div className="flex gap-2 mb-6">
+                          <div className="w-2.5 h-2.5 rounded-full bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"></div>
+                          <div className="w-2.5 h-2.5 rounded-full bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"></div>
+                          <div className="w-2.5 h-2.5 rounded-full bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"></div>
+                      </div>
+
+                      {/* Header */}
+                      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-4 mb-4">
+                          <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center font-bold text-xs">A</div>
+                              <div>
+                                  <h4 className="font-bold text-xs text-black dark:text-white">EcoWear UF Team</h4>
+                                  <span className="text-[9px] text-gray-500 font-bold uppercase tracking-wide flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white"></span> 3 Online</span>
+                              </div>
+                          </div>
+                      </div>
+
+                      {/* Chat Messages */}
+                      <div className="flex-1 space-y-4 overflow-y-auto custom-scrollbar p-1">
+                          
+                          {/* User 1 */}
+                          <div className="flex gap-3 animate-[slideUp_0.5s_ease-out_forwards]" style={{animationDelay: '0.1s'}}>
+                              <div className="w-6 h-6 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center text-[9px] font-bold text-gray-500">VD</div>
+                              <div className="flex-1">
+                                  <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl rounded-tl-sm p-3 text-xs text-gray-700 dark:text-gray-300">
+                                      Hur går det med säljpitchen?
+                                  </div>
+                              </div>
+                          </div>
+
+                          {/* User 2 */}
+                          <div className="flex gap-3 flex-row-reverse animate-[slideUp_0.5s_ease-out_forwards]" style={{animationDelay: '0.5s'}}>
+                              <div className="w-6 h-6 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center text-[9px] font-bold">MK</div>
+                              <div className="flex-1 flex flex-col items-end">
+                                  <div className="bg-black dark:bg-white text-white dark:text-black rounded-2xl rounded-tr-sm p-3 text-xs">
+                                      Klar! Har laddat upp den. 🚀
+                                  </div>
+                              </div>
+                          </div>
+
+                          {/* System / AI Message - Monochrome */}
+                          <div className="flex justify-center animate-[slideUp_0.5s_ease-out_forwards]" style={{animationDelay: '1.2s'}}>
+                              <div className="bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-3 rounded-2xl max-w-[90%] flex items-start gap-2">
+                                  <div className="w-6 h-6 bg-black dark:bg-white rounded-lg flex items-center justify-center text-white dark:text-black shrink-0"><Zap size={12} fill="currentColor"/></div>
+                                  <div>
+                                      <span className="text-[8px] font-black uppercase tracking-widest text-black dark:text-white mb-1 block">Aceverse Intelligence</span>
+                                      <p className="text-[10px] text-gray-700 dark:text-gray-300 font-medium leading-relaxed">
+                                          Jag har analyserat pitchen. Ni saknar en "Call to Action" enligt <strong>Kriterie 5</strong>. Vill ni ha förslag?
+                                      </p>
+                                  </div>
+                              </div>
+                          </div>
+
+                          {/* User 1 Response */}
+                          <div className="flex gap-3 animate-[slideUp_0.5s_ease-out_forwards]" style={{animationDelay: '2.5s', opacity: 0}}>
+                              <div className="w-6 h-6 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center text-[9px] font-bold text-gray-500">VD</div>
+                              <div className="flex-1">
+                                  <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl rounded-tl-sm p-3 text-xs text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                      <div className="flex gap-1">
+                                          <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce"></div>
+                                          <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce delay-100"></div>
+                                          <div className="w-1 h-1 bg-gray-400 rounded-full animate-bounce delay-200"></div>
+                                      </div>
+                                  </div>
+                              </div>
+                          </div>
+
+                      </div>
+
+                      {/* Input Area */}
+                      <div className="mt-4 relative">
+                          <div className="h-10 bg-gray-50 dark:bg-gray-900 rounded-full border border-gray-200 dark:border-gray-800 flex items-center px-4 justify-between">
+                              <span className="text-xs text-gray-400">Skriv till teamet...</span>
+                              <div className="w-6 h-6 bg-black dark:bg-white rounded-full flex items-center justify-center text-white dark:text-black">
+                                  <ArrowRight size={10}/>
+                              </div>
+                          </div>
+                      </div>
+
+                  </div>
+              </RevealOnScroll>
+          </div>
+      </section>
+
+    </div>
   );
 };
 

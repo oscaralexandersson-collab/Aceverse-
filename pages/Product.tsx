@@ -1,234 +1,332 @@
 
 import React from 'react';
-import { Check, ArrowRight, Sparkles, MessageSquare, BarChart3, PieChart, Zap, Target, Search, CheckCircle2 } from 'lucide-react';
+import { 
+    Check, ArrowRight, Sparkles, MessageSquare, BarChart3, PieChart, 
+    Zap, Target, Search, CheckCircle2, User, Mic, Send, Globe, 
+    FileText, Users, Share2, Briefcase, Brain, Layers, MousePointer2, Plus, Terminal, ArrowUpRight, TrendingUp, BookOpen, Award
+} from 'lucide-react';
 import { PageProps } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
-import { translations } from '../utils/translations';
 import RevealOnScroll from '../components/RevealOnScroll';
 
 const Product: React.FC<PageProps> = ({ onNavigate }) => {
-  const { t, language } = useLanguage();
-  
-  // Need to safely cast/retrieve list from translations because 't' returns string.
-  // Accessing directly from object for array data
-  const featureList = (translations[language] as any).product.f1.list as string[];
+  const { t } = useLanguage();
 
   return (
-    <div className="pt-20 pb-24">
-      {/* Product Hero */}
-      <section className="px-6 mb-32">
-        <div className="max-w-7xl mx-auto">
+    <div className="pt-20 pb-24 bg-white dark:bg-black overflow-hidden transition-colors duration-300 font-sans">
+      
+      {/* 1. INTRO: ENTREPRENEURIAL INTELLIGENCE */}
+      <section className="px-6 py-32 text-center relative border-b border-gray-100 dark:border-gray-900">
+        <div className="max-w-5xl mx-auto">
           <RevealOnScroll>
-            <span className="text-sm font-semibold tracking-widest text-gray-500 dark:text-gray-400 uppercase mb-4 block">{t('product.tag')}</span>
-            <h1 className="font-serif-display text-6xl md:text-8xl leading-[0.9] text-gray-900 dark:text-white mb-12 max-w-5xl">
-              {t('product.title')}
+            {/* CLICKABLE BADGE */}
+            <button 
+                onClick={() => onNavigate('intelligence')}
+                className="group inline-flex items-center gap-2 px-6 py-2.5 rounded-full border border-black dark:border-white bg-transparent text-black dark:text-white text-[10px] font-black uppercase tracking-[0.15em] mb-8 hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all"
+            >
+                <Brain size={14} /> Entrepreneurial Intelligence <ArrowUpRight size={14} className="group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform"/>
+            </button>
+            <h1 className="font-serif-display text-5xl md:text-8xl leading-[0.95] text-black dark:text-white mb-8 tracking-tight font-medium">
+              Mer än bara verktyg.<br/>
+              <span className="font-bold border-b-4 border-black dark:border-white">Det är intelligens.</span>
             </h1>
-            <p className="text-xl text-gray-600 dark:text-gray-300 max-w-2xl leading-relaxed">
-              {t('product.desc')}
+            <p className="text-xl md:text-2xl text-gray-600 dark:text-gray-300 max-w-3xl mx-auto leading-relaxed mb-16 font-light">
+              Aceverse är inte en samling isolerade appar. Det är ett ekosystem där ditt CRM pratar med din Marknadsföring, och där din Pitch-coach vet exakt vad du säljer. Allt hänger ihop.
             </p>
+
+            {/* NEW: UF CRITERIA BAR */}
+            <div className="inline-flex flex-col md:flex-row items-center gap-6 md:gap-12 py-6 px-10 bg-gray-50 dark:bg-gray-900 rounded-full border border-gray-100 dark:border-gray-800">
+                <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 rounded-full bg-black dark:bg-white flex items-center justify-center text-white dark:text-black"><Check size={12} strokeWidth={4} /></div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">Byggt på UF-läroplanen</span>
+                </div>
+                <div className="hidden md:block w-px h-4 bg-gray-300 dark:bg-gray-700"></div>
+                <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 rounded-full bg-black dark:bg-white flex items-center justify-center text-white dark:text-black"><Check size={12} strokeWidth={4} /></div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-gray-300">Optimerad för Tävlingskriterier</span>
+                </div>
+            </div>
+
           </RevealOnScroll>
         </div>
       </section>
 
-      {/* Feature 1: AI Advisor Visual */}
-      <section className="px-6 py-24 bg-beige-50 dark:bg-gray-900 transition-colors">
-        <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center">
-            <RevealOnScroll>
-              {/* Abstract AI Chat Interface */}
-              <div className="w-full aspect-square md:aspect-[4/3] bg-white dark:bg-gray-800 rounded-2xl shadow-2xl border border-gray-100 dark:border-gray-700 relative overflow-hidden group">
-                  {/* Subtle Grid Background */}
-                  <div className="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.01)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.01)_1px,transparent_1px)] dark:bg-[linear-gradient(rgba(255,255,255,0.01)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.01)_1px,transparent_1px)] bg-[size:20px_20px]"></div>
+      {/* 2. THE MEGA BENTO GRID (AIRY VERSION - STRICT MONOCHROME) */}
+      <section className="px-6 py-32 bg-white dark:bg-black">
+        <div className="max-w-7xl mx-auto">
+            {/* Added gap-10 and auto-rows-[350px] for more air */}
+            <div className="grid grid-cols-1 md:grid-cols-6 md:grid-rows-3 gap-8 md:gap-12 auto-rows-[380px]">
+                
+                {/* A. ADVISOR (Large) */}
+                <div className="md:col-span-4 md:row-span-2 group relative bg-gray-50 dark:bg-gray-900 rounded-[3rem] border border-gray-100 dark:border-gray-800 overflow-hidden p-10 md:p-12 flex flex-col justify-between hover:border-black dark:hover:border-white transition-all duration-500 hover:shadow-2xl">
+                    <div>
+                        <div className="flex items-center justify-between mb-8">
+                            <div className="flex items-center gap-4">
+                                <div className="w-14 h-14 bg-black dark:bg-white rounded-full flex items-center justify-center text-white dark:text-black"><MessageSquare size={24}/></div>
+                                <h3 className="font-serif-display text-4xl text-black dark:text-white">UF-läraren</h3>
+                            </div>
+                            <span className="hidden md:inline-flex items-center gap-2 px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-widest text-gray-400">
+                                <BookOpen size={12}/> Kan UF-Handboken
+                            </span>
+                        </div>
+                        <p className="text-gray-500 dark:text-gray-400 max-w-lg text-xl leading-relaxed">
+                            En medgrundare som aldrig sover. Få feedback direkt baserad på <strong>UF:s bedömningsmatris</strong> för affärsplaner och strategisk vägledning i realtid.
+                        </p>
+                    </div>
+                    {/* UI Mockup - Monochrome */}
+                    <div className="mt-12 bg-white dark:bg-black rounded-t-3xl border-t border-x border-gray-200 dark:border-gray-800 p-8 relative translate-y-6 group-hover:translate-y-0 transition-transform duration-500 shadow-lg">
+                        <div className="flex gap-4 mb-6">
+                            <div className="w-10 h-10 rounded-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center"><Zap size={18} className="text-black dark:text-white"/></div>
+                            <div className="bg-gray-50 dark:bg-gray-900 p-5 rounded-3xl rounded-tl-none text-base text-black dark:text-white w-full border border-gray-100 dark:border-gray-800 shadow-sm">
+                                Enligt <span className="font-bold border-b border-black dark:border-white">Tävlingskriterierna</span> saknar er målgruppsanalys kvantitativ data. Ska vi fixa det?
+                            </div>
+                        </div>
+                        <div className="flex gap-4 flex-row-reverse">
+                            <div className="w-10 h-10 rounded-full bg-black dark:bg-white flex items-center justify-center text-white dark:text-black"><User size={18}/></div>
+                            <div className="bg-black dark:bg-white text-white dark:text-black p-5 rounded-3xl rounded-tr-none text-base shadow-sm">
+                                Ja, hjälp oss ta fram siffror!
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
-                  <div className="absolute inset-0 p-8 flex flex-col justify-center relative z-10">
-                      <div className="flex flex-col gap-6 max-w-md mx-auto w-full">
-                           
-                           {/* Message 1: User */}
-                           <div className="self-end bg-black dark:bg-white text-white dark:text-black p-4 rounded-2xl rounded-br-none shadow-lg transform translate-y-2 animate-[slideUp_0.8s_ease-out_forwards] max-w-[80%]">
-                               <p className="text-sm font-medium opacity-90">Hur sätter jag rätt pris på min produkt?</p>
-                           </div>
+                {/* B. MARKETING ENGINE (Tall) */}
+                <div className="md:col-span-2 md:row-span-2 bg-black dark:bg-white text-white dark:text-black rounded-[3rem] p-10 flex flex-col relative overflow-hidden group border border-black dark:border-white">
+                    <div className="relative z-10 h-full flex flex-col justify-between">
+                        <div>
+                            <div className="w-14 h-14 bg-white/20 dark:bg-black/10 rounded-full flex items-center justify-center backdrop-blur-sm mb-8"><Globe size={28}/></div>
+                            <h3 className="font-serif-display text-4xl mb-6">Marketing Engine</h3>
+                            <p className="text-white/70 dark:text-black/70 text-lg mb-8 leading-relaxed">Generera LinkedIn-inlägg och content-planer direkt från din CRM-data. <br/><br/><span className="text-white dark:text-black font-bold border-b border-white/30 dark:border-black/30">Bygger varumärke enligt juryns krav.</span></p>
+                        </div>
+                        <button className="bg-white dark:bg-black text-black dark:text-white px-8 py-4 rounded-full text-xs font-bold uppercase tracking-widest hover:scale-105 transition-transform flex items-center gap-3 w-fit">
+                            Skapa Kampanj <ArrowRight size={14}/>
+                        </button>
+                    </div>
+                    {/* Abstract Content Flow - Wireframe style */}
+                    <div className="absolute bottom-0 right-0 w-full h-1/2 flex flex-col gap-3 p-6 opacity-30 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
+                        <div className="bg-white/10 dark:bg-black/10 p-4 rounded-xl border border-white/20 dark:border-black/20 transform translate-x-12 rotate-[-5deg]">
+                            <div className="h-2 w-full bg-white/10 dark:bg-black/10 rounded mb-2"></div>
+                            <div className="h-2 w-2/3 bg-white/10 dark:bg-black/10 rounded"></div>
+                        </div>
+                        <div className="bg-white/10 dark:bg-black/10 p-4 rounded-xl border border-white/20 dark:border-black/20 transform translate-x-4">
+                             <div className="h-2 w-full bg-white/10 dark:bg-black/10 rounded mb-2"></div>
+                             <div className="h-2 w-1/2 bg-white/10 dark:bg-black/10 rounded"></div>
+                        </div>
+                    </div>
+                </div>
 
-                           {/* Typing Indicator - Neutral */}
-                           <div className="self-start flex items-center gap-2 mb-1 animate-[fadeIn_0.5s_ease-out_0.8s_forwards] opacity-0">
-                               <div className="w-6 h-6 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center border border-gray-200 dark:border-gray-600">
-                                   <Sparkles size={12} className="text-gray-500 dark:text-gray-400" />
-                               </div>
-                               <span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Aceverse AI tänker...</span>
-                           </div>
+                {/* C. CRM (Wide) - UPDATED VISUAL: Monochrome Deals List */}
+                <div className="md:col-span-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-[3rem] p-10 flex flex-col justify-between group hover:border-black dark:hover:border-white transition-all hover:shadow-xl">
+                    <div className="flex justify-between items-start mb-4">
+                        <div>
+                            <h3 className="font-serif-display text-3xl text-black dark:text-white mb-2">Smart CRM</h3>
+                            <p className="text-gray-500">Hantera sponsorer & sälj. <span className="block text-xs font-bold uppercase tracking-wider mt-2 text-black dark:text-white">Krav för "Årets Säljare"</span></p>
+                        </div>
+                        <div className="w-12 h-12 border border-gray-200 dark:border-gray-700 rounded-full flex items-center justify-center text-black dark:text-white"><Target size={24}/></div>
+                    </div>
+                    {/* Deal Pipeline Visualization (Monochrome) */}
+                    <div className="space-y-4">
+                        <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-black border border-gray-100 dark:border-gray-800 rounded-2xl">
+                            <div className="flex items-center gap-4">
+                                <div className="w-3 h-3 rounded-full bg-black dark:bg-white"></div>
+                                <div>
+                                    <div className="text-sm font-bold text-black dark:text-white">ICA Maxi</div>
+                                    <div className="text-[10px] text-gray-500 uppercase tracking-wide">Förhandling</div>
+                                </div>
+                            </div>
+                            <div className="text-sm font-bold font-mono">15 000 kr</div>
+                        </div>
+                        <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-black border border-gray-100 dark:border-gray-800 rounded-2xl opacity-60 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-4">
+                                <div className="w-3 h-3 rounded-full border-2 border-gray-400"></div>
+                                <div>
+                                    <div className="text-sm font-bold text-black dark:text-white">TechHub AB</div>
+                                    <div className="text-[10px] text-gray-500 uppercase tracking-wide">Möte bokat</div>
+                                </div>
+                            </div>
+                            <div className="text-sm font-bold font-mono">8 500 kr</div>
+                        </div>
+                    </div>
+                </div>
 
-                           {/* Message 2: AI Response */}
-                           <div className="self-start bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-6 rounded-2xl rounded-bl-none shadow-xl transform animate-[slideUp_0.8s_ease-out_1.5s_forwards] opacity-0 relative overflow-hidden">
-                               {/* Shimmer effect for "loading" text feel */}
-                               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-gray-50/50 dark:via-gray-700/50 to-transparent translate-x-[-100%] animate-[shimmer_2s_infinite]"></div>
-                               
-                               <div className="space-y-3">
-                                   <div className="flex items-center gap-2 mb-2">
-                                       <span className="text-xs font-bold text-gray-900 dark:text-white">Analys klar</span>
-                                       <Check size={12} className="text-black dark:text-white" />
-                                   </div>
-                                   <div className="h-2 w-full bg-gray-100 dark:bg-gray-700 rounded-full"></div>
-                                   <div className="h-2 w-[90%] bg-gray-100 dark:bg-gray-700 rounded-full"></div>
-                                   <div className="h-2 w-[60%] bg-gray-100 dark:bg-gray-700 rounded-full"></div>
-                               </div>
-                               
-                               {/* Floating Insight Card - Neutral */}
-                               <div className="mt-4 bg-beige-50 dark:bg-gray-700/30 p-3 rounded-lg border border-gray-200 dark:border-gray-600 flex items-start gap-3">
-                                   <Zap size={16} className="text-black dark:text-white mt-0.5" />
-                                   <div>
-                                       <div className="text-xs font-bold text-gray-900 dark:text-white mb-1">Strategiförslag</div>
-                                       <div className="text-[10px] text-gray-600 dark:text-gray-300 leading-tight">Baserat på dina konkurrenter rekommenderar jag en freemium-modell.</div>
-                                   </div>
-                               </div>
-                           </div>
-                      </div>
-                  </div>
-              </div>
-            </RevealOnScroll>
-            
-            <RevealOnScroll delay={200}>
-              <div>
-                  <h2 className="font-serif-display text-4xl md:text-5xl mb-6 text-gray-900 dark:text-white">{t('product.f1.title')}</h2>
-                  <p className="text-gray-600 dark:text-gray-300 text-lg mb-8">
-                      {t('product.f1.desc')}
-                  </p>
-                  <ul className="space-y-4 mb-8">
-                      {featureList.map((item, idx) => (
-                          <li key={item} className="flex items-center gap-3 text-gray-800 dark:text-gray-200 font-medium" style={{ transitionDelay: `${idx * 100}ms` }}>
-                              <div className="bg-black dark:bg-white text-white dark:text-black rounded-full p-1"><Check size={12} /></div>
-                              {item}
-                          </li>
-                      ))}
-                  </ul>
-              </div>
-            </RevealOnScroll>
+                {/* D. PITCH STUDIO (Square) - UPDATED VISUAL: Monochrome Scorecard */}
+                <div className="md:col-span-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-[3rem] p-10 group hover:border-black dark:hover:border-white transition-all hover:shadow-xl">
+                    <div className="flex justify-between items-start mb-8">
+                        <div>
+                            <h3 className="font-serif-display text-3xl text-black dark:text-white mb-2">Pitch Studio</h3>
+                            <p className="text-gray-500">AI-bedömning enligt <br/><span className="text-black dark:text-white font-bold">UF:s tävlingsprotokoll.</span></p>
+                        </div>
+                        <div className="w-12 h-12 border border-gray-200 dark:border-gray-700 rounded-full flex items-center justify-center text-black dark:text-white"><Mic size={24}/></div>
+                    </div>
+                    {/* Scorecard Visualization (Monochrome) */}
+                    <div className="space-y-4 bg-gray-50 dark:bg-black p-5 rounded-3xl border border-gray-100 dark:border-gray-800">
+                        <div className="flex justify-between items-end mb-1">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Retorik (Kriterie 4)</span>
+                            <span className="text-xs font-bold text-black dark:text-white">8/10</span>
+                        </div>
+                        <div className="h-2 w-full bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden mb-4">
+                            <div className="h-full bg-black dark:bg-white w-[80%] rounded-full"></div>
+                        </div>
+                        
+                        <div className="flex justify-between items-end mb-1">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Struktur (Kriterie 2)</span>
+                            <span className="text-xs font-bold text-gray-500 dark:text-gray-400">6/10</span>
+                        </div>
+                        <div className="h-2 w-full bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-full bg-gray-400 dark:bg-gray-600 w-[60%] rounded-full"></div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* E. REPORT BUILDER (Wide) - UPDATED TEXT */}
+                <div className="md:col-span-6 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-[3rem] p-12 flex flex-col md:flex-row items-center justify-between group hover:border-black dark:hover:border-white transition-all">
+                    <div className="max-w-xl mb-8 md:mb-0">
+                        <div className="flex items-center gap-4 mb-4">
+                            <div className="p-3 bg-white dark:bg-black rounded-xl border border-gray-200 dark:border-gray-700"><FileText size={28} className="text-black dark:text-white"/></div>
+                            <h3 className="font-serif-display text-4xl text-black dark:text-white">Rapport-Coachen</h3>
+                        </div>
+                        <p className="text-gray-500 dark:text-gray-400 text-lg leading-relaxed">
+                            Få professionell feedback på er årsredovisning. Aceverse hjälper er förbättra struktur och språk enligt <strong>tävlingsreglerna för Årets Årsredovisning</strong>.
+                        </p>
+                    </div>
+                    <button className="bg-white dark:bg-black border border-gray-200 dark:border-gray-700 text-black dark:text-white px-10 py-5 rounded-full font-bold text-xs uppercase tracking-widest hover:bg-black hover:text-white dark:hover:bg-white dark:hover:text-black transition-all flex items-center gap-3 shadow-lg">
+                        Förbättra Rapport <ArrowRight size={16}/>
+                    </button>
+                </div>
+
+            </div>
         </div>
       </section>
 
-       {/* Feature 2: CRM Visual - The Lead Magnet */}
-       <section className="px-6 py-24">
-        <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center">
-            <RevealOnScroll>
-              <div>
-                  <h2 className="font-serif-display text-4xl md:text-5xl mb-6 text-gray-900 dark:text-white">{t('product.f2.title')}</h2>
-                  <p className="text-gray-600 dark:text-gray-300 text-lg mb-8">
-                     {t('product.f2.desc')}
-                  </p>
-                  <button 
-                    onClick={() => onNavigate('login')}
-                    className="flex items-center gap-2 text-black dark:text-white font-semibold hover:underline decoration-2 underline-offset-4"
-                  >
-                      {t('product.f2.link')} <ArrowRight size={16} />
-                  </button>
-              </div>
-            </RevealOnScroll>
-            
-            <RevealOnScroll delay={200}>
-               {/* Seamless 3D Gravity Core Visualization */}
-              <div className="relative w-full aspect-square md:aspect-[4/3] flex items-center justify-center perspective-1000">
-                  {/* Background Aura */}
-                  <div className="absolute w-[60%] h-[60%] bg-gray-100/80 dark:bg-gray-800/80 rounded-full blur-[80px] -z-10 animate-pulse-slow"></div>
+      {/* 3. TEAMS MODE SECTION (STRICT MONOCHROME CHAT) */}
+      <section className="px-6 py-32 bg-white dark:bg-black relative overflow-hidden">
+          
+          {/* Subtle Grid Background */}
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#f0f0f0_1px,transparent_1px),linear-gradient(to_bottom,#f0f0f0_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,#1a1a1a_1px,transparent_1px),linear-gradient(to_bottom,#1a1a1a_1px,transparent_1px)] bg-[size:60px_60px] opacity-50 pointer-events-none"></div>
 
-                  {/* The 3D Composition */}
-                  <div className="relative w-full h-full preserve-3d flex items-center justify-center">
+          <div className="max-w-7xl mx-auto relative z-10">
+              <div className="grid lg:grid-cols-2 gap-20 items-center">
+                  
+                  {/* Left: Text Content */}
+                  <div>
+                      <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-black dark:border-white bg-white dark:bg-black text-xs font-black uppercase tracking-widest mb-8">
+                          <Users size={14} /> Nyhet: Teams Mode
+                      </div>
+                      <h2 className="font-serif-display text-6xl md:text-7xl mb-8 leading-tight text-black dark:text-white">Bygg bolaget <br/> tillsammans.</h2>
+                      <p className="text-xl text-gray-600 dark:text-gray-400 leading-relaxed mb-12">
+                          UF-företagande är en lagsport. Med Aceverse Teams får alla i gruppen tillgång till samma hjärna. Dela leads, samarbeta i realtid och håll koll på vem som gör vad.
+                      </p>
+                      <ul className="space-y-6">
+                          {['Delad Arbetsyta', 'Rollfördelning', 'Internchatt & Video'].map((item, i) => (
+                              <li key={i} className="flex items-center gap-4 p-4 border-b border-gray-100 dark:border-gray-800 hover:border-black dark:hover:border-white transition-colors cursor-default group">
+                                  <div className="w-8 h-8 rounded-full border border-black dark:border-white flex items-center justify-center shrink-0 group-hover:bg-black group-hover:text-white dark:group-hover:bg-white dark:group-hover:text-black transition-colors"><Check size={14}/></div>
+                                  <h4 className="font-bold text-lg text-black dark:text-white">{item}</h4>
+                              </li>
+                          ))}
+                      </ul>
+                  </div>
+
+                  {/* Right: Simulated Team Chat - UPDATED (MONOCHROME) */}
+                  <div className="relative h-[600px] bg-white dark:bg-black rounded-[3rem] border-2 border-black dark:border-white p-8 overflow-hidden shadow-[15px_15px_0px_0px_rgba(0,0,0,1)] dark:shadow-[15px_15px_0px_0px_rgba(255,255,255,1)] flex flex-col">
                       
-                      {/* Central Intelligence Core */}
-                      <div className="relative w-32 h-32 preserve-3d animate-[float_6s_ease-in-out_infinite]">
-                          {/* The Black Box */}
-                          <div className="absolute inset-0 bg-gradient-to-br from-black to-gray-800 dark:from-white dark:to-gray-200 rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.2)] border border-gray-700/50 dark:border-gray-300/50 flex items-center justify-center z-20 transform rotate-12">
-                               <div className="relative w-16 h-16 border border-white/10 dark:border-black/10 rounded-full flex items-center justify-center">
-                                   <div className="absolute inset-0 border-t border-white/30 dark:border-black/30 rounded-full animate-spin"></div>
-                                   <Target className="text-white dark:text-black" size={28} strokeWidth={1.5} />
-                               </div>
-                          </div>
-                          {/* Decorative Elements behind core */}
-                          <div className="absolute inset-0 bg-gray-900/20 dark:bg-white/20 rounded-3xl transform -rotate-6 scale-110 -z-10 blur-sm"></div>
+                      {/* Window Controls - Monochrome */}
+                      <div className="flex gap-2 mb-6">
+                          <div className="w-3 h-3 rounded-full bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"></div>
+                          <div className="w-3 h-3 rounded-full bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"></div>
+                          <div className="w-3 h-3 rounded-full bg-gray-200 dark:bg-gray-800 border border-gray-300 dark:border-gray-700"></div>
                       </div>
 
-                      {/* Floating Lead Cards - Orbiting */}
-                      
-                      {/* Lead 1: Incoming (Top Right) - Glass Style */}
-                      <div className="absolute top-[15%] right-[10%] w-48 p-3 bg-white/80 dark:bg-gray-800/80 backdrop-blur-md border border-white/60 dark:border-gray-700 rounded-xl shadow-xl animate-float" style={{ animationDelay: '0.5s' }}>
-                          <div className="flex items-center gap-3 mb-2">
-                              <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 flex items-center justify-center text-xs font-bold border border-gray-200 dark:border-gray-600">JD</div>
+                      {/* Header */}
+                      <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-4 mb-4">
+                          <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center font-bold">A</div>
                               <div>
-                                  <div className="text-xs font-bold text-gray-900 dark:text-white">John Doe</div>
-                                  <div className="text-[10px] text-gray-500 dark:text-gray-400">CEO, TechStart</div>
-                              </div>
-                              <div className="ml-auto w-2 h-2 rounded-full bg-black dark:bg-white animate-pulse"></div>
-                          </div>
-                          <div className="h-1.5 w-full bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                              <div className="h-full bg-black dark:bg-white w-[85%] rounded-full"></div>
-                          </div>
-                          <div className="mt-1 flex justify-between text-[9px] text-gray-400 font-medium">
-                               <span>Match Score</span>
-                               <span>85%</span>
-                          </div>
-                      </div>
-
-                      {/* Lead 2: Processing (Left) - Glass Style */}
-                      <div className="absolute top-[40%] left-[5%] w-44 p-3 bg-white/70 dark:bg-gray-800/70 backdrop-blur-sm border border-white/60 dark:border-gray-700 rounded-xl shadow-lg animate-float blur-[0.5px] scale-95" style={{ animationDelay: '2s' }}>
-                          <div className="flex items-center gap-3 mb-2 opacity-80">
-                              <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center justify-center text-xs font-bold border border-gray-200 dark:border-gray-600">SJ</div>
-                              <div>
-                                  <div className="text-xs font-bold text-gray-900 dark:text-white">Sarah J.</div>
-                                  <div className="text-[10px] text-gray-500 dark:text-gray-400">Founder, Eco...</div>
+                                  <h4 className="font-bold text-sm text-black dark:text-white">EcoWear UF Team</h4>
+                                  <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wide flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-black dark:bg-white"></span> 3 Online</span>
                               </div>
                           </div>
-                          <div className="flex gap-1 mt-1">
-                              <div className="px-1.5 py-0.5 bg-gray-50 dark:bg-gray-700 border border-gray-100 dark:border-gray-600 rounded text-[9px] text-gray-600 dark:text-gray-300">SaaS</div>
-                              <div className="px-1.5 py-0.5 bg-gray-50 dark:bg-gray-700 border border-gray-100 dark:border-gray-600 rounded text-[9px] text-gray-600 dark:text-gray-300">Stockholm</div>
-                          </div>
                       </div>
 
-                      {/* Lead 3: Converted (Bottom Right - Stacked) - Black Card */}
-                      <div className="absolute bottom-[20%] right-[15%] w-52 bg-black dark:bg-white text-white dark:text-black p-4 rounded-xl shadow-2xl animate-float" style={{ animationDelay: '3.5s' }}>
-                          <div className="flex justify-between items-start mb-3">
-                              <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-full bg-white/20 dark:bg-black/10 flex items-center justify-center text-xs font-bold">MK</div>
+                      {/* Chat Messages */}
+                      <div className="flex-1 space-y-6 overflow-y-auto custom-scrollbar p-2">
+                          
+                          {/* User 1 */}
+                          <div className="flex gap-4 animate-[slideUp_0.5s_ease-out_forwards]" style={{animationDelay: '0.1s'}}>
+                              <div className="w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center text-xs font-bold text-gray-500">VD</div>
+                              <div className="flex-1">
+                                  <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl rounded-tl-sm p-4 text-sm text-gray-700 dark:text-gray-300">
+                                      Hur går det med säljpitchen till mässan?
+                                  </div>
+                                  <span className="text-[10px] text-gray-400 mt-1 block pl-1">Alice • 10:42</span>
+                              </div>
+                          </div>
+
+                          {/* User 2 */}
+                          <div className="flex gap-4 flex-row-reverse animate-[slideUp_0.5s_ease-out_forwards]" style={{animationDelay: '0.5s'}}>
+                              <div className="w-8 h-8 bg-black dark:bg-white text-white dark:text-black rounded-full flex items-center justify-center text-xs font-bold">MK</div>
+                              <div className="flex-1 flex flex-col items-end">
+                                  <div className="bg-black dark:bg-white text-white dark:text-black rounded-2xl rounded-tr-sm p-4 text-sm">
+                                      Klar! Har laddat upp utkastet i Pitch Studio nu. 🚀
+                                  </div>
+                                  <span className="text-[10px] text-gray-400 mt-1 block pr-1">Max • 10:45</span>
+                              </div>
+                          </div>
+
+                          {/* System / AI Message - Monochrome */}
+                          <div className="flex justify-center animate-[slideUp_0.5s_ease-out_forwards]" style={{animationDelay: '1.2s'}}>
+                              <div className="bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800 p-4 rounded-2xl max-w-[80%] flex items-start gap-3">
+                                  <div className="w-8 h-8 bg-black dark:bg-white rounded-lg flex items-center justify-center text-white dark:text-black shrink-0"><Zap size={16} fill="currentColor"/></div>
                                   <div>
-                                       <div className="text-xs font-bold">Möte Bokato</div>
-                                       <div className="text-[10px] text-gray-400 dark:text-gray-600">Tis 14:00</div>
+                                      <span className="text-[10px] font-black uppercase tracking-widest text-black dark:text-white mb-1 block">Aceverse Intelligence</span>
+                                      <p className="text-xs text-gray-700 dark:text-gray-300 font-medium leading-relaxed">
+                                          Snyggt jobbat! Jag har analyserat pitchen. Struktur och retorik ser bra ut, men ni saknar en tydlig "Call to Action" på slutet enligt <strong>Tävlingskriterie 5</strong>. Vill ni att jag ger förslag?
+                                      </p>
                                   </div>
                               </div>
-                              <div className="bg-white/20 dark:bg-black/10 p-1.5 rounded-full">
-                                  <CheckCircle2 size={12} />
+                          </div>
+
+                          {/* User 1 Response */}
+                          <div className="flex gap-4 animate-[slideUp_0.5s_ease-out_forwards]" style={{animationDelay: '2.5s', opacity: 0}}>
+                              <div className="w-8 h-8 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center text-xs font-bold text-gray-500">VD</div>
+                              <div className="flex-1">
+                                  <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl rounded-tl-sm p-4 text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                      <div className="flex gap-1">
+                                          <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce"></div>
+                                          <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-100"></div>
+                                          <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce delay-200"></div>
+                                      </div>
+                                  </div>
                               </div>
                           </div>
-                          <div className="p-2 bg-white/10 dark:bg-black/5 rounded text-[10px] text-gray-300 dark:text-gray-600 italic border border-white/5 dark:border-black/5">
-                              "Ser fram emot att höra mer..."
+
+                      </div>
+
+                      {/* Input Area */}
+                      <div className="mt-4 relative">
+                          <div className="h-12 bg-gray-50 dark:bg-gray-900 rounded-full border border-gray-200 dark:border-gray-800 flex items-center px-4 justify-between">
+                              <span className="text-sm text-gray-400">Skriv till teamet...</span>
+                              <div className="w-8 h-8 bg-black dark:bg-white rounded-full flex items-center justify-center text-white dark:text-black">
+                                  <ArrowRight size={14}/>
+                              </div>
                           </div>
                       </div>
-                      
-                      {/* Connecting Beams (SVG) */}
-                      <svg className="absolute inset-0 w-full h-full pointer-events-none drop-shadow-md">
-                          <defs>
-                              <linearGradient id="beamGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                  <stop offset="0%" stopColor="rgba(0,0,0,0.05)" />
-                                  <stop offset="50%" stopColor="rgba(0,0,0,0.2)" />
-                                  <stop offset="100%" stopColor="rgba(0,0,0,0.05)" />
-                              </linearGradient>
-                          </defs>
-                          <path d="M 70% 25% Q 50% 50% 55% 45%" fill="none" stroke="url(#beamGrad)" strokeWidth="1" strokeDasharray="4 4" className="animate-[shimmer_3s_linear_infinite]" />
-                          <path d="M 25% 45% Q 40% 50% 45% 50%" fill="none" stroke="url(#beamGrad)" strokeWidth="1" strokeDasharray="4 4" className="animate-[shimmer_4s_linear_infinite]" />
-                      </svg>
+
                   </div>
               </div>
-            </RevealOnScroll>
-        </div>
+          </div>
       </section>
 
-      {/* Bottom CTA */}
-      <section className="px-6 py-32 bg-black dark:bg-white text-white dark:text-black text-center transition-colors">
-        <div className="max-w-3xl mx-auto">
-            <RevealOnScroll>
-              <h2 className="font-serif-display text-5xl md:text-6xl mb-8">{t('product.cta.title')}</h2>
-              <button 
+      {/* CTA */}
+      <section className="px-6 py-32 text-center bg-gray-50 dark:bg-black border-t border-gray-100 dark:border-gray-900">
+        <RevealOnScroll>
+            <h2 className="font-serif-display text-5xl md:text-8xl text-black dark:text-white mb-10">Redo att bygga?</h2>
+            <button 
                 onClick={() => onNavigate('login')}
-                className="bg-white dark:bg-black text-black dark:text-white px-8 py-4 text-lg font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors rounded-full"
-              >
-                  {t('product.cta.btn')}
-              </button>
-            </RevealOnScroll>
-        </div>
+                className="bg-black dark:bg-white text-white dark:text-black px-12 py-6 rounded-full text-xl font-bold hover:shadow-2xl hover:-translate-y-1 transition-all border-2 border-transparent hover:border-black dark:hover:border-white"
+            >
+                Kom igång gratis
+            </button>
+        </RevealOnScroll>
       </section>
     </div>
   );

@@ -13,6 +13,7 @@ import Dashboard from './pages/Dashboard';
 import Contact from './pages/Contact';
 import About from './pages/About';
 import Onboarding from './pages/Onboarding';
+import Intelligence from './pages/Intelligence';
 import PageTransition from './components/PageTransition';
 import GlobalChatbot from './components/GlobalChatbot';
 import { Page, User } from './types';
@@ -194,6 +195,7 @@ function AppContent() {
     switch (currentPage) {
       case 'home': return <Home onNavigate={handleNavigation} />;
       case 'product': return <Product onNavigate={handleNavigation} />;
+      case 'intelligence': return <Intelligence onNavigate={handleNavigation} />;
       case 'solutions': return <Solutions onNavigate={handleNavigation} />;
       case 'security': return <SecurityPage />;
       case 'customers': return <Customers />;

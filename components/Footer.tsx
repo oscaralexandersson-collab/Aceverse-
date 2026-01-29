@@ -103,7 +103,7 @@ const Footer: React.FC<NavProps> = ({ onNavigate }) => {
         </div>
         
         <div className="mt-8 flex flex-col md:flex-row justify-between text-xs text-gray-500 dark:text-gray-400">
-            <p>&copy; 2025 Aceverse AB. {t('footer.rights')}</p>
+            <p>&copy; 2026 Aceverse. {t('footer.rights')}</p>
             <div className="flex gap-4 mt-4 md:mt-0">
                 <span>Stockholm // Västerås</span>
             </div>

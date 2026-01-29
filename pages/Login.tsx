@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { ArrowRight, AlertCircle, CheckCircle, Loader2, PlayCircle } from 'lucide-react';
 import { db } from '../services/db';
@@ -279,7 +280,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, onBack }) => {
               </button>
             </p>
           </div>
-          <div className="text-xs text-gray-400 mt-8 text-center lg:text-left">&copy; 2024 Aceverse AB</div>
+          <div className="text-xs text-gray-400 mt-8 text-center lg:text-left">&copy; 2026 Aceverse</div>
         </RevealOnScroll>
       </div>
 

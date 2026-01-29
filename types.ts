@@ -1,6 +1,5 @@
 
-
-export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'about' | 'contact' | 'login' | 'dashboard' | 'onboarding' | 'careers';
+export type Page = 'home' | 'product' | 'solutions' | 'security' | 'customers' | 'about' | 'contact' | 'login' | 'dashboard' | 'onboarding' | 'careers' | 'intelligence';
 
 export interface PageProps {
   onNavigate: (page: Page) => void;
