@@ -16,13 +16,14 @@ export const UF_KNOWLEDGE_BASE = `
 # 🔒 SYSTEM PROMPT: UF-LÄRAREN (DEEP CONTEXT MODE)
 
 ## DIN ROLL
-Du är den personliga AI-rådgivaren för ett UF-företag. Du har tillgång till realtidsdata från deras CRM, marknadsföring och idébank. 
+Du är den personliga AI-rådgivaren för ett UF-företag. Du har tillgång till realtidsdata från deras CRM, marknadsföring, idébank OCH deras årsredovisning/rapporter.
 Ditt uppdrag är att ge proaktiv, analytisk och extremt personlig feedback baserat på deras exakta situation.
 
 ## REGLER FÖR DATA-ANVÄNDNING
-1. **Referera till handlingar:** Om de precis vunnit en affär, gratulera dem. Om de har inlägg som utkast, hjälp dem publicera.
-2. **Koppla till affärsmodell:** Använd deras valda bransch och affärstyp (B2B/B2C) för att ge relevanta tips.
-3. **GDPR:** Lagra aldrig känsliga personuppgifter.
+1. **Rapporter & Analys:** Om användaren frågar om sin rapport, läs avsnittet "Senaste Rapportdata". Där finns den senaste AI-analysen, betyg och textinnehåll från uppladdade PDF:er. Citera exakta poäng om de finns.
+2. **Referera till handlingar:** Om de precis vunnit en affär, gratulera dem. Om de har inlägg som utkast, hjälp dem publicera.
+3. **Koppla till affärsmodell:** Använd deras valda bransch och affärstyp (B2B/B2C) för att ge relevanta tips.
+4. **GDPR:** Lagra aldrig känsliga personuppgifter.
 
 ## PEDAGOGISK PROFIL
 - Var professionell men engagerad.
@@ -120,26 +121,71 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
         } catch (err) { console.error(err); }
     };
 
+    const generateAutoTitle = async (firstUserMessage: string, sessionId: string) => {
+        try {
+            const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+            const prompt = `Sammanfatta följande fråga till en mycket kort och beskrivande rubrik (max 4-5 ord) för en chatt-historik. Svara BARA med rubriken, inget annat. Fråga: "${firstUserMessage}"`;
+            
+            const response = await ai.models.generateContent({
+                model: 'gemini-3-flash-preview',
+                contents: prompt
+            });
+            
+            const newTitle = response.text?.trim().replace(/^["']|["']$/g, '') || "Ny Konversation";
+            
+            await db.updateChatSession(user.id, sessionId, newTitle);
+            setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, name: newTitle } : s));
+        } catch (e) {
+            console.error("Auto-title failed", e);
+        }
+    };
+
     const generateAIResponse = async (text: string, sessionId: string, history: ChatMessage[]) => {
         setIsLoading(true);
         try {
             const data: UserData = await db.getUserData(user.id);
+            
+            // Scope filtering helper
+            const filterScope = (item: any) => {
+                const itemId = item.workspace_id;
+                if (viewScope === 'personal') return !itemId;
+                return activeWorkspace?.id && itemId === activeWorkspace.id;
+            };
+
+            // Get Reports
+            const reports = (data.fullReports || [])
+                .filter(filterScope)
+                .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+            
+            const recentReport = reports[0];
+            const reportContext = recentReport ? {
+                title: recentReport.company_name,
+                updated: new Date(recentReport.updated_at).toLocaleDateString(),
+                last_analysis_content: recentReport.last_analysis_content || "Ingen analys genomförd än.",
+                pdf_content_snippet: recentReport.sections.intro?.content?.substring(0, 500) + "..." || "Inget innehåll",
+                financials: recentReport.financials
+            } : "Ingen rapport skapad än.";
+
             const contextData = {
-                activeIdea: data.ideas.find(i => i.is_active_track),
-                recentSales: data.salesEvents.slice(0, 5),
-                activeDeals: data.deals.filter(d => d.stage !== 'WON' && d.stage !== 'LOST'),
-                recentPosts: data.marketingCampaigns.slice(0, 3).map(c => ({ name: c.name, status: c.status, date: c.dateCreated })),
-                events: data.ufEvents.filter(e => new Date(e.date_at) > new Date()).slice(0, 3)
+                activeIdea: data.ideas.filter(filterScope).find(i => i.is_active_track),
+                recentSales: data.salesEvents.filter(filterScope).slice(0, 5),
+                activeDeals: data.deals.filter(filterScope).filter(d => d.stage !== 'WON' && d.stage !== 'LOST'),
+                recentPosts: data.marketingCampaigns.filter(filterScope).slice(0, 3).map(c => ({ name: c.name, status: c.status, date: c.dateCreated })),
+                events: data.ufEvents.filter(filterScope).filter(e => new Date(e.date_at) > new Date()).slice(0, 3)
             };
 
             const deepContext = `
                 FÖRETAGSINFO: ${user.company}, Bransch: ${user.industry}, Typ: ${user.businessType}.
+                
                 AKTUELL PLATTFORMS-DATA:
                 - Idé: ${JSON.stringify(contextData.activeIdea?.snapshot || 'Ingen aktiv idé')}
                 - Senaste sälj: ${JSON.stringify(contextData.recentSales)}
                 - Aktiva deals: ${JSON.stringify(contextData.activeDeals)}
                 - Marknadsföring: ${JSON.stringify(contextData.recentPosts)}
                 - Kommande events: ${JSON.stringify(contextData.events)}
+                
+                - SENASTE RAPPORTDATA (VIKTIGT OM DE FRÅGAR OM ANALYS/BETYG):
+                ${JSON.stringify(reportContext, null, 2)}
             `;
 
             const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -163,7 +209,12 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
     const handleSend = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!input.trim() || isLoading) return;
+        
         let activeId = currentSessionId;
+        const text = input;
+        setInput('');
+
+        // Create new session if none selected
         if (!activeId) {
             const visibility = viewScope === 'workspace' ? 'shared' : 'private';
             const workspaceId = viewScope === 'workspace' ? activeWorkspace?.id : null;
@@ -172,8 +223,14 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
             setCurrentSessionId(newS.id);
             activeId = newS.id;
         }
-        const text = input;
-        setInput('');
+
+        // Check if we need to auto-rename (if name is generic and this is first/second msg)
+        const currentSession = sessions.find(s => s.id === activeId);
+        if (currentSession && (currentSession.name === 'Ny Chatt' || currentSession.name === 'Ny konversation')) {
+            // Trigger background rename, don't await it to block UI
+            generateAutoTitle(text, activeId);
+        }
+
         const userMsg = await db.addMessage(user.id, { role: 'user', text, session_id: activeId! });
         setMessages(prev => [...prev, userMsg]);
         await generateAIResponse(text, activeId!, messages);
@@ -314,7 +371,7 @@ const Advisor: React.FC<AdvisorProps> = ({ user, initialPrompt, onClearPrompt })
                                 value={input} 
                                 onChange={(e) => setInput(e.target.value)} 
                                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }} 
-                                placeholder={currentSessionId ? "Ställ en fråga om ditt CRM, sälj eller inlägg..." : "Välj en chatt..."} 
+                                placeholder={currentSessionId ? "Ställ en fråga om ditt CRM, sälj, rapporter eller inlägg..." : "Välj en chatt..."} 
                                 disabled={!currentSessionId} 
                                 className="flex-1 bg-transparent border-none focus:ring-0 resize-none py-4 px-6 text-base font-bold italic text-gray-900 dark:text-white placeholder:text-gray-400 outline-none rounded-[2rem]" 
                                 rows={1} 

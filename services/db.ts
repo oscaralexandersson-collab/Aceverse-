@@ -461,6 +461,12 @@ class DatabaseService {
       return data as FullReportProject;
   }
   async deleteFullReportProject(userId: string, id: string) { await supabase.from('full_report_projects').delete().eq('id', id); }
+  
+  async saveReportAnalysis(userId: string, projectId: string, content: string) {
+      await supabase.from('full_report_projects')
+          .update({ last_analysis_content: content, last_analysis_at: new Date().toISOString() })
+          .eq('id', projectId);
+  }
 
   async getChannels(workspaceId: string): Promise<Channel[]> {
       const { data } = await supabase.from('channels').select('*').eq('workspace_id', workspaceId).order('created_at');

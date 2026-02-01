@@ -206,7 +206,6 @@ export interface Idea {
   current_phase: 'A' | 'B' | 'C';
   snapshot: {
     problem_statement: string;
-    // Fix: Added detailed_business_concept to Idea snapshot to resolve missing property error in IdeaLab
     detailed_business_concept: string;
     icp: string;
     solution_hypothesis: string;
@@ -404,6 +403,8 @@ export interface FullReportProject {
     equity: number;
     debt: number;
   };
+  last_analysis_content?: string; // New field for persistence
+  last_analysis_at?: string;      // New field for persistence
   updated_at: string;
 }
 
