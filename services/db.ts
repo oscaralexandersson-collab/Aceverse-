@@ -201,6 +201,10 @@ class DatabaseService {
       await supabase.from('sales_events').update(data).eq('id', id);
   }
 
+  async deleteSale(id: string) {
+      await supabase.from('sales_events').delete().eq('id', id);
+  }
+
   async addDeal(userId: string, data: Partial<Deal>) {
       const { data: deal } = await supabase.from('deals').insert({ ...data, user_id: userId }).select().single();
       if (data.stage === 'WON') {
@@ -213,6 +217,10 @@ class DatabaseService {
       if (data.stage === 'WON') {
           await this.processCrossToolIntelligence(userId, data.workspace_id || null, 'DEAL_WON', { ...data, id });
       }
+  }
+
+  async deleteDeal(id: string) {
+      await supabase.from('deals').delete().eq('id', id);
   }
 
   // --- CROSS-TOOL INTELLIGENCE ENGINE ---

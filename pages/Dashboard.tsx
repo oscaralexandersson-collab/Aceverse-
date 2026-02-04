@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Lightbulb, Users, Mic, MessageSquare, 
   Settings as SettingsIcon, LogOut, Bell, Search, Menu, X, 
   Loader2, Wifi, WifiOff, Moon, Sun, Globe, RefreshCw, AlertTriangle, Calendar,
-  Briefcase, ChevronUp, Check, Plus, FileText, Video
+  Briefcase, ChevronUp, Check, Plus, FileText, Video, CheckCircle2
 } from 'lucide-react';
 import { DashboardView, User, UfEvent, Notification } from '../types';
 import { db } from '../services/db';
@@ -56,6 +56,19 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
   
   const { t, language, setLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
+
+  // Mapping for nice Swedish titles
+  const viewTitles: Record<string, string> = {
+    overview: 'Översikt',
+    ideas: 'UF-Kompassen',
+    advisor: 'AI-Rådgivare',
+    marketing: 'Marketing Hub',
+    crm: 'CRM & Sälj',
+    pitch: 'Pitch Studio',
+    report: 'Report Studio',
+    team: 'Team Hub',
+    settings: 'Inställningar'
+  };
 
   useEffect(() => {
       const handleClickOutside = (event: MouseEvent) => {
@@ -225,8 +238,21 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout, syncTrigger = 0 }
         <header className="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-8 z-10">
           <div className="flex items-center gap-4">
             {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="text-gray-500"><Menu size={24} /></button>}
-            <h2 className="text-lg font-bold">{currentView}</h2>
-            <button onClick={refreshData} disabled={isSyncing} className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest ml-4 px-3 py-1.5 rounded-full bg-gray-50 hover:bg-gray-100 transition-all">{isSyncing ? 'Synkar...' : 'Synka data'}</button>
+            <h2 className="font-serif-display text-2xl font-bold text-gray-900 dark:text-white capitalize">
+                {viewTitles[currentView] || currentView}
+            </h2>
+            <button 
+                onClick={refreshData} 
+                disabled={isSyncing} 
+                className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ml-4 px-3 py-1.5 rounded-full transition-all border border-transparent ${
+                    isSyncing ? 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400' :
+                    connectionError ? 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400' :
+                    'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400 hover:border-green-200'
+                }`}
+            >
+                {isSyncing ? <RefreshCw size={12} className="animate-spin"/> : connectionError ? <WifiOff size={12}/> : <CheckCircle2 size={12}/>}
+                <span>{isSyncing ? 'Synkar...' : connectionError ? 'Synkfel' : 'Uppdaterad'}</span>
+            </button>
           </div>
           <div className="flex items-center gap-3">
             <div className="relative">

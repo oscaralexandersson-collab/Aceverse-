@@ -11,6 +11,7 @@ import { User, Contact, Deal, SalesEvent, SustainabilityLog, UfEvent, Recommenda
 import { db } from '../../services/db';
 import { useLanguage } from '../../contexts/LanguageContext';
 import { useWorkspace } from '../../contexts/WorkspaceContext';
+import DeleteConfirmModal from './DeleteConfirmModal';
 
 type Tab = 'dashboard' | 'sales' | 'deals' | 'contacts' | 'mail' | 'impact';
 
@@ -44,6 +45,9 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
     const [editingSale, setEditingSale] = useState<SalesEvent | any>(null);
     const [editingDeal, setEditingDeal] = useState<Deal | null>(null);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
+
+    // Delete State
+    const [itemToDelete, setItemToDelete] = useState<{id: string, type: 'SALE' | 'DEAL', name: string} | null>(null);
 
     const [recipients, setRecipients] = useState<MailRecipient[]>([]);
     const [selectedRecipient, setSelectedRecipient] = useState<MailRecipient | null>(null);
@@ -145,6 +149,24 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
         } catch (error) { console.error("Save deal error:", error); alert("Kunde inte spara affären."); }
     };
 
+    const handleDelete = async () => {
+        if (!itemToDelete) return;
+        try {
+            if (itemToDelete.type === 'SALE') {
+                await db.deleteSale(itemToDelete.id);
+                setSales(prev => prev.filter(s => s.id !== itemToDelete.id));
+            } else if (itemToDelete.type === 'DEAL') {
+                await db.deleteDeal(itemToDelete.id);
+                setDeals(prev => prev.filter(d => d.id !== itemToDelete.id));
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Kunde inte ta bort objektet.");
+        } finally {
+            setItemToDelete(null);
+        }
+    };
+
     const handleAddEvent = async (e: React.FormEvent) => {
         e.preventDefault();
         const form = e.target as HTMLFormElement;
@@ -172,6 +194,37 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
             const response = await db.generateAiEmail({ recipient: selectedRecipient, template: mailTemplate, tone: mailTone, extraContext: mailContext, meetingTime: meetingTime, senderName: `${user.firstName} ${user.lastName}`, senderCompany: user.company || 'Vårt UF-företag' });
             setGeneratedSubject(response.subject); setGeneratedBody(response.body);
         } catch (e) { console.error(e); alert("Kunde inte generera mailet."); } finally { setIsGeneratingMail(false); }
+    };
+
+    // Improved Send Mail Handler using Hidden Anchor Tag
+    const handleSendMail = () => {
+        if (!selectedRecipient?.email || !generatedBody) return;
+        
+        const subject = encodeURIComponent(generatedSubject || '');
+        const body = encodeURIComponent(generatedBody || '');
+        const fullLink = `mailto:${selectedRecipient.email}?subject=${subject}&body=${body}`;
+        
+        // Browsers/Clients have URL limits. If too long, copy to clipboard.
+        // Limit is around 2000 chars for safety across most clients.
+        if (fullLink.length > 1900) {
+            navigator.clipboard.writeText(generatedBody || '');
+            alert("Mailet är för långt för att öppnas direkt. Texten har kopierats till urklipp. Klistra in den i ditt mailprogram (Ctrl+V).");
+            
+            // Open with just recipient and subject
+            const shortLink = `mailto:${selectedRecipient.email}?subject=${subject}`;
+            const link = document.createElement('a');
+            link.href = shortLink;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            // Create hidden link and click it to bypass some browser popup blocker logic
+            const link = document.createElement('a');
+            link.href = fullLink;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
     };
 
     const filteredRecipients = useMemo(() => {
@@ -203,6 +256,13 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
 
     return (
         <div className="flex flex-col h-full gap-6 animate-fadeIn pb-20">
+            <DeleteConfirmModal 
+                isOpen={!!itemToDelete} 
+                onClose={() => setItemToDelete(null)} 
+                onConfirm={handleDelete} 
+                itemName={itemToDelete?.name || ''} 
+            />
+
             <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6 border-b border-gray-100 dark:border-gray-800 pb-6">
                 <div>
                     <h1 className="font-serif-display text-4xl text-gray-900 dark:text-white mb-2">CRM & Sälj</h1>
@@ -304,9 +364,14 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                             <td className="px-6 py-4 text-gray-500">{new Date(s.occurred_at).toLocaleDateString()}</td>
                                             <td className="px-6 py-4 text-right font-mono font-bold">{s.amount} kr</td>
                                             <td className="px-6 py-4 text-right">
-                                                <button onClick={() => openEditSale(s)} className="text-gray-400 hover:text-black dark:hover:text-white transition-colors p-1">
-                                                    <Edit2 size={14} />
-                                                </button>
+                                                <div className="flex items-center justify-end gap-1">
+                                                    <button onClick={() => openEditSale(s)} className="text-gray-400 hover:text-black dark:hover:text-white transition-colors p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                                                        <Edit2 size={14} />
+                                                    </button>
+                                                    <button onClick={() => setItemToDelete({ id: s.id, type: 'SALE', name: `${s.product_name} (${s.amount} kr)` })} className="text-gray-400 hover:text-red-500 transition-colors p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg">
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -337,10 +402,18 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                     </div>
                                     <div className="space-y-3 overflow-y-auto flex-1">
                                         {deals.filter(d => d.stage === stage).map(d => (
-                                            <div key={d.id} draggable onDragStart={(e) => handleDragStart(e, d.id)} onDragEnd={handleDragEnd} onClick={() => openEditDeal(d)} className={`bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 cursor-grab active:cursor-grabbing hover:border-black dark:hover:border-white transition-all group ${draggedDealId === d.id ? 'opacity-50 border-black dark:border-white' : ''}`}>
+                                            <div key={d.id} draggable onDragStart={(e) => handleDragStart(e, d.id)} onDragEnd={handleDragEnd} onClick={() => openEditDeal(d)} className={`bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-100 dark:border-gray-800 cursor-grab active:cursor-grabbing hover:border-black dark:hover:border-white transition-all group relative ${draggedDealId === d.id ? 'opacity-50 border-black dark:border-white' : ''}`}>
                                                 <div className="flex justify-between items-start mb-1">
-                                                    <h4 className="font-bold text-sm">{d.title}</h4>
+                                                    <h4 className="font-bold text-sm pr-6">{d.title}</h4>
                                                     <GripVertical size={14} className="text-gray-300 opacity-0 group-hover:opacity-100" />
+                                                </div>
+                                                <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button 
+                                                        onClick={(e) => { e.stopPropagation(); setItemToDelete({ id: d.id, type: 'DEAL', name: d.title }); }} 
+                                                        className="p-1.5 hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 rounded-lg transition-colors"
+                                                    >
+                                                        <Trash2 size={12} />
+                                                    </button>
                                                 </div>
                                                 <div className="flex items-center gap-1.5 mb-2 text-xs text-gray-500 dark:text-gray-400">
                                                     <Building2 size={12} />
@@ -469,7 +542,13 @@ const CRM: React.FC<CRMProps> = ({ user }) => {
                                 <div className="text-xs text-gray-400">{generatedBody.length > 0 ? `${generatedBody.length} tecken` : ''}</div>
                                 <div className="flex gap-2">
                                     <button onClick={() => { navigator.clipboard.writeText(`${generatedSubject}\n\n${generatedBody}`); alert(t('dashboard.crmContent.mail.copied')); }} disabled={!generatedBody} className="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-gray-50 dark:hover:bg-gray-700 transition-all flex items-center gap-2 disabled:opacity-50"><Copy size={14} /> {t('dashboard.crmContent.mail.copy')}</button>
-                                    <a href={selectedRecipient?.email ? `mailto:${selectedRecipient.email}?subject=${encodeURIComponent(generatedSubject)}&body=${encodeURIComponent(generatedBody)}` : '#'} className={`px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-bold uppercase tracking-wide hover:opacity-80 transition-all flex items-center gap-2 ${!selectedRecipient?.email || !generatedBody ? 'opacity-50 pointer-events-none' : ''}`}><Send size={14} /> Maila</a>
+                                    <button 
+                                        onClick={handleSendMail} 
+                                        disabled={!selectedRecipient?.email || !generatedBody}
+                                        className="px-4 py-2 bg-black dark:bg-white text-white dark:text-black rounded-lg text-xs font-bold uppercase tracking-wide hover:opacity-80 transition-all flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        <Send size={14} /> Maila
+                                    </button>
                                 </div>
                             </div>
                         </div>
